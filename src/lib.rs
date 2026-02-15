@@ -14,6 +14,7 @@
 //! - **`local_vol`** — Dupire local volatility extraction
 
 pub mod error;
+pub mod implied;
 pub mod types;
 
 pub use error::{Result, VolSurfError};
