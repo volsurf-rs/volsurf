@@ -25,4 +25,7 @@ pub mod surface;
 pub mod types;
 
 pub use error::{Result, VolSurfError};
+pub use local_vol::LocalVol;
+pub use smile::SmileSection;
+pub use surface::VolSurface;
 pub use types::{OptionType, Strike, Tenor, Variance, Vol};

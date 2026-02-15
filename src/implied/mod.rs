@@ -10,6 +10,6 @@ pub mod black;
 pub mod displaced;
 pub mod normal;
 
-pub use black::BlackImpliedVol;
+pub use black::{black_price, BlackImpliedVol};
 pub use displaced::DisplacedImpliedVol;
 pub use normal::NormalImpliedVol;

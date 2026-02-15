@@ -12,6 +12,7 @@
 //! - Dupire, B. "Pricing with a Smile" (1994)
 //! - Gatheral, J. "The Volatility Surface: A Practitioner's Guide" (2006), Ch. 2
 
+use std::fmt;
 use std::sync::Arc;
 
 use crate::error::{self, VolSurfError};
@@ -26,6 +27,15 @@ pub struct DupireLocalVol {
     surface: Arc<dyn VolSurface>,
     /// Finite difference step for numerical derivatives.
     bump_size: f64,
+}
+
+impl fmt::Debug for DupireLocalVol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DupireLocalVol")
+            .field("surface", &self.surface)
+            .field("bump_size", &self.bump_size)
+            .finish()
+    }
 }
 
 impl DupireLocalVol {

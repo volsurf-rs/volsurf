@@ -34,7 +34,7 @@ use crate::types::{Variance, Vol};
 /// # Error Handling
 /// Methods return `Result` so implementations can report numerical failures
 /// (e.g., negative variance, NaN) rather than panicking.
-pub trait SmileSection: Send + Sync {
+pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// Implied Black volatility σ at the given strike.
     fn vol(&self, strike: f64) -> error::Result<Vol>;
 

@@ -22,7 +22,7 @@ use crate::types::Vol;
 /// Local volatility surface.
 ///
 /// Provides σ_loc(T, K) at any point, derived from an implied vol surface.
-pub trait LocalVol: Send + Sync {
+pub trait LocalVol: Send + Sync + std::fmt::Debug {
     /// Local volatility at the given expiry and strike.
     fn local_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol>;
 }

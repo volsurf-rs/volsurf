@@ -4,6 +4,8 @@
 //! independently calibrated [`SmileSection`], and cross-tenor queries
 //! interpolate in variance space to maintain no-calendar-arbitrage.
 
+use std::fmt;
+
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::surface::arbitrage::SurfaceDiagnostics;
@@ -16,6 +18,15 @@ pub struct PiecewiseSurface {
     tenors: Vec<f64>,
     /// One smile section per tenor.
     smiles: Vec<Box<dyn SmileSection>>,
+}
+
+impl fmt::Debug for PiecewiseSurface {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PiecewiseSurface")
+            .field("tenors", &self.tenors)
+            .field("num_smiles", &self.smiles.len())
+            .finish()
+    }
 }
 
 impl PiecewiseSurface {

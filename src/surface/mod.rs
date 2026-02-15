@@ -37,7 +37,7 @@ use crate::types::{Variance, Vol};
 /// - Local vol is computed via [`DupireLocalVol`](crate::local_vol::DupireLocalVol)
 ///   by composing it around any `VolSurface`, not as a trait method here.
 ///   This avoids forcing every surface type to embed Dupire numerics.
-pub trait VolSurface: Send + Sync {
+pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// Black implied volatility σ(T, K).
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol>;
 
