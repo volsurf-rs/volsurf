@@ -83,13 +83,6 @@ impl SmileSection for SabrSmile {
         })
     }
 
-    fn density(&self, strike: f64) -> error::Result<f64> {
-        let _ = strike;
-        Err(VolSurfError::NumericalError {
-            message: "not yet implemented".to_string(),
-        })
-    }
-
     fn forward(&self) -> f64 {
         self.forward
     }
