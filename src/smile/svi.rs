@@ -129,10 +129,15 @@ impl SviSmile {
         expiry: f64,
         market_vols: &[(f64, f64)],
     ) -> error::Result<Self> {
+        /// Minimum market quotes for SVI calibration (5 free params).
         const MIN_POINTS: usize = 5;
+        /// Grid search resolution for (m, sigma) initialization.
         const GRID_N: usize = 15;
+        /// Nelder-Mead iteration limit.
         const NM_MAX_ITER: usize = 300;
+        /// Simplex diameter convergence threshold.
         const NM_DIAMETER_TOL: f64 = 1e-8;
+        /// Objective value spread convergence threshold.
         const NM_FVALUE_TOL: f64 = 1e-12;
 
         // --- Input validation ---
@@ -377,9 +382,13 @@ impl SmileSection for SviSmile {
     /// # Reference
     /// Gatheral & Jacquier (2014), Theorem 4.1.
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
+        /// Number of grid points for g-function arbitrage scan.
         const N: usize = 200;
+        /// Minimum log-moneyness for arbitrage scan.
         const K_MIN: f64 = -3.0;
+        /// Maximum log-moneyness for arbitrage scan.
         const K_MAX: f64 = 3.0;
+        /// Tolerance for g-function negativity detection.
         const TOL: f64 = 1e-10;
 
         let mut violations = Vec::new();

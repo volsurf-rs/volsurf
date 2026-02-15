@@ -33,9 +33,12 @@ use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
 
 /// Number of strikes used when sampling smiles for interpolation.
+/// Log-spaced grid from 0.5·F to 2.0·F provides adequate density for
+/// accurate spline construction while keeping memory usage reasonable.
 const SMILE_GRID_SIZE: usize = 51;
 
 /// Number of strikes used for calendar arbitrage checks.
+/// Grid for scanning cross-tenor variance monotonicity between adjacent tenors.
 const CALENDAR_CHECK_GRID_SIZE: usize = 41;
 
 /// Piecewise volatility surface composed of per-tenor smile sections.
@@ -146,6 +149,7 @@ impl PiecewiseSurface {
 
         // Check for exact match (within tolerance)
         for (i, &t) in self.tenors.iter().enumerate() {
+            // Tolerance for exact tenor matching.
             if (expiry - t).abs() < 1e-10 {
                 return TenorPosition::Exact(i);
             }
@@ -294,6 +298,7 @@ impl VolSurface for PiecewiseSurface {
             for &k in &grid {
                 let w_short = self.smiles[i].variance(k)?;
                 let w_long = self.smiles[i + 1].variance(k)?;
+                // Tolerance for calendar spread violation detection.
                 if w_long.0 < w_short.0 - 1e-10 {
                     calendar_violations.push(CalendarViolation {
                         strike: k,

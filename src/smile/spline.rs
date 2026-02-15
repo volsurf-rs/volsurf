@@ -271,6 +271,7 @@ impl SmileSection for SplineSmile {
     }
 
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
+        // Number of grid points for density-based arbitrage scan.
         let n_samples = 200;
         let k_min = self.strikes[0];
         let k_max = self.strikes[self.strikes.len() - 1];
@@ -280,6 +281,7 @@ impl SmileSection for SplineSmile {
         for i in 1..n_samples {
             let k = k_min + dk * (i as f64);
             let d = self.density(k)?;
+            // Tolerance for negative density detection.
             if d < -1e-8 {
                 violations.push(ButterflyViolation {
                     strike: k,
