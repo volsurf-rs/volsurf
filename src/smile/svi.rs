@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use std::f64::consts::PI;
 
+use nalgebra::{DMatrix, DVector};
+
 use crate::error::{self, VolSurfError};
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
@@ -106,17 +108,249 @@ impl SviSmile {
 
     /// Calibrate SVI parameters from market (strike, vol) observations.
     ///
+    /// Uses the Zeliade (2009) quasi-explicit method: for fixed (m, σ),
+    /// the remaining parameters (a, b·ρ, b) enter linearly and are solved
+    /// via least-squares. A grid search + Nelder-Mead optimizes (m, σ).
+    ///
+    /// # Arguments
+    /// * `forward` — Forward price (must be > 0)
+    /// * `expiry` — Time to expiry in years (must be > 0)
+    /// * `market_vols` — Slice of (strike, implied_vol) pairs (min 5)
+    ///
     /// # Errors
-    /// Returns [`VolSurfError::CalibrationError`] if the optimizer fails to converge.
+    /// Returns [`VolSurfError::InvalidInput`] for insufficient data,
+    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    ///
+    /// # References
+    /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
     pub fn calibrate(
         forward: f64,
         expiry: f64,
         market_vols: &[(f64, f64)],
     ) -> error::Result<Self> {
-        let _ = (forward, expiry, market_vols);
-        Err(VolSurfError::CalibrationError(
-            "not yet implemented".to_string(),
-        ))
+        const MIN_POINTS: usize = 5;
+        const GRID_N: usize = 15;
+        const NM_MAX_ITER: usize = 300;
+        const NM_DIAMETER_TOL: f64 = 1e-8;
+        const NM_FVALUE_TOL: f64 = 1e-12;
+
+        // --- Input validation ---
+        if forward <= 0.0 || forward.is_nan() {
+            return Err(VolSurfError::InvalidInput(format!(
+                "forward must be positive, got {forward}"
+            )));
+        }
+        if expiry <= 0.0 || expiry.is_nan() {
+            return Err(VolSurfError::InvalidInput(format!(
+                "expiry must be positive, got {expiry}"
+            )));
+        }
+        if market_vols.len() < MIN_POINTS {
+            return Err(VolSurfError::InvalidInput(format!(
+                "at least {MIN_POINTS} market points required, got {}",
+                market_vols.len()
+            )));
+        }
+        for &(strike, vol) in market_vols {
+            if strike <= 0.0 || strike.is_nan() {
+                return Err(VolSurfError::InvalidInput(format!(
+                    "strike must be positive, got {strike}"
+                )));
+            }
+            if vol <= 0.0 || vol.is_nan() {
+                return Err(VolSurfError::InvalidInput(format!(
+                    "implied vol must be positive, got {vol}"
+                )));
+            }
+        }
+
+        // --- Convert to log-moneyness / total-variance ---
+        let k_vals: Vec<f64> = market_vols.iter().map(|&(s, _)| (s / forward).ln()).collect();
+        let w_vals: Vec<f64> = market_vols.iter().map(|&(_, v)| v * v * expiry).collect();
+
+        let k_min = k_vals.iter().cloned().fold(f64::INFINITY, f64::min);
+        let k_max = k_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let k_range = (k_max - k_min).max(0.1);
+
+        // --- Inner linear solve: for fixed (m, sigma), solve for (a, b*rho, b) ---
+        let inner_solve = |m: f64, sigma: f64| -> Option<(f64, f64, f64, f64)> {
+            let n = k_vals.len();
+            let a_mat = DMatrix::<f64>::from_fn(n, 3, |i, j| {
+                let dk = k_vals[i] - m;
+                match j {
+                    0 => 1.0,
+                    1 => dk,
+                    2 => (dk * dk + sigma * sigma).sqrt(),
+                    _ => unreachable!(),
+                }
+            });
+            let b_vec = DVector::from_column_slice(&w_vals);
+
+            let ata = a_mat.transpose() * &a_mat;
+            let atb = a_mat.transpose() * &b_vec;
+            let x = ata.qr().solve(&atb)?;
+
+            let residual = &a_mat * &x - &b_vec;
+            let rss = residual.dot(&residual);
+            Some((x[0], x[1], x[2], rss)) // (a, b_rho, b, rss)
+        };
+
+        // Objective function: RSS with penalty for invalid params
+        let objective = |m: f64, sigma: f64| -> f64 {
+            if sigma <= 0.0 {
+                return f64::MAX;
+            }
+            match inner_solve(m, sigma) {
+                None => f64::MAX,
+                Some((a, b_rho, b, rss)) => {
+                    if b < -1e-10 {
+                        return f64::MAX;
+                    }
+                    let b_clamped = b.max(0.0);
+                    let rho = if b_clamped < 1e-10 { 0.0 } else { (b_rho / b_clamped).clamp(-0.999, 0.999) };
+                    let min_var = a + b_clamped * sigma * (1.0 - rho * rho).sqrt();
+                    if min_var < -1e-10 {
+                        return f64::MAX;
+                    }
+                    rss
+                }
+            }
+        };
+
+        // --- Grid search ---
+        let m_lo = k_min - 0.5 * k_range;
+        let m_hi = k_max + 0.5 * k_range;
+        let sigma_lo = 0.01_f64;
+        let sigma_hi = k_range.max(0.5);
+
+        let mut best_m = 0.0;
+        let mut best_sigma = 0.1;
+        let mut best_rss = f64::MAX;
+
+        for im in 0..GRID_N {
+            let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
+            for is in 0..GRID_N {
+                let sigma = sigma_lo + (sigma_hi - sigma_lo) * (is as f64) / ((GRID_N - 1) as f64);
+                let rss = objective(m, sigma);
+                if rss < best_rss {
+                    best_rss = rss;
+                    best_m = m;
+                    best_sigma = sigma;
+                }
+            }
+        }
+
+        if best_rss >= f64::MAX {
+            return Err(VolSurfError::CalibrationError(
+                "grid search found no valid starting point".into(),
+            ));
+        }
+
+        // --- Nelder-Mead 2D optimization over (m, sigma) ---
+        let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
+        let step_s = (sigma_hi - sigma_lo) / (GRID_N as f64) * 0.5;
+
+        let mut simplex = [
+            (best_m, best_sigma),
+            (best_m + step_m, best_sigma),
+            (best_m, (best_sigma + step_s).max(0.001)),
+        ];
+        let mut f_vals = [
+            objective(simplex[0].0, simplex[0].1),
+            objective(simplex[1].0, simplex[1].1),
+            objective(simplex[2].0, simplex[2].1),
+        ];
+
+        for _ in 0..NM_MAX_ITER {
+            // Sort by objective value
+            let mut idx = [0usize, 1, 2];
+            idx.sort_by(|&a, &b| f_vals[a].partial_cmp(&f_vals[b]).unwrap_or(std::cmp::Ordering::Equal));
+            let sorted_s = [simplex[idx[0]], simplex[idx[1]], simplex[idx[2]]];
+            let sorted_f = [f_vals[idx[0]], f_vals[idx[1]], f_vals[idx[2]]];
+            simplex = sorted_s;
+            f_vals = sorted_f;
+
+            // Check convergence
+            let diameter = simplex.iter()
+                .flat_map(|a| simplex.iter().map(move |b|
+                    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
+                ))
+                .fold(0.0_f64, f64::max);
+            let f_spread = f_vals[2] - f_vals[0];
+
+            if diameter < NM_DIAMETER_TOL || f_spread < NM_FVALUE_TOL {
+                break;
+            }
+
+            // Centroid of best two
+            let cx = (simplex[0].0 + simplex[1].0) / 2.0;
+            let cy = (simplex[0].1 + simplex[1].1) / 2.0;
+
+            // Reflection
+            let rx = cx + (cx - simplex[2].0);
+            let ry = cy + (cy - simplex[2].1);
+            let fr = objective(rx, ry);
+
+            if fr < f_vals[1] && fr >= f_vals[0] {
+                simplex[2] = (rx, ry);
+                f_vals[2] = fr;
+            } else if fr < f_vals[0] {
+                // Expansion
+                let ex = cx + 2.0 * (rx - cx);
+                let ey = cy + 2.0 * (ry - cy);
+                let fe = objective(ex, ey);
+                if fe < fr {
+                    simplex[2] = (ex, ey);
+                    f_vals[2] = fe;
+                } else {
+                    simplex[2] = (rx, ry);
+                    f_vals[2] = fr;
+                }
+            } else {
+                // Contraction
+                let (hx, hy) = if fr < f_vals[2] {
+                    // Outside contraction
+                    (cx + 0.5 * (rx - cx), cy + 0.5 * (ry - cy))
+                } else {
+                    // Inside contraction
+                    (cx + 0.5 * (simplex[2].0 - cx), cy + 0.5 * (simplex[2].1 - cy))
+                };
+                let fh = objective(hx, hy);
+                if fh < f_vals[2].min(fr) {
+                    simplex[2] = (hx, hy);
+                    f_vals[2] = fh;
+                } else {
+                    // Shrink toward best vertex
+                    for j in 1..3 {
+                        simplex[j].0 = simplex[0].0 + 0.5 * (simplex[j].0 - simplex[0].0);
+                        simplex[j].1 = simplex[0].1 + 0.5 * (simplex[j].1 - simplex[0].1);
+                        f_vals[j] = objective(simplex[j].0, simplex[j].1);
+                    }
+                }
+            }
+        }
+
+        // --- Recover final parameters ---
+        // Pick best vertex
+        let best_idx = if f_vals[0] <= f_vals[1] && f_vals[0] <= f_vals[2] { 0 }
+            else if f_vals[1] <= f_vals[2] { 1 } else { 2 };
+        let (opt_m, opt_sigma) = simplex[best_idx];
+
+        let (a, b_rho, b, _rss) = inner_solve(opt_m, opt_sigma).ok_or_else(|| {
+            VolSurfError::CalibrationError(
+                "linear solve failed at optimal (m, sigma)".into(),
+            )
+        })?;
+
+        let b = b.max(0.0);
+        let rho = if b < 1e-10 {
+            0.0
+        } else {
+            (b_rho / b).clamp(-0.999, 0.999)
+        };
+
+        Self::new(forward, expiry, a, b, rho, opt_m, opt_sigma.max(1e-6))
+            .map_err(|e| VolSurfError::CalibrationError(format!("calibrated params invalid: {e}")))
     }
 
     /// Evaluate the raw SVI total variance w(k) at log-moneyness k.
@@ -622,5 +856,122 @@ mod tests {
         let smile = SviSmile::new(100.0, 1.0, 0.04, 0.0, 0.0, 0.0, 0.1).unwrap();
         let report = smile.is_arbitrage_free().unwrap();
         assert!(report.is_free);
+    }
+
+    // --- calibrate() tests ---
+
+    /// Generate synthetic market data from known SVI params.
+    fn synthetic_market_data(smile: &SviSmile, strikes: &[f64]) -> Vec<(f64, f64)> {
+        strikes
+            .iter()
+            .map(|&k| (k, smile.vol(k).unwrap().0))
+            .collect()
+    }
+
+    #[test]
+    fn calibrate_round_trip_canonical() {
+        let original = make_smile();
+        let strikes: Vec<f64> = (0..20)
+            .map(|i| 60.0 + 4.0 * i as f64)
+            .collect();
+        let data = synthetic_market_data(&original, &strikes);
+
+        let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
+
+        // Check round-trip RMS
+        let rms = (data.iter()
+            .map(|&(k, sigma)| {
+                let fitted = calibrated.vol(k).unwrap().0;
+                (fitted - sigma).powi(2)
+            })
+            .sum::<f64>() / data.len() as f64)
+            .sqrt();
+        assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
+    }
+
+    #[test]
+    fn calibrate_round_trip_skewed() {
+        // More aggressive skew
+        let original = SviSmile::new(100.0, 0.5, 0.02, 0.6, -0.6, 0.05, 0.15).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
+        let data = synthetic_market_data(&original, &strikes);
+
+        let calibrated = SviSmile::calibrate(100.0, 0.5, &data).unwrap();
+
+        let rms = (data.iter()
+            .map(|&(k, sigma)| {
+                let fitted = calibrated.vol(k).unwrap().0;
+                (fitted - sigma).powi(2)
+            })
+            .sum::<f64>() / data.len() as f64)
+            .sqrt();
+        assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
+    }
+
+    #[test]
+    fn calibrate_round_trip_symmetric() {
+        let original = SviSmile::new(100.0, 1.0, 0.04, 0.3, 0.0, 0.0, 0.2).unwrap();
+        let strikes: Vec<f64> = (0..20).map(|i| 60.0 + 4.0 * i as f64).collect();
+        let data = synthetic_market_data(&original, &strikes);
+
+        let calibrated = SviSmile::calibrate(100.0, 1.0, &data).unwrap();
+
+        let rms = (data.iter()
+            .map(|&(k, sigma)| {
+                let fitted = calibrated.vol(k).unwrap().0;
+                (fitted - sigma).powi(2)
+            })
+            .sum::<f64>() / data.len() as f64)
+            .sqrt();
+        assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
+    }
+
+    #[test]
+    fn calibrate_rejects_too_few_points() {
+        let data = vec![(90.0, 0.2), (100.0, 0.2), (110.0, 0.2)];
+        let result = SviSmile::calibrate(100.0, 1.0, &data);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn calibrate_rejects_negative_forward() {
+        let data = vec![(80.0, 0.2), (90.0, 0.2), (100.0, 0.2), (110.0, 0.2), (120.0, 0.2)];
+        let result = SviSmile::calibrate(-100.0, 1.0, &data);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn calibrate_rejects_negative_vol() {
+        let data = vec![(80.0, 0.2), (90.0, -0.1), (100.0, 0.2), (110.0, 0.2), (120.0, 0.2)];
+        let result = SviSmile::calibrate(100.0, 1.0, &data);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn calibrate_params_pass_new_validation() {
+        let original = make_smile();
+        let strikes: Vec<f64> = (0..20).map(|i| 60.0 + 4.0 * i as f64).collect();
+        let data = synthetic_market_data(&original, &strikes);
+        // calibrate() internally calls new(), so if it succeeds the params are valid
+        let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
+        assert!(calibrated.forward() > 0.0);
+        assert!(calibrated.expiry() > 0.0);
+    }
+
+    #[test]
+    fn calibrate_exact_5_points() {
+        // Minimum data: exactly 5 points
+        let original = make_smile();
+        let strikes = [80.0, 90.0, 100.0, 110.0, 120.0];
+        let data = synthetic_market_data(&original, &strikes);
+        let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
+        let rms = (data.iter()
+            .map(|&(k, sigma)| {
+                let fitted = calibrated.vol(k).unwrap().0;
+                (fitted - sigma).powi(2)
+            })
+            .sum::<f64>() / data.len() as f64)
+            .sqrt();
+        assert!(rms < 0.001, "round-trip RMS {rms} with 5 points should be < 0.001");
     }
 }
