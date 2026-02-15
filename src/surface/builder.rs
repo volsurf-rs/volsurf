@@ -20,18 +20,32 @@
 
 use crate::conventions;
 use crate::error::VolSurfError;
-use crate::smile::SmileSection;
-use crate::smile::SviSmile;
+use crate::smile::{SmileSection, SplineSmile, SviSmile};
 use crate::surface::piecewise::PiecewiseSurface;
 use crate::validate::{validate_finite, validate_positive};
+
+/// Smile model to use when calibrating each tenor.
+///
+/// Different models have different trade-offs:
+/// - [`Svi`](SmileModel::Svi) fits a parametric 5-parameter curve (minimum 5 strikes)
+/// - [`CubicSpline`](SmileModel::CubicSpline) interpolates variance directly (minimum 3 strikes)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SmileModel {
+    /// SVI parametric model (Gatheral 2004). Requires ≥ 5 strikes per tenor.
+    #[default]
+    Svi,
+    /// Cubic spline on total variance. Requires ≥ 3 strikes per tenor.
+    CubicSpline,
+}
 
 /// Builder for constructing volatility surfaces from market data.
 ///
 /// Accumulates spot price, risk-free rate, and per-tenor (strikes, vols)
-/// data, then calibrates SVI smiles and assembles a [`PiecewiseSurface`].
+/// data, then calibrates smiles and assembles a [`PiecewiseSurface`].
 pub struct SurfaceBuilder {
     spot: Option<f64>,
     rate: Option<f64>,
+    model: SmileModel,
     tenor_data: Vec<TenorData>,
 }
 
@@ -43,13 +57,22 @@ struct TenorData {
 }
 
 impl SurfaceBuilder {
-    /// Create a new surface builder.
+    /// Create a new surface builder with default settings (SVI model).
     pub fn new() -> Self {
         Self {
             spot: None,
             rate: None,
+            model: SmileModel::default(),
             tenor_data: Vec::new(),
         }
+    }
+
+    /// Set the smile model used for per-tenor calibration.
+    ///
+    /// Default is [`SmileModel::Svi`].
+    pub fn model(mut self, model: SmileModel) -> Self {
+        self.model = model;
+        self
     }
 
     /// Set the spot price.
@@ -110,47 +133,70 @@ impl SurfaceBuilder {
         let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> =
             Vec::with_capacity(self.tenor_data.len());
 
+        let min_strikes = match self.model {
+            SmileModel::Svi => 5,
+            SmileModel::CubicSpline => 3,
+        };
+
         for tenor in &self.tenor_data {
             if tenor.expiry <= 0.0 || !tenor.expiry.is_finite() {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "expiry must be positive and finite, got {}",
-                    tenor.expiry
-                ),
+                    message: format!(
+                        "expiry must be positive and finite, got {}",
+                        tenor.expiry
+                    ),
                 });
             }
             if tenor.strikes.len() != tenor.vols.len() {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "strikes ({}) and vols ({}) must have the same length for tenor {}",
-                    tenor.strikes.len(),
-                    tenor.vols.len(),
-                    tenor.expiry
-                ),
+                    message: format!(
+                        "strikes ({}) and vols ({}) must have the same length for tenor {}",
+                        tenor.strikes.len(),
+                        tenor.vols.len(),
+                        tenor.expiry
+                    ),
                 });
             }
-            if tenor.strikes.len() < 5 {
+            if tenor.strikes.len() < min_strikes {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "at least 5 strikes required per tenor, got {} for tenor {}",
-                    tenor.strikes.len(),
-                    tenor.expiry
-                ),
+                    message: format!(
+                        "at least {min_strikes} strikes required per tenor (model: {:?}), got {} for tenor {}",
+                        self.model,
+                        tenor.strikes.len(),
+                        tenor.expiry
+                    ),
                 });
             }
 
             let forward = conventions::forward_price(spot, rate, tenor.expiry);
 
-            let market_vols: Vec<(f64, f64)> = tenor
-                .strikes
-                .iter()
-                .zip(tenor.vols.iter())
-                .map(|(&k, &v)| (k, v))
-                .collect();
+            let smile: Box<dyn SmileSection> = match self.model {
+                SmileModel::Svi => {
+                    let market_vols: Vec<(f64, f64)> = tenor
+                        .strikes
+                        .iter()
+                        .zip(tenor.vols.iter())
+                        .map(|(&k, &v)| (k, v))
+                        .collect();
+                    let svi = SviSmile::calibrate(forward, tenor.expiry, &market_vols)?;
+                    Box::new(svi)
+                }
+                SmileModel::CubicSpline => {
+                    // Sort strikes and convert vols to total variances
+                    let mut pairs: Vec<(f64, f64)> = tenor
+                        .strikes
+                        .iter()
+                        .zip(tenor.vols.iter())
+                        .map(|(&k, &v)| (k, v * v * tenor.expiry))
+                        .collect();
+                    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
+                    let spline = SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
+                    Box::new(spline)
+                }
+            };
 
-            let smile = SviSmile::calibrate(forward, tenor.expiry, &market_vols)?;
-
-            tenor_smile_pairs.push((tenor.expiry, Box::new(smile) as Box<dyn SmileSection>));
+            tenor_smile_pairs.push((tenor.expiry, smile));
         }
 
         // --- Sort by tenor ---
@@ -374,6 +420,59 @@ mod tests {
             .spot(100.0)
             .rate(f64::NAN)
             .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    // --- SmileModel selector ---
+
+    #[test]
+    fn default_model_is_svi() {
+        let builder = SurfaceBuilder::new();
+        assert_eq!(builder.model, SmileModel::Svi);
+    }
+
+    #[test]
+    fn build_with_cubic_spline_model() {
+        // CubicSpline only needs 3 strikes
+        let strikes = vec![90.0, 100.0, 110.0];
+        let vols = vec![0.24, 0.20, 0.24];
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline)
+            .add_tenor(0.25, &strikes, &vols)
+            .add_tenor(1.0, &strikes, &vols)
+            .build()
+            .unwrap();
+
+        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        assert!(vol.0 > 0.0);
+        assert!(vol.0 < 1.0);
+    }
+
+    #[test]
+    fn cubic_spline_with_3_strikes_succeeds() {
+        let strikes = vec![90.0, 100.0, 110.0];
+        let vols = vec![0.22, 0.20, 0.22];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline)
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn cubic_spline_with_2_strikes_fails() {
+        let strikes = vec![90.0, 110.0];
+        let vols = vec![0.22, 0.22];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline)
+            .add_tenor(0.25, &strikes, &vols)
             .build();
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
