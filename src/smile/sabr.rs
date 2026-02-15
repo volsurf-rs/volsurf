@@ -52,9 +52,9 @@ impl SabrSmile {
         nu: f64,
     ) -> error::Result<Self> {
         let _ = (forward, expiry, alpha, beta, rho, nu);
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 
     /// Calibrate SABR parameters from market (strike, vol) observations.
@@ -67,25 +67,27 @@ impl SabrSmile {
         market_vols: &[(f64, f64)],
     ) -> error::Result<Self> {
         let _ = (forward, expiry, market_vols);
-        Err(VolSurfError::CalibrationError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::CalibrationError {
+            message: "not yet implemented".to_string(),
+            model: "SABR",
+            rms_error: None,
+        })
     }
 }
 
 impl SmileSection for SabrSmile {
     fn vol(&self, strike: f64) -> error::Result<Vol> {
         let _ = strike;
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 
     fn density(&self, strike: f64) -> error::Result<f64> {
         let _ = strike;
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 
     fn forward(&self) -> f64 {
@@ -97,8 +99,8 @@ impl SmileSection for SabrSmile {
     }
 
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 }

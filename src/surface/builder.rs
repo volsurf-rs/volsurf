@@ -87,26 +87,34 @@ impl SurfaceBuilder {
     pub fn build(self) -> crate::error::Result<PiecewiseSurface> {
         // --- Validate required fields ---
         let spot = self.spot.ok_or_else(|| {
-            VolSurfError::InvalidInput("spot price is required".into())
+            VolSurfError::InvalidInput {
+                message: "spot price is required".into(),
+            }
         })?;
         let rate = self.rate.ok_or_else(|| {
-            VolSurfError::InvalidInput("risk-free rate is required".into())
+            VolSurfError::InvalidInput {
+                message: "risk-free rate is required".into(),
+            }
         })?;
 
         if spot <= 0.0 || !spot.is_finite() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "spot must be positive and finite, got {spot}"
-            )));
+                ),
+            });
         }
         if !rate.is_finite() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "rate must be finite, got {rate}"
-            )));
+                ),
+            });
         }
         if self.tenor_data.is_empty() {
-            return Err(VolSurfError::InvalidInput(
-                "at least one tenor is required".into(),
-            ));
+            return Err(VolSurfError::InvalidInput {
+                message: "at least one tenor is required".into(),
+            });
         }
 
         // --- Per-tenor validation, forward calculation, and calibration ---
@@ -115,25 +123,31 @@ impl SurfaceBuilder {
 
         for tenor in &self.tenor_data {
             if tenor.expiry <= 0.0 || !tenor.expiry.is_finite() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "expiry must be positive and finite, got {}",
                     tenor.expiry
-                )));
+                ),
+                });
             }
             if tenor.strikes.len() != tenor.vols.len() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "strikes ({}) and vols ({}) must have the same length for tenor {}",
                     tenor.strikes.len(),
                     tenor.vols.len(),
                     tenor.expiry
-                )));
+                ),
+                });
             }
             if tenor.strikes.len() < 5 {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "at least 5 strikes required per tenor, got {} for tenor {}",
                     tenor.strikes.len(),
                     tenor.expiry
-                )));
+                ),
+                });
             }
 
             let forward = conventions::forward_price(spot, rate, tenor.expiry);
@@ -293,7 +307,7 @@ mod tests {
             .rate(0.05)
             .add_tenor(0.25, &sample_strikes(), &sample_vols())
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -302,13 +316,13 @@ mod tests {
             .spot(100.0)
             .add_tenor(0.25, &sample_strikes(), &sample_vols())
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn no_tenors_returns_invalid_input() {
         let result = SurfaceBuilder::new().spot(100.0).rate(0.05).build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -320,7 +334,7 @@ mod tests {
             .rate(0.05)
             .add_tenor(0.25, &strikes, &vols)
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -332,7 +346,7 @@ mod tests {
             .rate(0.05)
             .add_tenor(0.25, &strikes, &vols)
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -342,7 +356,7 @@ mod tests {
             .rate(0.05)
             .add_tenor(0.25, &sample_strikes(), &sample_vols())
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -352,7 +366,7 @@ mod tests {
             .rate(0.05)
             .add_tenor(0.25, &sample_strikes(), &sample_vols())
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -362,7 +376,7 @@ mod tests {
             .rate(0.05)
             .add_tenor(0.0, &sample_strikes(), &sample_vols())
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -372,7 +386,7 @@ mod tests {
             .rate(f64::NAN)
             .add_tenor(0.25, &sample_strikes(), &sample_vols())
             .build();
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     // --- Default trait ---

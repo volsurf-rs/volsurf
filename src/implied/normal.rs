@@ -40,8 +40,8 @@ impl NormalImpliedVol {
         option_type: OptionType,
     ) -> crate::error::Result<Vol> {
         let _ = (option_price, forward, strike, expiry, option_type);
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 }

@@ -479,7 +479,7 @@ fn builder_missing_spot_is_invalid_input() {
         .rate(0.05)
         .add_tenor(0.25, &strikes, &vols)
         .build();
-    assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+    assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
 }
 
 #[test]
@@ -490,11 +490,11 @@ fn builder_missing_rate_is_invalid_input() {
         .spot(100.0)
         .add_tenor(0.25, &strikes, &vols)
         .build();
-    assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+    assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
 }
 
 #[test]
 fn builder_no_tenors_is_invalid_input() {
     let result = SurfaceBuilder::new().spot(100.0).rate(0.05).build();
-    assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+    assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
 }

@@ -14,18 +14,30 @@ pub type Result<T> = std::result::Result<T, VolSurfError>;
 #[non_exhaustive]
 pub enum VolSurfError {
     /// Smile or surface calibration failed to converge.
-    #[error("calibration failed: {0}")]
-    CalibrationError(String),
+    #[error("calibration failed: {message}")]
+    CalibrationError {
+        message: String,
+        /// Model that failed (e.g., "SVI", "SABR").
+        model: &'static str,
+        /// Final RMS error at convergence, if available.
+        rms_error: Option<f64>,
+    },
 
     /// Input data is invalid (e.g., negative vol, zero expiry, mismatched grid sizes).
-    #[error("invalid input: {0}")]
-    InvalidInput(String),
+    #[error("invalid input: {message}")]
+    InvalidInput {
+        message: String,
+    },
 
     /// Numerical computation failed (e.g., NaN, ill-conditioned matrix).
-    #[error("numerical error: {0}")]
-    NumericalError(String),
+    #[error("numerical error: {message}")]
+    NumericalError {
+        message: String,
+    },
 
     /// Arbitrage violation detected in the surface.
-    #[error("arbitrage detected: {0}")]
-    ArbitrageViolation(String),
+    #[error("arbitrage detected: {message}")]
+    ArbitrageViolation {
+        message: String,
+    },
 }

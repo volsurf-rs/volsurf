@@ -32,37 +32,37 @@ impl EssviSurface {
         _tenors: &[f64],
         _forwards: &[f64],
     ) -> error::Result<Self> {
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 }
 
 impl VolSurface for EssviSurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
         let _ = (expiry, strike);
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 
     fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
         let _ = (expiry, strike);
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 
     fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
         let _ = expiry;
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 }

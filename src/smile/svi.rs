@@ -64,35 +64,47 @@ impl SviSmile {
         sigma: f64,
     ) -> error::Result<Self> {
         if forward <= 0.0 || forward.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "forward must be positive, got {forward}"
-            )));
+                ),
+            });
         }
         if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "expiry must be positive, got {expiry}"
-            )));
+                ),
+            });
         }
         if b < 0.0 || b.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "b must be non-negative, got {b}"
-            )));
+                ),
+            });
         }
         if rho.abs() >= 1.0 || rho.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "|rho| must be less than 1, got {rho}"
-            )));
+                ),
+            });
         }
         if sigma <= 0.0 || sigma.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "sigma must be positive, got {sigma}"
-            )));
+                ),
+            });
         }
         let min_variance = a + b * sigma * (1.0 - rho * rho).sqrt();
         if min_variance < 0.0 || min_variance.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "minimum variance is negative: a + b*sigma*sqrt(1-rho^2) = {min_variance}"
-            )));
+                ),
+            });
         }
 
         Ok(Self {
@@ -136,31 +148,41 @@ impl SviSmile {
 
         // --- Input validation ---
         if forward <= 0.0 || forward.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "forward must be positive, got {forward}"
-            )));
+                ),
+            });
         }
         if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "expiry must be positive, got {expiry}"
-            )));
+                ),
+            });
         }
         if market_vols.len() < MIN_POINTS {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "at least {MIN_POINTS} market points required, got {}",
                 market_vols.len()
-            )));
+                ),
+            });
         }
         for &(strike, vol) in market_vols {
             if strike <= 0.0 || strike.is_nan() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "strike must be positive, got {strike}"
-                )));
+                ),
+                });
             }
             if vol <= 0.0 || vol.is_nan() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "implied vol must be positive, got {vol}"
-                )));
+                ),
+                });
             }
         }
 
@@ -241,9 +263,11 @@ impl SviSmile {
         }
 
         if best_rss >= f64::MAX {
-            return Err(VolSurfError::CalibrationError(
-                "grid search found no valid starting point".into(),
-            ));
+            return Err(VolSurfError::CalibrationError {
+                message: "grid search found no valid starting point".into(),
+                model: "SVI",
+                rms_error: None,
+            });
         }
 
         // --- Nelder-Mead 2D optimization over (m, sigma) ---
@@ -337,9 +361,11 @@ impl SviSmile {
         let (opt_m, opt_sigma) = simplex[best_idx];
 
         let (a, b_rho, b, _rss) = inner_solve(opt_m, opt_sigma).ok_or_else(|| {
-            VolSurfError::CalibrationError(
-                "linear solve failed at optimal (m, sigma)".into(),
-            )
+            VolSurfError::CalibrationError {
+                message: "linear solve failed at optimal (m, sigma)".into(),
+                model: "SVI",
+                rms_error: None,
+            }
         })?;
 
         let b = b.max(0.0);
@@ -350,7 +376,11 @@ impl SviSmile {
         };
 
         Self::new(forward, expiry, a, b, rho, opt_m, opt_sigma.max(1e-6))
-            .map_err(|e| VolSurfError::CalibrationError(format!("calibrated params invalid: {e}")))
+            .map_err(|e| VolSurfError::CalibrationError {
+                message: format!("calibrated params invalid: {e}"),
+                model: "SVI",
+                rms_error: None,
+            })
     }
 
     /// Evaluate the raw SVI total variance w(k) at log-moneyness k.
@@ -398,16 +428,16 @@ impl SviSmile {
 impl SmileSection for SviSmile {
     fn vol(&self, strike: f64) -> error::Result<Vol> {
         if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "strike must be positive, got {strike}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("strike must be positive, got {strike}"),
+            });
         }
         let k = (strike / self.forward).ln();
         let w = self.total_variance_at_k(k);
         if w < 0.0 {
-            return Err(VolSurfError::NumericalError(format!(
-                "SVI total variance is negative: w({k}) = {w}"
-            )));
+            return Err(VolSurfError::NumericalError {
+                message: format!("SVI total variance is negative: w({k}) = {w}"),
+            });
         }
         Ok(Vol((w / self.expiry).sqrt()))
     }
@@ -425,16 +455,16 @@ impl SmileSection for SviSmile {
     /// Breeden & Litzenberger (1978); Gatheral & Jacquier (2014), §4.
     fn density(&self, strike: f64) -> error::Result<f64> {
         if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "strike must be positive, got {strike}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("strike must be positive, got {strike}"),
+            });
         }
         let k = (strike / self.forward).ln();
         let w = self.total_variance_at_k(k);
         if w <= 0.0 {
-            return Err(VolSurfError::NumericalError(format!(
-                "SVI total variance is non-positive at k={k}: w={w}"
-            )));
+            return Err(VolSurfError::NumericalError {
+                message: format!("SVI total variance is non-positive at k={k}: w={w}"),
+            });
         }
         let g = self.g_function(k);
         let sqrt_w = w.sqrt();
@@ -518,37 +548,37 @@ mod tests {
     #[test]
     fn new_rejects_negative_forward() {
         let r = SviSmile::new(-1.0, T, A, B, RHO, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_zero_forward() {
         let r = SviSmile::new(0.0, T, A, B, RHO, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_nan_forward() {
         let r = SviSmile::new(f64::NAN, T, A, B, RHO, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_zero_expiry() {
         let r = SviSmile::new(F, 0.0, A, B, RHO, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_negative_expiry() {
         let r = SviSmile::new(F, -1.0, A, B, RHO, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_negative_b() {
         let r = SviSmile::new(F, T, A, -0.1, RHO, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -561,38 +591,38 @@ mod tests {
     #[test]
     fn new_rejects_rho_at_1() {
         let r = SviSmile::new(F, T, A, B, 1.0, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_rho_at_neg1() {
         let r = SviSmile::new(F, T, A, B, -1.0, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_rho_above_1() {
         let r = SviSmile::new(F, T, A, B, 1.5, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_zero_sigma() {
         let r = SviSmile::new(F, T, A, B, RHO, M, 0.0);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_negative_sigma() {
         let r = SviSmile::new(F, T, A, B, RHO, M, -0.1);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn new_rejects_negative_min_variance() {
         // a = -1.0 makes a + b*sigma*sqrt(1-rho^2) < 0
         let r = SviSmile::new(F, T, -1.0, B, RHO, M, SIGMA);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -688,14 +718,14 @@ mod tests {
     fn vol_rejects_zero_strike() {
         let smile = make_smile();
         let r = smile.vol(0.0);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn vol_rejects_negative_strike() {
         let smile = make_smile();
         let r = smile.vol(-10.0);
-        assert!(matches!(r, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     // --- variance() default impl consistency ---
@@ -796,7 +826,7 @@ mod tests {
         let smile = make_arb_free_smile();
         assert!(matches!(
             smile.density(0.0),
-            Err(VolSurfError::InvalidInput(_))
+            Err(VolSurfError::InvalidInput { .. })
         ));
     }
 
@@ -930,21 +960,21 @@ mod tests {
     fn calibrate_rejects_too_few_points() {
         let data = vec![(90.0, 0.2), (100.0, 0.2), (110.0, 0.2)];
         let result = SviSmile::calibrate(100.0, 1.0, &data);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn calibrate_rejects_negative_forward() {
         let data = vec![(80.0, 0.2), (90.0, 0.2), (100.0, 0.2), (110.0, 0.2), (120.0, 0.2)];
         let result = SviSmile::calibrate(-100.0, 1.0, &data);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn calibrate_rejects_negative_vol() {
         let data = vec![(80.0, 0.2), (90.0, -0.1), (100.0, 0.2), (110.0, 0.2), (120.0, 0.2)];
         let result = SviSmile::calibrate(100.0, 1.0, &data);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]

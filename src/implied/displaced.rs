@@ -26,9 +26,9 @@ impl DisplacedImpliedVol {
     /// Returns [`VolSurfError::InvalidInput`] if `beta` is not in \[0, 1\].
     pub fn new(beta: f64) -> crate::error::Result<Self> {
         if !(0.0..=1.0).contains(&beta) {
-            return Err(VolSurfError::InvalidInput(
-                format!("beta must be in [0, 1], got {beta}"),
-            ));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("beta must be in [0, 1], got {beta}"),
+            });
         }
         Ok(Self { beta })
     }
@@ -53,8 +53,8 @@ impl DisplacedImpliedVol {
         option_type: OptionType,
     ) -> crate::error::Result<Vol> {
         let _ = (self.beta, option_price, forward, strike, expiry, option_type);
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 }

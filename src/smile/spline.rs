@@ -82,55 +82,69 @@ impl SplineSmile {
     ) -> error::Result<Self> {
         // --- Input validation ---
         if forward <= 0.0 || forward.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "forward must be positive, got {forward}"
-            )));
+                ),
+            });
         }
         if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "expiry must be positive, got {expiry}"
-            )));
+                ),
+            });
         }
         if strikes.len() != variances.len() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "strikes and variances must have the same length, got {} and {}",
                 strikes.len(),
                 variances.len()
-            )));
+                ),
+            });
         }
         if strikes.len() < 3 {
-            return Err(VolSurfError::InvalidInput(
-                "spline requires at least 3 data points".into(),
-            ));
+            return Err(VolSurfError::InvalidInput {
+                message: "spline requires at least 3 data points".into(),
+            });
         }
         for k in &strikes {
             if !k.is_finite() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "strikes must be finite, got {k}"
-                )));
+                ),
+                });
             }
         }
         for (i, w) in strikes.windows(2).enumerate() {
             if w[1] <= w[0] {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "strikes must be strictly increasing, but strikes[{}]={} >= strikes[{}]={}",
                     i,
                     w[0],
                     i + 1,
                     w[1]
-                )));
+                ),
+                });
             }
         }
         for v in &variances {
             if *v < 0.0 || v.is_nan() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "variances must be non-negative, got {v}"
-                )));
+                ),
+                });
             }
             if !v.is_finite() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "variances must be finite, got {v}"
-                )));
+                ),
+                });
             }
         }
 
@@ -235,30 +249,50 @@ fn build_spline_coefficients(
 
 impl SmileSection for SplineSmile {
     fn vol(&self, strike: f64) -> error::Result<Vol> {
+        if strike <= 0.0 || strike.is_nan() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                "strike must be positive, got {strike}"
+                ),
+            });
+        }
         let w = self.eval_variance(strike);
         if w < 0.0 {
-            return Err(VolSurfError::NumericalError(format!(
+            return Err(VolSurfError::NumericalError {
+                message: format!(
                 "negative interpolated variance {w} at strike {strike}"
-            )));
+                ),
+            });
         }
         Ok(Vol((w / self.expiry).sqrt()))
     }
 
     fn variance(&self, strike: f64) -> error::Result<Variance> {
+        if strike <= 0.0 || strike.is_nan() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                "strike must be positive, got {strike}"
+                ),
+            });
+        }
         let w = self.eval_variance(strike);
         if w < 0.0 {
-            return Err(VolSurfError::NumericalError(format!(
+            return Err(VolSurfError::NumericalError {
+                message: format!(
                 "negative interpolated variance {w} at strike {strike}"
-            )));
+                ),
+            });
         }
         Ok(Variance(w))
     }
 
     fn density(&self, strike: f64) -> error::Result<f64> {
         if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "strike must be positive, got {strike}"
-            )));
+                ),
+            });
         }
         let h = strike * 1e-4;
         let k_lo = strike - h;
@@ -316,12 +350,17 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
+    /// Flat 20% vol smile for validation tests.
+    fn make_flat_smile() -> SplineSmile {
+        SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.04, 0.04, 0.04]).unwrap()
+    }
+
     // --- Constructor validation tests ---
 
     #[test]
     fn rejects_fewer_than_3_points() {
         let result = SplineSmile::new(100.0, 0.25, vec![1.0, 2.0], vec![0.04, 0.04]);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -332,7 +371,7 @@ mod tests {
             vec![1.0, 2.0, 3.0],
             vec![0.04, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -343,7 +382,7 @@ mod tests {
             vec![3.0, 1.0, 2.0],
             vec![0.04, 0.04, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -354,7 +393,7 @@ mod tests {
             vec![1.0, 2.0, 2.0, 3.0],
             vec![0.04, 0.04, 0.04, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -365,7 +404,7 @@ mod tests {
             vec![1.0, 2.0, 3.0],
             vec![0.04, -0.01, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -376,7 +415,7 @@ mod tests {
             vec![1.0, 2.0, 3.0],
             vec![0.04, f64::NAN, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -387,7 +426,7 @@ mod tests {
             vec![1.0, f64::NAN, 3.0],
             vec![0.04, 0.04, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -398,7 +437,7 @@ mod tests {
             vec![1.0, 2.0, 3.0],
             vec![0.04, f64::INFINITY, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -409,7 +448,7 @@ mod tests {
             vec![1.0, 2.0, 3.0],
             vec![0.04, 0.04, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -420,7 +459,7 @@ mod tests {
             vec![1.0, 2.0, 3.0],
             vec![0.04, 0.04, 0.04],
         );
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     // --- Interpolation tests ---
@@ -690,5 +729,52 @@ mod tests {
             );
             prev_vol = vol;
         }
+    }
+
+    // --- Strike validation in vol()/variance() ---
+
+    #[test]
+    fn vol_rejects_nan_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.vol(f64::NAN),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn vol_rejects_negative_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.vol(-1.0),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn vol_rejects_zero_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.vol(0.0),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn variance_rejects_nan_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.variance(f64::NAN),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn variance_rejects_zero_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.variance(0.0),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
     }
 }

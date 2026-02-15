@@ -88,30 +88,36 @@ impl PiecewiseSurface {
         smiles: Vec<Box<dyn SmileSection>>,
     ) -> error::Result<Self> {
         if tenors.len() != smiles.len() {
-            return Err(VolSurfError::InvalidInput(format!(
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
                 "tenors and smiles must have the same length, got {} and {}",
                 tenors.len(),
                 smiles.len()
-            )));
+                ),
+            });
         }
         if tenors.is_empty() {
-            return Err(VolSurfError::InvalidInput(
-                "at least one tenor is required".into(),
-            ));
+            return Err(VolSurfError::InvalidInput {
+                message: "at least one tenor is required".into(),
+            });
         }
         for (i, t) in tenors.iter().enumerate() {
             if *t <= 0.0 || t.is_nan() {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "tenors must be positive, got tenors[{i}]={t}"
-                )));
+                ),
+                });
             }
         }
         for w in tenors.windows(2) {
             if w[1] <= w[0] {
-                return Err(VolSurfError::InvalidInput(format!(
+                return Err(VolSurfError::InvalidInput {
+                message: format!(
                     "tenors must be strictly increasing, but {} >= {}",
                     w[0], w[1]
-                )));
+                ),
+                });
             }
         }
 
@@ -171,9 +177,9 @@ enum TenorPosition {
 impl VolSurface for PiecewiseSurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
         if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "expiry must be positive, got {expiry}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("expiry must be positive, got {expiry}"),
+            });
         }
         let var = self.black_variance(expiry, strike)?;
         Ok(Vol((var.0 / expiry).sqrt()))
@@ -181,9 +187,9 @@ impl VolSurface for PiecewiseSurface {
 
     fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
         if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "expiry must be positive, got {expiry}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("expiry must be positive, got {expiry}"),
+            });
         }
 
         match self.locate_tenor(expiry) {
@@ -215,9 +221,9 @@ impl VolSurface for PiecewiseSurface {
 
     fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
         if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "expiry must be positive, got {expiry}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("expiry must be positive, got {expiry}"),
+            });
         }
 
         // Determine the forward and strike grid for the interpolated smile
@@ -373,14 +379,14 @@ mod tests {
     #[test]
     fn rejects_empty_tenors() {
         let result = PiecewiseSurface::new(vec![], vec![]);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn rejects_mismatched_lengths() {
         let s1 = flat_smile(100.0, 0.25, 0.20);
         let result = PiecewiseSurface::new(vec![0.25, 0.5], vec![s1]);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -388,14 +394,14 @@ mod tests {
         let s1 = flat_smile(100.0, 0.5, 0.20);
         let s2 = flat_smile(100.0, 0.25, 0.20);
         let result = PiecewiseSurface::new(vec![0.5, 0.25], vec![s1, s2]);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn rejects_non_positive_tenor() {
         let s1 = flat_smile(100.0, 0.25, 0.20);
         let result = PiecewiseSurface::new(vec![0.0], vec![s1]);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -403,7 +409,7 @@ mod tests {
         let s1 = flat_smile(100.0, 0.25, 0.20);
         let s2 = flat_smile(100.0, 0.25, 0.20);
         let result = PiecewiseSurface::new(vec![0.25, 0.25], vec![s1, s2]);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -533,11 +539,11 @@ mod tests {
 
         assert!(matches!(
             surface.smile_at(0.0),
-            Err(VolSurfError::InvalidInput(_))
+            Err(VolSurfError::InvalidInput { .. })
         ));
         assert!(matches!(
             surface.smile_at(-1.0),
-            Err(VolSurfError::InvalidInput(_))
+            Err(VolSurfError::InvalidInput { .. })
         ));
     }
 
@@ -583,7 +589,7 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
         assert!(matches!(
             surface.black_vol(0.0, 100.0),
-            Err(VolSurfError::InvalidInput(_))
+            Err(VolSurfError::InvalidInput { .. })
         ));
     }
 
@@ -593,7 +599,7 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
         assert!(matches!(
             surface.black_variance(-0.5, 100.0),
-            Err(VolSurfError::InvalidInput(_))
+            Err(VolSurfError::InvalidInput { .. })
         ));
     }
 

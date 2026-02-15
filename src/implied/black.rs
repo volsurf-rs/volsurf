@@ -37,24 +37,24 @@ impl BlackImpliedVol {
         option_type: OptionType,
     ) -> crate::error::Result<Vol> {
         if option_price < 0.0 || option_price.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "option_price must be non-negative, got {option_price}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("option_price must be non-negative, got {option_price}"),
+            });
         }
         if forward <= 0.0 || !forward.is_finite() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "forward must be positive and finite, got {forward}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("forward must be positive and finite, got {forward}"),
+            });
         }
         if strike <= 0.0 || !strike.is_finite() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "strike must be positive and finite, got {strike}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("strike must be positive and finite, got {strike}"),
+            });
         }
         if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput(format!(
-                "expiry must be positive, got {expiry}"
-            )));
+            return Err(VolSurfError::InvalidInput {
+                message: format!("expiry must be positive, got {expiry}"),
+            });
         }
 
         let is_call = matches!(option_type, OptionType::Call);
@@ -67,15 +67,15 @@ impl BlackImpliedVol {
             .is_call(is_call)
             .build()
             .ok_or_else(|| {
-                VolSurfError::InvalidInput(
-                    "implied-vol rejected inputs as outside model domain".into(),
-                )
+                VolSurfError::InvalidInput {
+                    message: "implied-vol rejected inputs as outside model domain".into(),
+                }
             })?;
 
         let sigma = iv.calculate::<DefaultSpecialFn>().ok_or_else(|| {
-            VolSurfError::NumericalError(
-                "option price is outside the attainable range".into(),
-            )
+            VolSurfError::NumericalError {
+                message: "option price is outside the attainable range".into(),
+            }
         })?;
 
         Ok(Vol(sigma))
@@ -101,24 +101,24 @@ pub fn black_price(
     option_type: OptionType,
 ) -> crate::error::Result<f64> {
     if forward <= 0.0 || !forward.is_finite() {
-        return Err(VolSurfError::InvalidInput(format!(
-            "forward must be positive and finite, got {forward}"
-        )));
+        return Err(VolSurfError::InvalidInput {
+            message: format!("forward must be positive and finite, got {forward}"),
+        });
     }
     if strike <= 0.0 || !strike.is_finite() {
-        return Err(VolSurfError::InvalidInput(format!(
-            "strike must be positive and finite, got {strike}"
-        )));
+        return Err(VolSurfError::InvalidInput {
+            message: format!("strike must be positive and finite, got {strike}"),
+        });
     }
     if vol < 0.0 || vol.is_nan() {
-        return Err(VolSurfError::InvalidInput(format!(
-            "volatility must be non-negative, got {vol}"
-        )));
+        return Err(VolSurfError::InvalidInput {
+            message: format!("volatility must be non-negative, got {vol}"),
+        });
     }
     if expiry < 0.0 || expiry.is_nan() {
-        return Err(VolSurfError::InvalidInput(format!(
-            "expiry must be non-negative, got {expiry}"
-        )));
+        return Err(VolSurfError::InvalidInput {
+            message: format!("expiry must be non-negative, got {expiry}"),
+        });
     }
 
     let is_call = matches!(option_type, OptionType::Call);
@@ -131,9 +131,9 @@ pub fn black_price(
         .is_call(is_call)
         .build()
         .ok_or_else(|| {
-            VolSurfError::InvalidInput(
-                "implied-vol rejected pricing inputs as outside model domain".into(),
-            )
+            VolSurfError::InvalidInput {
+                message: "implied-vol rejected pricing inputs as outside model domain".into(),
+            }
         })?
         .calculate::<DefaultSpecialFn>();
 
@@ -275,51 +275,51 @@ mod tests {
     #[test]
     fn compute_rejects_negative_price() {
         let result = BlackImpliedVol::compute(-1.0, 100.0, 100.0, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn compute_rejects_nan_price() {
         let result =
             BlackImpliedVol::compute(f64::NAN, 100.0, 100.0, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn compute_rejects_zero_forward() {
         let result = BlackImpliedVol::compute(5.0, 0.0, 100.0, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn compute_rejects_negative_forward() {
         let result = BlackImpliedVol::compute(5.0, -1.0, 100.0, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn compute_rejects_infinite_forward() {
         let result =
             BlackImpliedVol::compute(5.0, f64::INFINITY, 100.0, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn compute_rejects_zero_strike() {
         let result = BlackImpliedVol::compute(5.0, 100.0, 0.0, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn compute_rejects_zero_expiry() {
         let result = BlackImpliedVol::compute(5.0, 100.0, 100.0, 0.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn compute_rejects_negative_expiry() {
         let result = BlackImpliedVol::compute(5.0, 100.0, 100.0, -1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -327,24 +327,24 @@ mod tests {
         // Call price cannot exceed forward price
         let result =
             BlackImpliedVol::compute(150.0, 100.0, 100.0, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::NumericalError(_))));
+        assert!(matches!(result, Err(VolSurfError::NumericalError { .. })));
     }
 
     #[test]
     fn black_price_rejects_negative_vol() {
         let result = black_price(100.0, 100.0, -0.1, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn black_price_rejects_negative_expiry() {
         let result = black_price(100.0, 100.0, 0.2, -1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn black_price_rejects_zero_forward() {
         let result = black_price(0.0, 100.0, 0.2, 1.0, OptionType::Call);
-        assert!(matches!(result, Err(VolSurfError::InvalidInput(_))));
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 }

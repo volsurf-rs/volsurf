@@ -53,8 +53,8 @@ impl DupireLocalVol {
 impl LocalVol for DupireLocalVol {
     fn local_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
         let _ = (self.surface.as_ref(), self.bump_size, expiry, strike);
-        Err(VolSurfError::NumericalError(
-            "not yet implemented".to_string(),
-        ))
+        Err(VolSurfError::NumericalError {
+            message: "not yet implemented".to_string(),
+        })
     }
 }
