@@ -1,0 +1,27 @@
+[package]
+name = "volsurf"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Production-ready volatility surface library for derivatives pricing"
+keywords = ["volatility", "finance", "quant", "options", "derivatives"]
+categories = ["mathematics", "finance"]
+
+[dependencies]
+implied-vol = "2.0"
+nalgebra = "0.34"
+rayon = "1.11"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+approx = "0.5"
+
+[[bench]]
+name = "vol_query"
+harness = false
+
+[[bench]]
+name = "surface_construction"
+harness = false
