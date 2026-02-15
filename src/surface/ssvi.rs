@@ -6,6 +6,8 @@
 //! # References
 //! - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
 
+#![allow(dead_code)] // Stub — not yet implemented (v0.2 scope)
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};

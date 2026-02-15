@@ -9,6 +9,8 @@
 //! where d = (F - K) / (σ√T)
 //! ```
 
+#![allow(dead_code)] // Stub — not yet implemented (v0.2+ scope)
+
 use crate::error::VolSurfError;
 use crate::types::{OptionType, Vol};
 

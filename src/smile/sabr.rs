@@ -14,6 +14,8 @@
 //! # References
 //! - Hagan, P. et al. "Managing Smile Risk" (2002)
 
+#![allow(dead_code)] // Stub — not yet implemented (v0.2 scope)
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};

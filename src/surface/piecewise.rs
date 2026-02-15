@@ -343,6 +343,7 @@ mod tests {
     }
 
     /// Helper: create a U-shaped smile at a given tenor.
+    #[allow(dead_code)]
     fn u_shaped_smile(
         forward: f64,
         expiry: f64,

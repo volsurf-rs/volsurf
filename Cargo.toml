@@ -7,10 +7,14 @@ description = "Production-ready volatility surface library for derivatives prici
 keywords = ["volatility", "finance", "quant", "options", "derivatives"]
 categories = ["mathematics", "finance"]
 
+[features]
+default = []
+parallel = ["dep:rayon"]
+
 [dependencies]
 implied-vol = "2.0"
 nalgebra = "0.34"
-rayon = "1.11"
+rayon = { version = "1.11", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 
