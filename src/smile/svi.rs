@@ -129,6 +129,9 @@ impl SviSmile {
         expiry: f64,
         market_vols: &[(f64, f64)],
     ) -> error::Result<Self> {
+        #[cfg(feature = "logging")]
+        tracing::debug!(forward, expiry, n_quotes = market_vols.len(), "SVI calibration started");
+
         /// Minimum market quotes for SVI calibration (5 free params).
         const MIN_POINTS: usize = 5;
         /// Grid search resolution for (m, sigma) initialization.
@@ -275,6 +278,9 @@ impl SviSmile {
         } else {
             (b_rho / b).clamp(-0.999, 0.999)
         };
+
+        #[cfg(feature = "logging")]
+        tracing::debug!(a, b, rho, m = opt_m, sigma = opt_sigma, "SVI calibration complete");
 
         Self::new(forward, expiry, a, b, rho, opt_m, opt_sigma.max(1e-6))
             .map_err(|e| VolSurfError::CalibrationError {

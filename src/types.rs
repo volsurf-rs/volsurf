@@ -3,6 +3,17 @@
 //! These newtypes wrap `f64` to provide compile-time type safety, preventing
 //! accidental parameter swapping (e.g., passing a strike where a tenor is expected).
 //!
+//! # Newtype Strategy
+//!
+//! **Outputs use newtypes** — [`Vol`], [`Variance`], [`Strike`], [`Tenor`] wrap
+//! return values so callers can't accidentally mix a volatility with a variance.
+//!
+//! **Inputs use bare `f64`** — API methods like `vol(strike: f64)` accept raw
+//! floats for ergonomics. Requiring `vol(Strike(100.0))` at every call site adds
+//! ceremony without meaningful safety (the caller already knows they're passing
+//! a strike). This is a deliberate trade-off: newtypes guard against *silent*
+//! misuse of outputs, while inputs are self-documenting via parameter names.
+//!
 //! # Why no `Eq` or `Ord`?
 //! These types wrap `f64`, which does not implement `Eq` or `Ord` because `NaN`
 //! breaks total ordering. We derive `PartialEq` and `PartialOrd` only. Do not

@@ -109,6 +109,13 @@ impl SurfaceBuilder {
     /// or tenor data is invalid. Returns [`VolSurfError::CalibrationError`]
     /// if SVI calibration fails for any tenor.
     pub fn build(self) -> crate::error::Result<PiecewiseSurface> {
+        #[cfg(feature = "logging")]
+        tracing::debug!(
+            n_tenors = self.tenor_data.len(),
+            model = ?self.model,
+            "surface build started"
+        );
+
         // --- Validate required fields ---
         let spot = self.spot.ok_or_else(|| {
             VolSurfError::InvalidInput {
@@ -206,6 +213,9 @@ impl SurfaceBuilder {
         // --- Assemble PiecewiseSurface ---
         let (tenors, smiles): (Vec<f64>, Vec<Box<dyn SmileSection>>) =
             tenor_smile_pairs.into_iter().unzip();
+
+        #[cfg(feature = "logging")]
+        tracing::debug!(n_tenors = tenors.len(), "surface build complete");
 
         PiecewiseSurface::new(tenors, smiles)
     }
