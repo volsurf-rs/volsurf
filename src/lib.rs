@@ -16,8 +16,10 @@
 // TODO: Remove once stub implementations are filled in.
 #![allow(dead_code)]
 
+pub mod conventions;
 pub mod error;
 pub mod implied;
+pub mod local_vol;
 pub mod smile;
 pub mod surface;
 pub mod types;

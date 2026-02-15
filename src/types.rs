@@ -2,6 +2,11 @@
 //!
 //! These newtypes wrap `f64` to provide compile-time type safety, preventing
 //! accidental parameter swapping (e.g., passing a strike where a tenor is expected).
+//!
+//! # Why no `Eq` or `Ord`?
+//! These types wrap `f64`, which does not implement `Eq` or `Ord` because `NaN`
+//! breaks total ordering. We derive `PartialEq` and `PartialOrd` only. Do not
+//! add `Eq` without handling `NaN` explicitly.
 
 use serde::{Deserialize, Serialize};
 

@@ -4,9 +4,11 @@
 //! independently calibrated [`SmileSection`], and cross-tenor queries
 //! interpolate in variance space to maintain no-calendar-arbitrage.
 
+use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::surface::arbitrage::SurfaceDiagnostics;
 use crate::surface::VolSurface;
+use crate::types::{Variance, Vol};
 
 /// Piecewise volatility surface composed of per-tenor smile sections.
 pub struct PiecewiseSurface {
@@ -28,35 +30,38 @@ impl PiecewiseSurface {
     pub fn new(
         tenors: Vec<f64>,
         smiles: Vec<Box<dyn SmileSection>>,
-    ) -> crate::error::Result<Self> {
+    ) -> error::Result<Self> {
         let _ = (&tenors, &smiles);
-        Err(crate::VolSurfError::NumericalError(
+        Err(VolSurfError::NumericalError(
             "not yet implemented".to_string(),
         ))
     }
 }
 
 impl VolSurface for PiecewiseSurface {
-    fn black_vol(&self, expiry: f64, strike: f64) -> f64 {
+    fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
         let _ = (expiry, strike);
-        unimplemented!()
+        Err(VolSurfError::NumericalError(
+            "not yet implemented".to_string(),
+        ))
     }
 
-    fn black_variance(&self, expiry: f64, strike: f64) -> f64 {
+    fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
         let _ = (expiry, strike);
-        unimplemented!()
+        Err(VolSurfError::NumericalError(
+            "not yet implemented".to_string(),
+        ))
     }
 
-    fn local_vol(&self, expiry: f64, strike: f64) -> f64 {
-        let _ = (expiry, strike);
-        unimplemented!()
+    fn smile_at(&self, _expiry: f64) -> error::Result<Box<dyn SmileSection>> {
+        Err(VolSurfError::NumericalError(
+            "not yet implemented".to_string(),
+        ))
     }
 
-    fn smile_at(&self, _expiry: f64) -> &dyn SmileSection {
-        unimplemented!()
-    }
-
-    fn diagnostics(&self) -> SurfaceDiagnostics {
-        unimplemented!()
+    fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+        Err(VolSurfError::NumericalError(
+            "not yet implemented".to_string(),
+        ))
     }
 }

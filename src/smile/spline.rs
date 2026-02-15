@@ -7,12 +7,15 @@
 //! # References
 //! - Fengler, M.R. "Arbitrage-free Smoothing of the Implied Volatility Surface" (2009)
 
-use crate::error::VolSurfError;
+use serde::{Deserialize, Serialize};
+
+use crate::error::{self, VolSurfError};
 use crate::smile::arbitrage::ArbitrageReport;
 use crate::smile::SmileSection;
+use crate::types::Vol;
 
 /// Cubic spline smile on variance with optional monotonicity constraints.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SplineSmile {
     forward: f64,
     expiry: f64,
@@ -31,7 +34,7 @@ impl SplineSmile {
         expiry: f64,
         strikes: Vec<f64>,
         variances: Vec<f64>,
-    ) -> crate::error::Result<Self> {
+    ) -> error::Result<Self> {
         let _ = (forward, expiry, &strikes, &variances);
         Err(VolSurfError::NumericalError(
             "not yet implemented".to_string(),
@@ -40,14 +43,18 @@ impl SplineSmile {
 }
 
 impl SmileSection for SplineSmile {
-    fn vol(&self, strike: f64) -> f64 {
+    fn vol(&self, strike: f64) -> error::Result<Vol> {
         let _ = strike;
-        unimplemented!()
+        Err(VolSurfError::NumericalError(
+            "not yet implemented".to_string(),
+        ))
     }
 
-    fn density(&self, strike: f64) -> f64 {
+    fn density(&self, strike: f64) -> error::Result<f64> {
         let _ = strike;
-        unimplemented!()
+        Err(VolSurfError::NumericalError(
+            "not yet implemented".to_string(),
+        ))
     }
 
     fn forward(&self) -> f64 {
@@ -58,7 +65,9 @@ impl SmileSection for SplineSmile {
         self.expiry
     }
 
-    fn is_arbitrage_free(&self) -> ArbitrageReport {
-        unimplemented!()
+    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
+        Err(VolSurfError::NumericalError(
+            "not yet implemented".to_string(),
+        ))
     }
 }

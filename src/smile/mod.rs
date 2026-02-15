@@ -19,6 +19,9 @@ pub use sabr::SabrSmile;
 pub use spline::SplineSmile;
 pub use svi::SviSmile;
 
+use crate::error;
+use crate::types::{Variance, Vol};
+
 /// A single-tenor volatility smile.
 ///
 /// Represents the relationship between strike and implied volatility at a
@@ -27,23 +30,27 @@ pub use svi::SviSmile;
 ///
 /// # Thread Safety
 /// All implementations must be `Send + Sync` for use in concurrent pricing.
+///
+/// # Error Handling
+/// Methods return `Result` so implementations can report numerical failures
+/// (e.g., negative variance, NaN) rather than panicking.
 pub trait SmileSection: Send + Sync {
     /// Implied Black volatility σ at the given strike.
-    fn vol(&self, strike: f64) -> f64;
+    fn vol(&self, strike: f64) -> error::Result<Vol>;
 
     /// Total Black variance σ²T at the given strike.
     ///
     /// Default implementation derives from [`vol`](SmileSection::vol):
     /// `variance(K) = vol(K)² × expiry`.
-    fn variance(&self, strike: f64) -> f64 {
-        let v = self.vol(strike);
-        v * v * self.expiry()
+    fn variance(&self, strike: f64) -> error::Result<Variance> {
+        let v = self.vol(strike)?;
+        Ok(Variance(v.0 * v.0 * self.expiry()))
     }
 
     /// Risk-neutral probability density q(K) via Breeden-Litzenberger.
     ///
     /// Must be non-negative for an arbitrage-free smile.
-    fn density(&self, strike: f64) -> f64;
+    fn density(&self, strike: f64) -> error::Result<f64>;
 
     /// Forward price F at this tenor.
     fn forward(&self) -> f64;
@@ -52,5 +59,5 @@ pub trait SmileSection: Send + Sync {
     fn expiry(&self) -> f64;
 
     /// Check whether this smile is free of butterfly arbitrage.
-    fn is_arbitrage_free(&self) -> ArbitrageReport;
+    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport>;
 }

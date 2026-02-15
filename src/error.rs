@@ -11,6 +11,7 @@ pub type Result<T> = std::result::Result<T, VolSurfError>;
 
 /// Errors that can occur during volatility surface construction and queries.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum VolSurfError {
     /// Smile or surface calibration failed to converge.
     #[error("calibration failed: {0}")]
