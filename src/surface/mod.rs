@@ -1,0 +1,53 @@
+//! Multi-tenor volatility surface construction.
+//!
+//! A volatility surface maps (expiry, strike) → implied vol across multiple
+//! tenors. This module provides several surface representations:
+//!
+//! - [`SsviSurface`] — Global SSVI parameterization (Gatheral-Jacquier)
+//! - [`EssviSurface`] — Extended SSVI with calendar-spread no-arb guarantees
+//! - [`PiecewiseSurface`] — Per-tenor [`SmileSection`](crate::smile::SmileSection)s
+//!   with cross-tenor variance interpolation
+//! - [`SurfaceBuilder`] — Ergonomic builder API for surface construction
+
+pub mod arbitrage;
+pub mod builder;
+pub mod essvi;
+pub mod piecewise;
+pub mod ssvi;
+
+pub use arbitrage::{CalendarViolation, SurfaceDiagnostics};
+pub use builder::SurfaceBuilder;
+pub use essvi::EssviSurface;
+pub use piecewise::PiecewiseSurface;
+pub use ssvi::SsviSurface;
+
+use crate::smile::SmileSection;
+
+/// A full volatility surface: (expiry, strike) → vol.
+///
+/// All implementations must be `Send + Sync` for safe concurrent pricing
+/// across multiple threads. Surfaces are immutable after construction.
+///
+/// # Design
+/// - No global state — evaluation date is implicit in the tenors
+/// - Immutable after construction — no observer pattern
+/// - Ragged strike grids — each tenor can have different strikes
+pub trait VolSurface: Send + Sync {
+    /// Black implied volatility σ(T, K).
+    fn black_vol(&self, expiry: f64, strike: f64) -> f64;
+
+    /// Black total variance σ²(T, K) · T.
+    ///
+    /// Cross-tenor interpolation is performed in variance space because
+    /// total variance must be non-decreasing in time for no-arbitrage.
+    fn black_variance(&self, expiry: f64, strike: f64) -> f64;
+
+    /// Dupire local volatility σ_loc(T, K).
+    fn local_vol(&self, expiry: f64, strike: f64) -> f64;
+
+    /// The smile section at the given expiry.
+    fn smile_at(&self, expiry: f64) -> &dyn SmileSection;
+
+    /// Surface-level arbitrage diagnostics (butterfly + calendar).
+    fn diagnostics(&self) -> SurfaceDiagnostics;
+}

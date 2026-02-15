@@ -19,6 +19,7 @@
 pub mod error;
 pub mod implied;
 pub mod smile;
+pub mod surface;
 pub mod types;
 
 pub use error::{Result, VolSurfError};
