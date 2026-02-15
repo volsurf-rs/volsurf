@@ -12,3 +12,9 @@
 //! - **`smile`** — Single-tenor smile models (SVI, SABR, cubic spline)
 //! - **`surface`** — Multi-tenor surface construction (SSVI, eSSVI, piecewise)
 //! - **`local_vol`** — Dupire local volatility extraction
+
+pub mod error;
+pub mod types;
+
+pub use error::{Result, VolSurfError};
+pub use types::{OptionType, Strike, Tenor, Variance, Vol};
