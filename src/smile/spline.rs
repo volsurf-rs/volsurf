@@ -22,6 +22,7 @@ use crate::implied::black::black_price;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
 use crate::types::{OptionType, Variance, Vol};
+use crate::validate::validate_positive;
 
 /// Coefficients for one cubic polynomial interval.
 ///
@@ -81,20 +82,8 @@ impl SplineSmile {
         variances: Vec<f64>,
     ) -> error::Result<Self> {
         // --- Input validation ---
-        if forward <= 0.0 || forward.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "forward must be positive, got {forward}"
-                ),
-            });
-        }
-        if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "expiry must be positive, got {expiry}"
-                ),
-            });
-        }
+        validate_positive(forward, "forward")?;
+        validate_positive(expiry, "expiry")?;
         if strikes.len() != variances.len() {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -249,13 +238,7 @@ fn build_spline_coefficients(
 
 impl SmileSection for SplineSmile {
     fn vol(&self, strike: f64) -> error::Result<Vol> {
-        if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "strike must be positive, got {strike}"
-                ),
-            });
-        }
+        validate_positive(strike, "strike")?;
         let w = self.eval_variance(strike);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
@@ -268,13 +251,7 @@ impl SmileSection for SplineSmile {
     }
 
     fn variance(&self, strike: f64) -> error::Result<Variance> {
-        if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "strike must be positive, got {strike}"
-                ),
-            });
-        }
+        validate_positive(strike, "strike")?;
         let w = self.eval_variance(strike);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
@@ -287,13 +264,7 @@ impl SmileSection for SplineSmile {
     }
 
     fn density(&self, strike: f64) -> error::Result<f64> {
-        if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "strike must be positive, got {strike}"
-                ),
-            });
-        }
+        validate_positive(strike, "strike")?;
         let h = strike * 1e-4;
         let k_lo = strike - h;
         let k_hi = strike + h;

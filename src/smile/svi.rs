@@ -23,6 +23,7 @@ use crate::error::{self, VolSurfError};
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
 use crate::types::Vol;
+use crate::validate::validate_positive;
 
 /// SVI volatility smile with 5 parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,20 +64,8 @@ impl SviSmile {
         m: f64,
         sigma: f64,
     ) -> error::Result<Self> {
-        if forward <= 0.0 || forward.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "forward must be positive, got {forward}"
-                ),
-            });
-        }
-        if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "expiry must be positive, got {expiry}"
-                ),
-            });
-        }
+        validate_positive(forward, "forward")?;
+        validate_positive(expiry, "expiry")?;
         if b < 0.0 || b.is_nan() {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -147,20 +136,8 @@ impl SviSmile {
         const NM_FVALUE_TOL: f64 = 1e-12;
 
         // --- Input validation ---
-        if forward <= 0.0 || forward.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "forward must be positive, got {forward}"
-                ),
-            });
-        }
-        if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "expiry must be positive, got {expiry}"
-                ),
-            });
-        }
+        validate_positive(forward, "forward")?;
+        validate_positive(expiry, "expiry")?;
         if market_vols.len() < MIN_POINTS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -170,20 +147,8 @@ impl SviSmile {
             });
         }
         for &(strike, vol) in market_vols {
-            if strike <= 0.0 || strike.is_nan() {
-                return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "strike must be positive, got {strike}"
-                ),
-                });
-            }
-            if vol <= 0.0 || vol.is_nan() {
-                return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "implied vol must be positive, got {vol}"
-                ),
-                });
-            }
+            validate_positive(strike, "strike")?;
+            validate_positive(vol, "implied vol")?;
         }
 
         // --- Convert to log-moneyness / total-variance ---
@@ -358,11 +323,7 @@ impl SviSmile {
 
 impl SmileSection for SviSmile {
     fn vol(&self, strike: f64) -> error::Result<Vol> {
-        if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("strike must be positive, got {strike}"),
-            });
-        }
+        validate_positive(strike, "strike")?;
         let k = (strike / self.forward).ln();
         let w = self.total_variance_at_k(k);
         if w < 0.0 {
@@ -385,11 +346,7 @@ impl SmileSection for SviSmile {
     /// # Reference
     /// Breeden & Litzenberger (1978); Gatheral & Jacquier (2014), §4.
     fn density(&self, strike: f64) -> error::Result<f64> {
-        if strike <= 0.0 || strike.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("strike must be positive, got {strike}"),
-            });
-        }
+        validate_positive(strike, "strike")?;
         let k = (strike / self.forward).ln();
         let w = self.total_variance_at_k(k);
         if w <= 0.0 {

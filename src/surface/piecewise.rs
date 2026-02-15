@@ -30,6 +30,7 @@ use crate::smile::SmileSection;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::surface::VolSurface;
 use crate::types::{Variance, Vol};
+use crate::validate::validate_positive;
 
 /// Number of strikes used when sampling smiles for interpolation.
 const SMILE_GRID_SIZE: usize = 51;
@@ -176,21 +177,13 @@ enum TenorPosition {
 
 impl VolSurface for PiecewiseSurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
-        if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("expiry must be positive, got {expiry}"),
-            });
-        }
+        validate_positive(expiry, "expiry")?;
         let var = self.black_variance(expiry, strike)?;
         Ok(Vol((var.0 / expiry).sqrt()))
     }
 
     fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
-        if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("expiry must be positive, got {expiry}"),
-            });
-        }
+        validate_positive(expiry, "expiry")?;
 
         match self.locate_tenor(expiry) {
             TenorPosition::Exact(i) => self.smiles[i].variance(strike),
@@ -220,11 +213,7 @@ impl VolSurface for PiecewiseSurface {
     }
 
     fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
-        if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("expiry must be positive, got {expiry}"),
-            });
-        }
+        validate_positive(expiry, "expiry")?;
 
         // Determine the forward and strike grid for the interpolated smile
         let (forward, strikes, variances) = match self.locate_tenor(expiry) {

@@ -21,6 +21,7 @@ pub mod local_vol;
 pub mod smile;
 pub mod surface;
 pub mod types;
+mod validate;
 
 pub use error::{Result, VolSurfError};
 pub use local_vol::LocalVol;

@@ -23,6 +23,7 @@ use crate::error::VolSurfError;
 use crate::smile::SmileSection;
 use crate::smile::SviSmile;
 use crate::surface::piecewise::PiecewiseSurface;
+use crate::validate::{validate_finite, validate_positive};
 
 /// Builder for constructing volatility surfaces from market data.
 ///
@@ -97,20 +98,8 @@ impl SurfaceBuilder {
             }
         })?;
 
-        if spot <= 0.0 || !spot.is_finite() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "spot must be positive and finite, got {spot}"
-                ),
-            });
-        }
-        if !rate.is_finite() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "rate must be finite, got {rate}"
-                ),
-            });
-        }
+        validate_positive(spot, "spot")?;
+        validate_finite(rate, "rate")?;
         if self.tenor_data.is_empty() {
             return Err(VolSurfError::InvalidInput {
                 message: "at least one tenor is required".into(),

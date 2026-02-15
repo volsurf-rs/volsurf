@@ -6,6 +6,7 @@ use implied_vol::{DefaultSpecialFn, ImpliedBlackVolatility, PriceBlackScholes};
 
 use crate::error::VolSurfError;
 use crate::types::{OptionType, Vol};
+use crate::validate::{validate_non_negative, validate_positive};
 
 /// Black (lognormal) implied volatility calculator.
 ///
@@ -36,26 +37,10 @@ impl BlackImpliedVol {
         expiry: f64,
         option_type: OptionType,
     ) -> crate::error::Result<Vol> {
-        if option_price < 0.0 || option_price.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("option_price must be non-negative, got {option_price}"),
-            });
-        }
-        if forward <= 0.0 || !forward.is_finite() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("forward must be positive and finite, got {forward}"),
-            });
-        }
-        if strike <= 0.0 || !strike.is_finite() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("strike must be positive and finite, got {strike}"),
-            });
-        }
-        if expiry <= 0.0 || expiry.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("expiry must be positive, got {expiry}"),
-            });
-        }
+        validate_non_negative(option_price, "option_price")?;
+        validate_positive(forward, "forward")?;
+        validate_positive(strike, "strike")?;
+        validate_positive(expiry, "expiry")?;
 
         let is_call = matches!(option_type, OptionType::Call);
 
@@ -100,26 +85,10 @@ pub fn black_price(
     expiry: f64,
     option_type: OptionType,
 ) -> crate::error::Result<f64> {
-    if forward <= 0.0 || !forward.is_finite() {
-        return Err(VolSurfError::InvalidInput {
-            message: format!("forward must be positive and finite, got {forward}"),
-        });
-    }
-    if strike <= 0.0 || !strike.is_finite() {
-        return Err(VolSurfError::InvalidInput {
-            message: format!("strike must be positive and finite, got {strike}"),
-        });
-    }
-    if vol < 0.0 || vol.is_nan() {
-        return Err(VolSurfError::InvalidInput {
-            message: format!("volatility must be non-negative, got {vol}"),
-        });
-    }
-    if expiry < 0.0 || expiry.is_nan() {
-        return Err(VolSurfError::InvalidInput {
-            message: format!("expiry must be non-negative, got {expiry}"),
-        });
-    }
+    validate_positive(forward, "forward")?;
+    validate_positive(strike, "strike")?;
+    validate_non_negative(vol, "volatility")?;
+    validate_non_negative(expiry, "expiry")?;
 
     let is_call = matches!(option_type, OptionType::Call);
 
