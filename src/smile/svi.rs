@@ -272,93 +272,24 @@ impl SviSmile {
 
         // --- Nelder-Mead 2D optimization over (m, sigma) ---
         let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
-        let step_s = (sigma_hi - sigma_lo) / (GRID_N as f64) * 0.5;
+        let step_s = ((sigma_hi - sigma_lo) / (GRID_N as f64) * 0.5).max(0.001);
 
-        let mut simplex = [
-            (best_m, best_sigma),
-            (best_m + step_m, best_sigma),
-            (best_m, (best_sigma + step_s).max(0.001)),
-        ];
-        let mut f_vals = [
-            objective(simplex[0].0, simplex[0].1),
-            objective(simplex[1].0, simplex[1].1),
-            objective(simplex[2].0, simplex[2].1),
-        ];
-
-        for _ in 0..NM_MAX_ITER {
-            // Sort by objective value
-            let mut idx = [0usize, 1, 2];
-            idx.sort_by(|&a, &b| f_vals[a].partial_cmp(&f_vals[b]).unwrap_or(std::cmp::Ordering::Equal));
-            let sorted_s = [simplex[idx[0]], simplex[idx[1]], simplex[idx[2]]];
-            let sorted_f = [f_vals[idx[0]], f_vals[idx[1]], f_vals[idx[2]]];
-            simplex = sorted_s;
-            f_vals = sorted_f;
-
-            // Check convergence
-            let diameter = simplex.iter()
-                .flat_map(|a| simplex.iter().map(move |b|
-                    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
-                ))
-                .fold(0.0_f64, f64::max);
-            let f_spread = f_vals[2] - f_vals[0];
-
-            if diameter < NM_DIAMETER_TOL || f_spread < NM_FVALUE_TOL {
-                break;
-            }
-
-            // Centroid of best two
-            let cx = (simplex[0].0 + simplex[1].0) / 2.0;
-            let cy = (simplex[0].1 + simplex[1].1) / 2.0;
-
-            // Reflection
-            let rx = cx + (cx - simplex[2].0);
-            let ry = cy + (cy - simplex[2].1);
-            let fr = objective(rx, ry);
-
-            if fr < f_vals[1] && fr >= f_vals[0] {
-                simplex[2] = (rx, ry);
-                f_vals[2] = fr;
-            } else if fr < f_vals[0] {
-                // Expansion
-                let ex = cx + 2.0 * (rx - cx);
-                let ey = cy + 2.0 * (ry - cy);
-                let fe = objective(ex, ey);
-                if fe < fr {
-                    simplex[2] = (ex, ey);
-                    f_vals[2] = fe;
-                } else {
-                    simplex[2] = (rx, ry);
-                    f_vals[2] = fr;
-                }
-            } else {
-                // Contraction
-                let (hx, hy) = if fr < f_vals[2] {
-                    // Outside contraction
-                    (cx + 0.5 * (rx - cx), cy + 0.5 * (ry - cy))
-                } else {
-                    // Inside contraction
-                    (cx + 0.5 * (simplex[2].0 - cx), cy + 0.5 * (simplex[2].1 - cy))
-                };
-                let fh = objective(hx, hy);
-                if fh < f_vals[2].min(fr) {
-                    simplex[2] = (hx, hy);
-                    f_vals[2] = fh;
-                } else {
-                    // Shrink toward best vertex
-                    for j in 1..3 {
-                        simplex[j].0 = simplex[0].0 + 0.5 * (simplex[j].0 - simplex[0].0);
-                        simplex[j].1 = simplex[0].1 + 0.5 * (simplex[j].1 - simplex[0].1);
-                        f_vals[j] = objective(simplex[j].0, simplex[j].1);
-                    }
-                }
-            }
-        }
+        let nm_config = crate::optim::NelderMeadConfig {
+            max_iter: NM_MAX_ITER,
+            diameter_tol: NM_DIAMETER_TOL,
+            fvalue_tol: NM_FVALUE_TOL,
+        };
+        let nm_result = crate::optim::nelder_mead_2d(
+            objective,
+            best_m,
+            best_sigma,
+            step_m,
+            step_s,
+            &nm_config,
+        );
 
         // --- Recover final parameters ---
-        // Pick best vertex
-        let best_idx = if f_vals[0] <= f_vals[1] && f_vals[0] <= f_vals[2] { 0 }
-            else if f_vals[1] <= f_vals[2] { 1 } else { 2 };
-        let (opt_m, opt_sigma) = simplex[best_idx];
+        let (opt_m, opt_sigma) = (nm_result.x, nm_result.y);
 
         let (a, b_rho, b, _rss) = inner_solve(opt_m, opt_sigma).ok_or_else(|| {
             VolSurfError::CalibrationError {
