@@ -13,8 +13,12 @@
 //! - **`surface`** — Multi-tenor surface construction (SSVI, eSSVI, piecewise)
 //! - **`local_vol`** — Dupire local volatility extraction
 
+// TODO: Remove once stub implementations are filled in.
+#![allow(dead_code)]
+
 pub mod error;
 pub mod implied;
+pub mod smile;
 pub mod types;
 
 pub use error::{Result, VolSurfError};
