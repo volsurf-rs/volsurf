@@ -58,3 +58,61 @@ impl DisplacedImpliedVol {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Gap #15: Beta boundary values ---
+
+    #[test]
+    fn new_accepts_beta_zero() {
+        // beta=0 → pure normal (Bachelier) model
+        let result = DisplacedImpliedVol::new(0.0);
+        assert!(result.is_ok(), "beta=0 should be valid (pure normal)");
+    }
+
+    #[test]
+    fn new_accepts_beta_one() {
+        // beta=1 → pure Black (lognormal) model
+        let result = DisplacedImpliedVol::new(1.0);
+        assert!(result.is_ok(), "beta=1 should be valid (pure lognormal)");
+    }
+
+    #[test]
+    fn new_accepts_beta_mid() {
+        let result = DisplacedImpliedVol::new(0.5);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn new_rejects_beta_above_one() {
+        let result = DisplacedImpliedVol::new(1.01);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn new_rejects_beta_below_zero() {
+        let result = DisplacedImpliedVol::new(-0.01);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn new_rejects_nan_beta() {
+        let result = DisplacedImpliedVol::new(f64::NAN);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn new_rejects_inf_beta() {
+        let result = DisplacedImpliedVol::new(f64::INFINITY);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn compute_stub_returns_not_implemented() {
+        let calc = DisplacedImpliedVol::new(0.5).unwrap();
+        let result = calc.compute(5.0, 100.0, 100.0, 1.0, OptionType::Call);
+        assert!(matches!(result, Err(VolSurfError::NumericalError { .. })));
+    }
+}

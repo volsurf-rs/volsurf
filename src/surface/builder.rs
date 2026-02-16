@@ -540,4 +540,72 @@ mod tests {
         let result = builder.build();
         assert!(result.is_err()); // no spot/rate/tenors
     }
+
+    // --- Gap #7: Inf rate rejected, large negative rate accepted ---
+
+    #[test]
+    fn inf_rate_returns_invalid_input() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(f64::INFINITY)
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn neg_inf_rate_returns_invalid_input() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(f64::NEG_INFINITY)
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    // --- Gap #8: Mismatched lengths error message content ---
+
+    #[test]
+    fn mismatched_lengths_error_message_contains_counts() {
+        let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
+        let vols = vec![0.20, 0.20, 0.20]; // 3 vols for 5 strikes
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        match result {
+            Err(VolSurfError::InvalidInput { message }) => {
+                assert!(message.contains("5") && message.contains("3"),
+                    "error should mention both lengths: {message}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    // --- Gap #9: Negative strikes cause calibration failure ---
+
+    #[test]
+    fn negative_strikes_cause_calibration_error() {
+        let strikes = vec![-80.0, -90.0, -100.0, -110.0, -120.0];
+        let vols = vec![0.28, 0.24, 0.20, 0.24, 0.28];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        assert!(result.is_err(), "negative strikes should cause build to fail");
+    }
+
+    #[test]
+    fn zero_strike_in_data_causes_error() {
+        let strikes = vec![0.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0];
+        let vols = vec![0.28, 0.24, 0.22, 0.20, 0.22, 0.24, 0.28];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        assert!(result.is_err(), "zero strike should cause build to fail");
+    }
 }

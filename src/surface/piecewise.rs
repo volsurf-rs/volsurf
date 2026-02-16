@@ -106,10 +106,10 @@ impl PiecewiseSurface {
             });
         }
         for (i, t) in tenors.iter().enumerate() {
-            if *t <= 0.0 || t.is_nan() {
+            if !t.is_finite() || *t <= 0.0 {
                 return Err(VolSurfError::InvalidInput {
                 message: format!(
-                    "tenors must be positive, got tenors[{i}]={t}"
+                    "tenors must be positive and finite, got tenors[{i}]={t}"
                 ),
                 });
             }
@@ -608,6 +608,109 @@ mod tests {
     }
 
     // --- Multi-tenor interpolation ---
+
+    // --- Gap #10: Infinity tenor rejected ---
+
+    #[test]
+    fn rejects_infinity_tenor() {
+        let s1 = flat_smile(100.0, 0.25, 0.20);
+        let result = PiecewiseSurface::new(vec![f64::INFINITY], vec![s1]);
+        assert!(
+            matches!(result, Err(VolSurfError::InvalidInput { .. })),
+            "Inf tenor should be rejected"
+        );
+    }
+
+    #[test]
+    fn rejects_negative_infinity_tenor() {
+        let s1 = flat_smile(100.0, 0.25, 0.20);
+        let result = PiecewiseSurface::new(vec![f64::NEG_INFINITY], vec![s1]);
+        assert!(
+            matches!(result, Err(VolSurfError::InvalidInput { .. })),
+            "-Inf tenor should be rejected"
+        );
+    }
+
+    // --- Gap #11: Single-tenor unit tests ---
+
+    #[test]
+    fn single_tenor_extrapolation_before() {
+        let vol = 0.25;
+        let t1 = 1.0;
+        let s1 = flat_smile(100.0, t1, vol);
+        let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
+
+        // Query before the only tenor — flat vol extrapolation
+        let v = surface.black_vol(0.1, 100.0).unwrap();
+        assert_abs_diff_eq!(v.0, vol, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn single_tenor_extrapolation_after() {
+        let vol = 0.25;
+        let t1 = 0.5;
+        let s1 = flat_smile(100.0, t1, vol);
+        let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
+
+        // Query after the only tenor — flat vol extrapolation
+        let v = surface.black_vol(2.0, 100.0).unwrap();
+        assert_abs_diff_eq!(v.0, vol, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn single_tenor_smile_at_before() {
+        let vol = 0.20;
+        let t1 = 1.0;
+        let s1 = flat_smile(100.0, t1, vol);
+        let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
+
+        let smile = surface.smile_at(0.5).unwrap();
+        assert_abs_diff_eq!(smile.expiry(), 0.5, epsilon = 1e-14);
+        let v = smile.vol(100.0).unwrap();
+        assert_abs_diff_eq!(v.0, vol, epsilon = 1e-4);
+    }
+
+    #[test]
+    fn single_tenor_smile_at_after() {
+        let vol = 0.20;
+        let t1 = 0.5;
+        let s1 = flat_smile(100.0, t1, vol);
+        let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
+
+        let smile = surface.smile_at(2.0).unwrap();
+        assert_abs_diff_eq!(smile.expiry(), 2.0, epsilon = 1e-14);
+        let v = smile.vol(100.0).unwrap();
+        assert_abs_diff_eq!(v.0, vol, epsilon = 1e-4);
+    }
+
+    // --- Gap #12: Tenor tolerance boundary ---
+
+    #[test]
+    fn near_exact_tenor_within_tolerance_matches() {
+        let s1 = flat_smile(100.0, 0.25, 0.20);
+        let s2 = flat_smile(100.0, 1.0, 0.25);
+        let surface = PiecewiseSurface::new(vec![0.25, 1.0], vec![s1, s2]).unwrap();
+
+        // Query at T = 0.25 + 1e-11 (within 1e-10 tolerance) — should match exactly
+        let vol = surface.black_vol(0.25 + 1e-11, 100.0).unwrap();
+        assert_abs_diff_eq!(vol.0, 0.20, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn near_exact_tenor_outside_tolerance_interpolates() {
+        let s1 = flat_smile(100.0, 0.25, 0.20);
+        let s2 = flat_smile(100.0, 1.0, 0.25);
+        let surface = PiecewiseSurface::new(vec![0.25, 1.0], vec![s1, s2]).unwrap();
+
+        // Query at T = 0.25 + 1e-8 (outside 1e-10 tolerance) — should interpolate
+        let vol = surface.black_vol(0.25 + 1e-8, 100.0).unwrap();
+        // This is very close to T=0.25, so vol should still be very close to 0.20
+        // but technically goes through the interpolation path
+        assert!(vol.0 > 0.0);
+        assert_abs_diff_eq!(vol.0, 0.20, epsilon = 0.01);
+    }
+
+    // --- (continued from existing tests) ---
 
     #[test]
     fn three_tenor_surface_interpolates_correctly() {

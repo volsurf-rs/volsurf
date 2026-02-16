@@ -41,3 +41,87 @@ pub enum VolSurfError {
         message: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Gap #2: Structured error field access ---
+
+    #[test]
+    fn calibration_error_fields_accessible() {
+        let err = VolSurfError::CalibrationError {
+            message: "convergence failed".into(),
+            model: "SVI",
+            rms_error: Some(0.05),
+        };
+        match &err {
+            VolSurfError::CalibrationError { message, model, rms_error } => {
+                assert_eq!(message, "convergence failed");
+                assert_eq!(*model, "SVI");
+                assert_eq!(*rms_error, Some(0.05));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn calibration_error_rms_none() {
+        let err = VolSurfError::CalibrationError {
+            message: "no grid point found".into(),
+            model: "SVI",
+            rms_error: None,
+        };
+        match &err {
+            VolSurfError::CalibrationError { rms_error, .. } => {
+                assert!(rms_error.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn invalid_input_message_accessible() {
+        let err = VolSurfError::InvalidInput {
+            message: "strike must be positive".into(),
+        };
+        match &err {
+            VolSurfError::InvalidInput { message } => {
+                assert!(message.contains("positive"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn error_display_includes_message() {
+        let err = VolSurfError::CalibrationError {
+            message: "test failure".into(),
+            model: "SVI",
+            rms_error: Some(0.01),
+        };
+        let display = format!("{err}");
+        assert!(display.contains("test failure"));
+
+        let err2 = VolSurfError::InvalidInput {
+            message: "bad input".into(),
+        };
+        assert!(format!("{err2}").contains("bad input"));
+
+        let err3 = VolSurfError::NumericalError {
+            message: "NaN detected".into(),
+        };
+        assert!(format!("{err3}").contains("NaN detected"));
+
+        let err4 = VolSurfError::ArbitrageViolation {
+            message: "calendar spread".into(),
+        };
+        assert!(format!("{err4}").contains("calendar spread"));
+    }
+
+    #[test]
+    fn error_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<VolSurfError>();
+    }
+}

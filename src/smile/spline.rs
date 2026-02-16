@@ -785,4 +785,51 @@ mod tests {
             "should find at least one strike where spline variance goes negative"
         );
     }
+
+    // --- Gap #16: Default density() error propagation ---
+    //
+    // SplineSmile uses the default SmileSection::density() implementation
+    // (Breeden-Litzenberger via finite differences). When vol() fails,
+    // the error should propagate through density().
+
+    #[test]
+    fn default_density_propagates_vol_error() {
+        let smile = make_overshooting_spline();
+        // Find a strike where vol() fails (negative variance)
+        let mut error_strike = None;
+        for i in 0..400 {
+            let strike = 1.01 + i as f64 * 0.01;
+            if smile.vol(strike).is_err() {
+                error_strike = Some(strike);
+                break;
+            }
+        }
+        let strike = error_strike.expect("should find a failing strike");
+
+        // density() should propagate the error from vol()
+        let density_result = smile.density(strike);
+        assert!(
+            density_result.is_err(),
+            "density() should propagate vol() error at K={strike}"
+        );
+    }
+
+    #[test]
+    fn default_density_rejects_zero_strike() {
+        // Default density() validates strike > 0 before calling vol()
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.density(0.0),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn default_density_rejects_negative_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.density(-10.0),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
 }

@@ -160,4 +160,108 @@ mod tests {
         let m2 = moneyness(100.0, 120.0);
         assert_abs_diff_eq!(m1 * m2, 1.0, epsilon = 1e-10);
     }
+
+    // --- Gap #3: log_moneyness/moneyness with zero forward ---
+
+    #[test]
+    fn log_moneyness_zero_forward_returns_inf() {
+        let k = log_moneyness(100.0, 0.0);
+        assert!(k.is_infinite(), "log_moneyness(100, 0) should be Inf, got {k}");
+        assert!(k.is_sign_positive());
+    }
+
+    #[test]
+    fn moneyness_zero_forward_returns_inf() {
+        let m = moneyness(100.0, 0.0);
+        assert!(m.is_infinite(), "moneyness(100, 0) should be Inf, got {m}");
+    }
+
+    #[test]
+    fn log_moneyness_zero_strike_returns_neg_inf() {
+        let k = log_moneyness(0.0, 100.0);
+        assert!(k.is_infinite() && k.is_sign_negative(),
+            "log_moneyness(0, 100) should be -Inf, got {k}");
+    }
+
+    #[test]
+    fn moneyness_zero_strike_returns_zero() {
+        let m = moneyness(0.0, 100.0);
+        assert_abs_diff_eq!(m, 0.0, epsilon = 1e-15);
+    }
+
+    // --- Gap #4: NaN and Inf inputs ---
+
+    #[test]
+    fn log_moneyness_nan_strike_returns_nan() {
+        let k = log_moneyness(f64::NAN, 100.0);
+        assert!(k.is_nan(), "log_moneyness(NaN, 100) should be NaN, got {k}");
+    }
+
+    #[test]
+    fn log_moneyness_nan_forward_returns_nan() {
+        let k = log_moneyness(100.0, f64::NAN);
+        assert!(k.is_nan(), "log_moneyness(100, NaN) should be NaN, got {k}");
+    }
+
+    #[test]
+    fn moneyness_nan_inputs_return_nan() {
+        assert!(moneyness(f64::NAN, 100.0).is_nan());
+        assert!(moneyness(100.0, f64::NAN).is_nan());
+    }
+
+    #[test]
+    fn log_moneyness_inf_strike_returns_inf() {
+        let k = log_moneyness(f64::INFINITY, 100.0);
+        assert!(k.is_infinite() && k.is_sign_positive());
+    }
+
+    #[test]
+    fn moneyness_inf_strike_returns_inf() {
+        let m = moneyness(f64::INFINITY, 100.0);
+        assert!(m.is_infinite());
+    }
+
+    #[test]
+    fn forward_price_nan_inputs() {
+        assert!(forward_price(f64::NAN, 0.05, 1.0).is_nan());
+        assert!(forward_price(100.0, f64::NAN, 1.0).is_nan());
+        assert!(forward_price(100.0, 0.05, f64::NAN).is_nan());
+    }
+
+    // --- Gap #5: StickyKind enum ---
+
+    #[test]
+    fn sticky_kind_debug_display() {
+        assert_eq!(format!("{:?}", StickyKind::StickyStrike), "StickyStrike");
+        assert_eq!(format!("{:?}", StickyKind::StickyDelta), "StickyDelta");
+    }
+
+    #[test]
+    fn sticky_kind_copy_and_eq() {
+        let a = StickyKind::StickyStrike;
+        let b = a; // Copy
+        assert_eq!(a, b);
+
+        let c = StickyKind::StickyDelta;
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn sticky_kind_serde_round_trip() {
+        for kind in [StickyKind::StickyStrike, StickyKind::StickyDelta] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let kind2: StickyKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(kind, kind2);
+        }
+    }
+
+    #[test]
+    fn sticky_kind_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(StickyKind::StickyStrike);
+        set.insert(StickyKind::StickyDelta);
+        set.insert(StickyKind::StickyStrike); // duplicate
+        assert_eq!(set.len(), 2);
+    }
 }

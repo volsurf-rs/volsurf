@@ -316,4 +316,45 @@ mod tests {
         let result = black_price(0.0, 100.0, 0.2, 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
+
+    // --- Gap #13: Zero strike + zero vol combined edge case ---
+
+    #[test]
+    fn black_price_rejects_zero_strike() {
+        // Zero strike is rejected by validate_positive, regardless of vol
+        let result = black_price(100.0, 0.0, 0.0, 1.0, OptionType::Call);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn black_price_rejects_zero_strike_with_zero_vol() {
+        let result = black_price(100.0, 0.0, 0.0, 1.0, OptionType::Put);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    // --- Gap #14: Infinite strike ---
+
+    #[test]
+    fn compute_rejects_infinite_strike() {
+        let result = BlackImpliedVol::compute(5.0, 100.0, f64::INFINITY, 1.0, OptionType::Call);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn compute_rejects_nan_strike() {
+        let result = BlackImpliedVol::compute(5.0, 100.0, f64::NAN, 1.0, OptionType::Call);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn black_price_rejects_infinite_strike() {
+        let result = black_price(100.0, f64::INFINITY, 0.2, 1.0, OptionType::Call);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn black_price_rejects_nan_strike() {
+        let result = black_price(100.0, f64::NAN, 0.2, 1.0, OptionType::Call);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
 }
