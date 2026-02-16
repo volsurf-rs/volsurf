@@ -137,3 +137,152 @@ where
         fval: f_vals[best_idx],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_config() -> NelderMeadConfig {
+        NelderMeadConfig {
+            max_iter: 1000,
+            diameter_tol: 1e-12,
+            fvalue_tol: 1e-14,
+        }
+    }
+
+    // --- Convergence on known minima ---
+
+    #[test]
+    fn converges_on_sphere_function() {
+        // f(x,y) = x^2 + y^2, minimum at (0,0) with fval=0
+        let result = nelder_mead_2d(|x, y| x * x + y * y, 1.0, 1.0, 0.5, 0.5, &default_config());
+        assert!((result.x).abs() < 1e-6, "x should be ~0, got {}", result.x);
+        assert!((result.y).abs() < 1e-6, "y should be ~0, got {}", result.y);
+        assert!(result.fval < 1e-12, "fval should be ~0, got {}", result.fval);
+    }
+
+    #[test]
+    fn converges_on_rosenbrock() {
+        // f(x,y) = (1-x)^2 + 100*(y-x^2)^2, minimum at (1,1) with fval=0
+        let result = nelder_mead_2d(
+            |x, y| (1.0 - x).powi(2) + 100.0 * (y - x * x).powi(2),
+            -1.0,
+            -1.0,
+            0.5,
+            0.5,
+            &NelderMeadConfig {
+                max_iter: 5000,
+                diameter_tol: 1e-12,
+                fvalue_tol: 1e-14,
+            },
+        );
+        assert!(
+            (result.x - 1.0).abs() < 1e-3,
+            "x should be ~1, got {}",
+            result.x
+        );
+        assert!(
+            (result.y - 1.0).abs() < 1e-3,
+            "y should be ~1, got {}",
+            result.y
+        );
+    }
+
+    #[test]
+    fn converges_on_shifted_minimum() {
+        // f(x,y) = (x-3)^2 + (y+2)^2, minimum at (3,-2)
+        let result = nelder_mead_2d(
+            |x, y| (x - 3.0).powi(2) + (y + 2.0).powi(2),
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            &default_config(),
+        );
+        assert!(
+            (result.x - 3.0).abs() < 1e-6,
+            "x should be ~3, got {}",
+            result.x
+        );
+        assert!(
+            (result.y + 2.0).abs() < 1e-6,
+            "y should be ~-2, got {}",
+            result.y
+        );
+        assert!(result.fval < 1e-12);
+    }
+
+    // --- Convergence criteria ---
+
+    #[test]
+    fn respects_max_iter_limit() {
+        // Rosenbrock with only 5 iterations — should NOT converge
+        let result = nelder_mead_2d(
+            |x, y| (1.0 - x).powi(2) + 100.0 * (y - x * x).powi(2),
+            -1.0,
+            -1.0,
+            0.5,
+            0.5,
+            &NelderMeadConfig {
+                max_iter: 5,
+                diameter_tol: 1e-20,
+                fvalue_tol: 1e-20,
+            },
+        );
+        // After only 5 iterations from (-1,-1), should still be far from (1,1)
+        assert!(
+            (result.x - 1.0).abs() > 0.1 || (result.y - 1.0).abs() > 0.1,
+            "should not converge in 5 iterations"
+        );
+    }
+
+    #[test]
+    fn diameter_convergence_terminates() {
+        // Very large diameter_tol should stop quickly without panic
+        let result = nelder_mead_2d(
+            |x, y| x * x + y * y,
+            5.0,
+            5.0,
+            2.0,
+            2.0,
+            &NelderMeadConfig {
+                max_iter: 100000,
+                diameter_tol: 100.0, // Immediate stop — initial diameter is small
+                fvalue_tol: 1e-20,
+            },
+        );
+        // Just verify it returns a result without panicking
+        assert!(result.fval.is_finite(), "should return finite fval");
+    }
+
+    // --- Edge cases ---
+
+    #[test]
+    fn handles_small_step_gracefully() {
+        // Very small step creates a nearly-degenerate initial simplex
+        let result = nelder_mead_2d(
+            |x, y| x * x + y * y,
+            1.0,
+            1.0,
+            0.001,
+            0.001,
+            &default_config(),
+        );
+        // Should still converge, just slowly
+        assert!(result.fval < 0.5, "should improve despite small steps");
+    }
+
+    #[test]
+    fn already_at_minimum() {
+        // Start exactly at the minimum
+        let result = nelder_mead_2d(
+            |x, y| x * x + y * y,
+            0.0,
+            0.0,
+            0.01,
+            0.01,
+            &default_config(),
+        );
+        assert!(result.fval < 1e-4, "starting near minimum should converge");
+    }
+}

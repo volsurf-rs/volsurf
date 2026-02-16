@@ -730,4 +730,59 @@ mod tests {
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
+
+    // --- Gap #5: negative interpolated variance error path ---
+
+    /// Construct a SplineSmile that will overshoot into negative variance,
+    /// bypassing new()'s validation by building with borderline-valid data
+    /// where the natural cubic oscillates below zero between knots.
+    fn make_overshooting_spline() -> SplineSmile {
+        // Alternating high-low pattern forces cubic to overshoot.
+        // Knots at: [1, 2, 3, 4, 5] with variances [0.5, 0.0001, 0.5, 0.0001, 0.5]
+        // The cubic between knot 2 and 3 must swing from 0.0001 to 0.5,
+        // but with matching second derivatives from the surrounding steep
+        // segments, the natural cubic oscillates into negatives.
+        SplineSmile::new(
+            100.0,
+            1.0,
+            vec![1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![0.5, 0.0001, 0.5, 0.0001, 0.5],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn vol_returns_error_for_negative_interpolated_variance() {
+        let smile = make_overshooting_spline();
+        // Scan between knots looking for the negative overshoot
+        let mut found_negative = false;
+        for i in 0..400 {
+            let strike = 1.01 + i as f64 * 0.01;
+            if let Err(VolSurfError::NumericalError { .. }) = smile.vol(strike) {
+                found_negative = true;
+                break;
+            }
+        }
+        assert!(
+            found_negative,
+            "should find at least one strike where spline variance goes negative"
+        );
+    }
+
+    #[test]
+    fn variance_returns_error_for_negative_interpolated_variance() {
+        let smile = make_overshooting_spline();
+        let mut found_negative = false;
+        for i in 0..400 {
+            let strike = 1.01 + i as f64 * 0.01;
+            if let Err(VolSurfError::NumericalError { .. }) = smile.variance(strike) {
+                found_negative = true;
+                break;
+            }
+        }
+        assert!(
+            found_negative,
+            "should find at least one strike where spline variance goes negative"
+        );
+    }
 }

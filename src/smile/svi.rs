@@ -87,6 +87,16 @@ impl SviSmile {
                 ),
             });
         }
+        if !m.is_finite() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("m must be finite, got {m}"),
+            });
+        }
+        if !a.is_finite() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("a must be finite, got {a}"),
+            });
+        }
         let min_variance = a + b * sigma * (1.0 - rho * rho).sqrt();
         if min_variance < 0.0 || min_variance.is_nan() {
             return Err(VolSurfError::InvalidInput {
@@ -906,5 +916,78 @@ mod tests {
             .sum::<f64>() / data.len() as f64)
             .sqrt();
         assert!(rms < 0.001, "round-trip RMS {rms} with 5 points should be < 0.001");
+    }
+
+    // --- Gap #4: m and a parameter validation ---
+
+    #[test]
+    fn new_rejects_nan_m() {
+        let r = SviSmile::new(F, T, A, B, RHO, f64::NAN, SIGMA);
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn new_rejects_inf_m() {
+        let r = SviSmile::new(F, T, A, B, RHO, f64::INFINITY, SIGMA);
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn new_rejects_neg_inf_m() {
+        let r = SviSmile::new(F, T, A, B, RHO, f64::NEG_INFINITY, SIGMA);
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn new_rejects_inf_a() {
+        let r = SviSmile::new(F, T, f64::INFINITY, B, RHO, M, SIGMA);
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn new_rejects_nan_a() {
+        let r = SviSmile::new(F, T, f64::NAN, B, RHO, M, SIGMA);
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    // --- Gap #2: vol() negative variance error path ---
+
+    /// Construct an SVI with invalid params (bypassing new() validation)
+    /// to test error paths that require negative total variance.
+    fn make_invalid_svi() -> SviSmile {
+        // Direct struct construction is possible within the same module.
+        // a = -0.1 makes total variance negative at ATM (k=0):
+        // w(0) = a + b*(rho*0 + sqrt(0 + sigma^2)) = -0.1 + 0.01*0.1 = -0.099
+        SviSmile {
+            forward: 100.0,
+            expiry: 1.0,
+            a: -0.1,
+            b: 0.01,
+            rho: 0.0,
+            m: 0.0,
+            sigma: 0.1,
+        }
+    }
+
+    #[test]
+    fn vol_returns_error_when_total_variance_is_negative() {
+        let smile = make_invalid_svi();
+        let result = smile.vol(100.0);
+        assert!(
+            matches!(result, Err(VolSurfError::NumericalError { .. })),
+            "vol() should return NumericalError for negative variance, got {result:?}"
+        );
+    }
+
+    // --- Gap #3: density() non-positive variance error path ---
+
+    #[test]
+    fn density_returns_error_when_total_variance_non_positive() {
+        let smile = make_invalid_svi();
+        let result = smile.density(100.0);
+        assert!(
+            matches!(result, Err(VolSurfError::NumericalError { .. })),
+            "density() should return NumericalError for non-positive variance, got {result:?}"
+        );
     }
 }

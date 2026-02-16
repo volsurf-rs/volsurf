@@ -89,29 +89,34 @@ proptest! {
 proptest! {
     /// SplineSmile should exactly interpolate through its knot points.
     ///
-    /// Creates a spline with 5 knots at variance=0.04 and verifies that
-    /// evaluating at each knot strike returns the exact variance.
+    /// Generates random variance values at fixed strikes and verifies that
+    /// evaluating at each knot strike returns the exact knot variance.
     #[test]
     fn spline_passes_through_knots(
-        _seed in 0..100_u32, // Just to run test multiple times
+        v0 in 0.01_f64..0.20,
+        v1 in 0.01_f64..0.20,
+        v2 in 0.01_f64..0.20,
+        v3 in 0.01_f64..0.20,
     ) {
         let forward = 100.0;
         let expiry = 1.0;
+        // Variances must be positive (enforced by range).
+        // Strikes must be strictly increasing.
         let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
-        let variances = vec![0.04, 0.04, 0.04, 0.04, 0.04];
+        // Use sorted variances to keep shape well-behaved, but randomize values.
+        let variances = vec![v0, v1, v2, v3, v0]; // Symmetric with random levels
 
         let smile = SplineSmile::new(forward, expiry, strikes.clone(), variances.clone())
             .unwrap();
 
         for (strike, expected_var) in strikes.iter().zip(variances.iter()) {
-            let vol = smile.vol(*strike).unwrap();
-            let actual_vol = (expected_var / expiry).sqrt();
+            let var = smile.variance(*strike).unwrap();
             prop_assert!(
-                (vol.0 - actual_vol).abs() < 1e-12,
-                "spline should pass through knot at K={}, got vol={} vs expected={}",
+                (var.0 - expected_var).abs() < 1e-12,
+                "spline should pass through knot at K={}, got var={} vs expected={}",
                 strike,
-                vol.0,
-                actual_vol
+                var.0,
+                expected_var
             );
         }
     }

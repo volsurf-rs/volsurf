@@ -468,6 +468,93 @@ fn concurrent_smile_at_queries() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // ---------------------------------------------------------------------------
+// Test 7: CubicSpline builder end-to-end
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cubic_spline_surface_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
+    use volsurf::surface::SmileModel;
+
+    let spot = 100.0;
+    let rate = 0.05;
+    let strikes = standard_strikes(); // 21 strikes, 80..120
+
+    // Generate synthetic vols from a known SVI smile for each tenor
+    let data_3m = svi_market_data(
+        &SviParams {
+            forward: spot * (rate * 0.25_f64).exp(),
+            expiry: 0.25,
+            a: 0.005, b: 0.05, rho: -0.3, m: 0.0, sigma: 0.25,
+        },
+        &strikes,
+    );
+    let data_1y = svi_market_data(
+        &SviParams {
+            forward: spot * (rate * 1.0_f64).exp(),
+            expiry: 1.0,
+            a: 0.02, b: 0.04, rho: -0.2, m: 0.0, sigma: 0.4,
+        },
+        &strikes,
+    );
+
+    let (strikes_3m, vols_3m): (Vec<f64>, Vec<f64>) = data_3m.into_iter().unzip();
+    let (strikes_1y, vols_1y): (Vec<f64>, Vec<f64>) = data_1y.into_iter().unzip();
+
+    let surface = SurfaceBuilder::new()
+        .spot(spot)
+        .rate(rate)
+        .model(SmileModel::CubicSpline)
+        .add_tenor(0.25, &strikes_3m, &vols_3m)
+        .add_tenor(1.00, &strikes_1y, &vols_1y)
+        .build()?;
+
+    // Query at exact tenors
+    for t in [0.25, 1.0] {
+        let vol = surface.black_vol(t, 100.0)?;
+        assert!(
+            vol.0 > 0.10 && vol.0 < 0.50,
+            "ATM vol at T={t} = {:.4}, out of range",
+            vol.0
+        );
+    }
+
+    // Interpolated tenor
+    let vol_mid = surface.black_vol(0.5, 100.0)?;
+    assert!(
+        vol_mid.0 > 0.10 && vol_mid.0 < 0.50,
+        "Interpolated ATM vol = {:.4}, out of range",
+        vol_mid.0
+    );
+
+    // Vol/variance consistency
+    for t in [0.25, 0.5, 1.0] {
+        for k in [80.0, 100.0, 120.0] {
+            let vol = surface.black_vol(t, k)?;
+            let var = surface.black_variance(t, k)?;
+            assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
+        }
+    }
+
+    // smile_at returns a queryable section
+    let smile = surface.smile_at(0.5)?;
+    assert!(smile.vol(100.0)?.0 > 0.0);
+
+    // No NaN across grid
+    for t in [0.1, 0.25, 0.5, 0.75, 1.0, 1.5] {
+        for &k in &strikes_3m {
+            let vol = surface.black_vol(t, k)?;
+            assert!(
+                vol.0.is_finite() && vol.0 > 0.0,
+                "vol({t}, {k}) = {:.6} is invalid",
+                vol.0
+            );
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Builder validation integration tests
 // ---------------------------------------------------------------------------
 

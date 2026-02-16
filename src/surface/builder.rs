@@ -487,6 +487,50 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
+    // --- Gap #6: CubicSpline with NaN and duplicate strikes ---
+
+    #[test]
+    fn cubic_spline_with_nan_strike_returns_error() {
+        let strikes = vec![90.0, f64::NAN, 110.0];
+        let vols = vec![0.22, 0.20, 0.22];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline)
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        // SplineSmile::new rejects NaN strikes
+        assert!(result.is_err(), "NaN strike should cause build to fail");
+    }
+
+    #[test]
+    fn cubic_spline_with_duplicate_strikes_returns_error() {
+        let strikes = vec![90.0, 100.0, 100.0, 110.0];
+        let vols = vec![0.22, 0.20, 0.20, 0.22];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline)
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        // SplineSmile::new rejects non-strictly-increasing strikes
+        assert!(result.is_err(), "duplicate strikes should cause build to fail");
+    }
+
+    #[test]
+    fn cubic_spline_with_unsorted_strikes_succeeds() {
+        // Builder sorts strikes internally for CubicSpline path
+        let strikes = vec![110.0, 90.0, 100.0];
+        let vols = vec![0.24, 0.24, 0.20];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline)
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        assert!(result.is_ok(), "unsorted strikes should be sorted by builder");
+    }
+
     // --- Default trait ---
 
     #[test]
