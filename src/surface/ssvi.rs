@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{self, VolSurfError};
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
-use crate::surface::arbitrage::SurfaceDiagnostics;
+use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::surface::VolSurface;
 use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
@@ -234,7 +234,6 @@ impl SsviSurface {
     /// where `φ(θ) = η / θ^γ`.
     ///
     /// This is the hot path — no allocations, no branching.
-    #[allow(dead_code)] // Used by T07 (SsviSlice) and T08 (VolSurface impl)
     pub(crate) fn total_variance_at(&self, theta: f64, k: f64) -> f64 {
         let phi = self.eta / theta.powf(self.gamma);
         let phi_k = phi * k;
@@ -244,7 +243,7 @@ impl SsviSurface {
     }
 
     /// Evaluate the power-law mixing function φ(θ) = η / θ^γ.
-    #[allow(dead_code)] // Used by T07 (SsviSlice)
+    #[allow(dead_code)] // Used by tests and potentially future callers
     pub(crate) fn phi(&self, theta: f64) -> f64 {
         self.eta / theta.powf(self.gamma)
     }
@@ -256,7 +255,6 @@ impl SsviSurface {
     ///   linear interpolation for forward price.
     /// - **Before first tenor**: flat vol extrapolation `θ(T) = θ₀ · T/T₀`.
     /// - **After last tenor**: flat vol extrapolation `θ(T) = θₙ · T/Tₙ`.
-    #[allow(dead_code)] // Used by T08 (VolSurface impl)
     pub(crate) fn theta_and_forward_at(&self, expiry: f64) -> (f64, f64) {
         let n = self.tenors.len();
 
@@ -304,33 +302,90 @@ impl SsviSurface {
     }
 }
 
+/// Number of strikes for calendar arbitrage checks.
+const CALENDAR_CHECK_GRID_SIZE: usize = 41;
+
 impl VolSurface for SsviSurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
-        let _ = (expiry, strike);
-        Err(VolSurfError::NumericalError {
-            message: "SSVI VolSurface not yet implemented (T08)".to_string(),
-        })
+        validate_positive(expiry, "expiry")?;
+        let var = self.black_variance(expiry, strike)?;
+        Ok(Vol((var.0 / expiry).sqrt()))
     }
 
     fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
-        let _ = (expiry, strike);
-        Err(VolSurfError::NumericalError {
-            message: "SSVI VolSurface not yet implemented (T08)".to_string(),
-        })
+        validate_positive(expiry, "expiry")?;
+        validate_positive(strike, "strike")?;
+        let (theta, forward) = self.theta_and_forward_at(expiry);
+        let k = (strike / forward).ln();
+        let w = self.total_variance_at(theta, k);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("SSVI total variance is negative: w({k}) = {w}"),
+            });
+        }
+        Ok(Variance(w))
     }
 
     fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
-        let _ = expiry;
-        Err(VolSurfError::NumericalError {
-            message: "SSVI VolSurface not yet implemented (T08)".to_string(),
-        })
+        validate_positive(expiry, "expiry")?;
+        let (theta, forward) = self.theta_and_forward_at(expiry);
+        let slice = SsviSlice::new(forward, expiry, self.rho, self.eta, self.gamma, theta)?;
+        Ok(Box::new(slice))
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        Err(VolSurfError::NumericalError {
-            message: "SSVI VolSurface not yet implemented (T08)".to_string(),
+        // Per-tenor butterfly reports
+        let mut smile_reports = Vec::with_capacity(self.tenors.len());
+        for (i, &tenor) in self.tenors.iter().enumerate() {
+            let slice = SsviSlice::new(
+                self.forwards[i], tenor,
+                self.rho, self.eta, self.gamma, self.thetas[i],
+            )?;
+            smile_reports.push(slice.is_arbitrage_free()?);
+        }
+
+        // Calendar spread checks between consecutive tenors
+        let mut calendar_violations = Vec::new();
+        for i in 0..self.tenors.len().saturating_sub(1) {
+            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
+            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
+
+            for &strike in &grid {
+                let k_short = (strike / self.forwards[i]).ln();
+                let k_long = (strike / self.forwards[i + 1]).ln();
+                let w_short = self.total_variance_at(self.thetas[i], k_short);
+                let w_long = self.total_variance_at(self.thetas[i + 1], k_long);
+                if w_long < w_short - 1e-10 {
+                    calendar_violations.push(CalendarViolation {
+                        strike,
+                        tenor_short: self.tenors[i],
+                        tenor_long: self.tenors[i + 1],
+                        variance_short: w_short,
+                        variance_long: w_long,
+                    });
+                }
+            }
+        }
+
+        let is_free =
+            smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+
+        Ok(SurfaceDiagnostics {
+            smile_reports,
+            calendar_violations,
+            is_free,
         })
     }
+}
+
+/// Generate a log-spaced strike grid from `0.5·F` to `2.0·F`.
+fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
+    let ln_lo = (0.5_f64).ln();
+    let ln_hi = (2.0_f64).ln();
+    let step = (ln_hi - ln_lo) / (n - 1) as f64;
+    (0..n)
+        .map(|i| forward * (ln_lo + step * i as f64).exp())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -880,17 +935,6 @@ mod tests {
         assert_send_sync::<SsviSurface>();
     }
 
-    // ========== VolSurface stubs still return errors ==========
-
-    #[test]
-    fn volsurface_stubs_return_error() {
-        let s = equity_surface();
-        assert!(s.black_vol(1.0, 100.0).is_err());
-        assert!(s.black_variance(1.0, 100.0).is_err());
-        assert!(s.smile_at(1.0).is_err());
-        assert!(s.diagnostics().is_err());
-    }
-
     #[test]
     fn calibrate_stub_returns_error() {
         let result = SsviSurface::calibrate(&[], &[], &[]);
@@ -905,6 +949,148 @@ mod tests {
             1.5, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04],
         ).unwrap_err();
         assert!(matches!(err, VolSurfError::InvalidInput { .. }));
+    }
+
+    // ========== VolSurface trait impl (T08) ==========
+
+    #[test]
+    fn black_vol_at_stored_tenor() {
+        let s = equity_surface();
+        // At T=1.0, K=100 (ATM), theta=0.16.
+        // vol = sqrt(theta / T) = sqrt(0.16) = 0.4
+        let vol = s.black_vol(1.0, 100.0).unwrap();
+        assert_abs_diff_eq!(vol.0, 0.4, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn black_variance_at_stored_tenor() {
+        let s = equity_surface();
+        // At T=1.0, K=100 (ATM), variance = theta = 0.16
+        let var = s.black_variance(1.0, 100.0).unwrap();
+        assert_abs_diff_eq!(var.0, 0.16, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn black_vol_variance_consistency() {
+        // vol^2 * T == variance at multiple query points.
+        let s = equity_surface();
+        for &expiry in &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0] {
+            for &strike in &[80.0, 100.0, 120.0] {
+                let vol = s.black_vol(expiry, strike).unwrap();
+                let var = s.black_variance(expiry, strike).unwrap();
+                assert_abs_diff_eq!(
+                    vol.0 * vol.0 * expiry, var.0,
+                    epsilon = 1e-12
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn black_vol_between_tenors() {
+        let s = equity_surface();
+        // At T=0.75 (between T=0.5 and T=1.0), the interpolated theta = 0.12.
+        // ATM vol = sqrt(0.12 / 0.75) = sqrt(0.16) = 0.4
+        let vol = s.black_vol(0.75, 100.0).unwrap();
+        assert_abs_diff_eq!(vol.0, 0.4, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn black_vol_before_first_tenor() {
+        let s = equity_surface();
+        // T=0.1 < T_0=0.25. Flat vol: theta(0.1) = 0.04 * 0.1/0.25 = 0.016.
+        // ATM vol = sqrt(0.016 / 0.1) = sqrt(0.16) = 0.4
+        let vol = s.black_vol(0.1, 100.0).unwrap();
+        assert_abs_diff_eq!(vol.0, 0.4, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn black_vol_after_last_tenor() {
+        let s = equity_surface();
+        // T=3.0 > T_n=2.0. Flat vol: theta(3.0) = 0.32 * 3.0/2.0 = 0.48.
+        // ATM vol = sqrt(0.48 / 3.0) = sqrt(0.16) = 0.4
+        let vol = s.black_vol(3.0, 100.0).unwrap();
+        assert_abs_diff_eq!(vol.0, 0.4, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn black_vol_rejects_invalid_inputs() {
+        let s = equity_surface();
+        assert!(s.black_vol(0.0, 100.0).is_err());
+        assert!(s.black_vol(-1.0, 100.0).is_err());
+        assert!(s.black_vol(1.0, 0.0).is_err());
+        assert!(s.black_vol(1.0, -100.0).is_err());
+    }
+
+    #[test]
+    fn smile_at_returns_working_section() {
+        let s = equity_surface();
+        let smile = s.smile_at(1.0).unwrap();
+        assert_eq!(smile.forward(), 100.0);
+        assert_eq!(smile.expiry(), 1.0);
+        // ATM vol via smile should match surface query
+        let smile_vol = smile.vol(100.0).unwrap();
+        let surface_vol = s.black_vol(1.0, 100.0).unwrap();
+        assert_abs_diff_eq!(smile_vol.0, surface_vol.0, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn smile_at_interpolated_tenor() {
+        let s = equity_surface();
+        let smile = s.smile_at(0.75).unwrap();
+        // ATM variance from smile should match surface
+        let smile_var = smile.variance(100.0).unwrap();
+        let surface_var = s.black_variance(0.75, 100.0).unwrap();
+        assert_abs_diff_eq!(smile_var.0, surface_var.0, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn smile_at_agrees_with_surface_otm() {
+        // OTM strikes via smile should match direct surface query.
+        let s = equity_surface();
+        let smile = s.smile_at(1.0).unwrap();
+        for &strike in &[80.0, 90.0, 110.0, 120.0] {
+            let smile_vol = smile.vol(strike).unwrap();
+            let surface_vol = s.black_vol(1.0, strike).unwrap();
+            assert_abs_diff_eq!(smile_vol.0, surface_vol.0, epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn diagnostics_clean_for_conservative_params() {
+        // eta * (1 + |rho|) = 0.5 * 1.3 = 0.65 < 2, and thetas strictly increasing.
+        let s = equity_surface();
+        let diag = s.diagnostics().unwrap();
+        assert!(diag.is_free, "conservative SSVI should be arb-free");
+        assert!(diag.calendar_violations.is_empty());
+        assert_eq!(diag.smile_reports.len(), 4);
+        assert!(diag.smile_reports.iter().all(|r| r.is_free));
+    }
+
+    #[test]
+    fn diagnostics_detects_butterfly_violations() {
+        // Extreme params: eta * (1 + |rho|) = 3 * 1.95 = 5.85 >> 2.
+        let s = SsviSurface::new(
+            -0.95, 3.0, 0.5,
+            vec![0.5, 1.0],
+            vec![100.0, 100.0],
+            vec![0.08, 0.16],
+        ).unwrap();
+        let diag = s.diagnostics().unwrap();
+        assert!(!diag.is_free);
+        // At least one tenor should have butterfly violations
+        assert!(diag.smile_reports.iter().any(|r| !r.is_free));
+    }
+
+    #[test]
+    fn diagnostics_single_tenor_no_calendar() {
+        let s = SsviSurface::new(
+            -0.3, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.16],
+        ).unwrap();
+        let diag = s.diagnostics().unwrap();
+        assert!(diag.calendar_violations.is_empty());
+        assert_eq!(diag.smile_reports.len(), 1);
     }
 
     // ================================================================
