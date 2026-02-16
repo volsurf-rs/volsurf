@@ -275,7 +275,7 @@ impl SsviSurface {
 
     /// Analytical calendar arbitrage check for this SSVI surface.
     ///
-    /// Scans `∂w/∂θ` (see [`dw_dtheta`](Self::dw_dtheta)) on a grid of
+    /// Scans `∂w/∂θ` (see `dw_dtheta`) on a grid of
     /// `(θ, k)` points at each consecutive tenor pair. Returns calendar
     /// violations where the derivative is negative, indicating total
     /// variance would decrease with increasing ATM variance.

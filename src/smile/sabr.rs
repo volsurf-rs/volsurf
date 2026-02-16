@@ -22,7 +22,44 @@ use crate::smile::SmileSection;
 use crate::types::Vol;
 use crate::validate::{validate_non_negative, validate_positive};
 
-/// SABR volatility smile with 4 parameters.
+/// SABR volatility smile (Hagan et al., 2002).
+///
+/// Models the forward price as a CEV process with stochastic volatility,
+/// parameterized by `(α, β, ρ, ν)`. The Hagan closed-form approximation
+/// maps these parameters to Black implied volatility:
+///
+/// ```text
+/// σ_B(K) ≈ (α / denom) · (z / x(z)) · [1 + correction · T]
+/// ```
+///
+/// where `z = (ν/α) · (FK)^((1−β)/2) · ln(F/K)` and `x(z)` involves
+/// the inverse sinh function.
+///
+/// # Parameters
+///
+/// | Parameter | Range | Meaning |
+/// |-----------|-------|---------|
+/// | `α` | `> 0` | ATM vol scale |
+/// | `β` | `[0, 1]` | CEV exponent (backbone shape) |
+/// | `ρ` | `(−1, 1)` | Spot-vol correlation (skew) |
+/// | `ν` | `≥ 0` | Vol-of-vol (smile curvature) |
+///
+/// Common choices: `β = 0.5` (equity), `β = 0` (normal), `β = 1` (lognormal).
+///
+/// # References
+///
+/// - Hagan, P. et al., "Managing Smile Risk", Wilmott Magazine, Jan 2002
+///
+/// # Examples
+///
+/// ```
+/// use volsurf::smile::{SabrSmile, SmileSection};
+///
+/// let smile = SabrSmile::new(100.0, 1.0, 0.3, 1.0, -0.3, 0.4)?;
+/// let vol = smile.vol(100.0)?; // ATM vol
+/// assert!(vol.0 > 0.0);
+/// # Ok::<(), volsurf::VolSurfError>(())
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SabrSmile {
     forward: f64,
@@ -40,8 +77,18 @@ pub struct SabrSmile {
 impl SabrSmile {
     /// Create a SABR smile from calibrated parameters.
     ///
+    /// # Arguments
+    ///
+    /// * `forward` — Forward price, must be positive
+    /// * `expiry` — Time to expiry in years, must be positive
+    /// * `alpha` — ATM vol scale, must be positive
+    /// * `beta` — CEV exponent, must be in \[0, 1\]
+    /// * `rho` — Spot-vol correlation, must be in (−1, 1)
+    /// * `nu` — Vol-of-vol, must be non-negative
+    ///
     /// # Errors
-    /// Returns [`VolSurfError::InvalidInput`] if parameters are out of range.
+    ///
+    /// Returns [`VolSurfError::InvalidInput`] if any parameter is out of range.
     pub fn new(
         forward: f64,
         expiry: f64,
