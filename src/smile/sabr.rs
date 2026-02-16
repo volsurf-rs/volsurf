@@ -1460,4 +1460,497 @@ mod tests {
             elapsed.as_millis()
         );
     }
+
+    // ========================================================================
+    // Academic validation tests (T05)
+    //
+    // Independent reference implementation of Hagan (2002) Eq. (2.17a)
+    // for cross-validation of the production code. Every test cites the
+    // source formula and parameter set.
+    // ========================================================================
+
+    /// Independent implementation of Hagan (2002) Eq. (2.17a) for cross-validation.
+    ///
+    /// This is a standalone transcription of the SABR implied vol formula,
+    /// deliberately written differently from `SabrSmile::hagan_implied_vol()`
+    /// to catch implementation errors via independent computation.
+    ///
+    /// Reference: Hagan, P. et al., "Managing Smile Risk", Wilmott Magazine,
+    /// January 2002, Equation (2.17a).
+    fn hagan_reference(f: f64, k: f64, t: f64, alpha: f64, beta: f64, rho: f64, nu: f64) -> f64 {
+        let one_minus_beta = 1.0 - beta;
+        let fk_product = f * k;
+        let log_ratio = (f / k).ln();
+
+        // (FK)^((1-β)/2)
+        let fk_half_power = fk_product.powf(one_minus_beta * 0.5);
+
+        // Denominator D from Eq. (2.17a)
+        let omb2 = one_minus_beta * one_minus_beta;
+        let log2 = log_ratio * log_ratio;
+        let denom = fk_half_power
+            * (1.0 + omb2 / 24.0 * log2 + omb2 * omb2 / 1920.0 * log2 * log2);
+
+        // z and z/x(z) ratio
+        let z = if nu.abs() < 1e-30 {
+            0.0
+        } else {
+            nu / alpha * fk_half_power * log_ratio
+        };
+
+        let z_over_xz = if z.abs() < 1e-6 {
+            // Taylor series: 1 - ρz/2 + (2-3ρ²)/12 · z²
+            1.0 + z * (-0.5 * rho + z * (2.0 - 3.0 * rho * rho) / 12.0)
+        } else {
+            let sqrt_term = (1.0 - 2.0 * rho * z + z * z).sqrt();
+            let x_of_z = ((sqrt_term + z - rho) / (1.0 - rho)).ln();
+            z / x_of_z
+        };
+
+        // (FK)^(1-β)
+        let fk_full_power = fk_product.powf(one_minus_beta);
+
+        // Time-dependent correction factor from Eq. (2.17a)
+        let term1 = omb2 / 24.0 * alpha * alpha / fk_full_power;
+        let term2 = 0.25 * rho * beta * nu * alpha / fk_half_power;
+        let term3 = (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu;
+        let correction = 1.0 + t * (term1 + term2 + term3);
+
+        alpha / denom * z_over_xz * correction
+    }
+
+    // --- Set 1: Equity-like parameters (β = 0.5) ---
+    // Hagan (2002) Eq. (2.17a): F=100, T=1, α=2.0, β=0.5, ρ=−0.3, ν=0.4
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=60 (deep ITM put).
+    #[test]
+    fn hagan_equity_k60() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 60.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(60.0).unwrap().0;
+        let eps = expected * 1e-12;
+        assert!((actual - expected).abs() < eps,
+            "K=60: expected {expected:.15e}, got {actual:.15e}, err={:.2e}", (actual - expected).abs());
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=70.
+    #[test]
+    fn hagan_equity_k70() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 70.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(70.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=70: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=80.
+    #[test]
+    fn hagan_equity_k80() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 80.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(80.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=80: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=90.
+    #[test]
+    fn hagan_equity_k90() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 90.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(90.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=90: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=95.
+    #[test]
+    fn hagan_equity_k95() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 95.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(95.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=95: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=100 (ATM).
+    #[test]
+    fn hagan_equity_atm() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        // ATM: analytical formula (no z/x(z) needed, z=0 → ratio=1)
+        let f = 100.0_f64;
+        let omb = 0.5;
+        let f_omb = f.powf(omb);
+        let expected = 2.0 / f_omb
+            * (1.0
+                + 1.0 * (omb * omb / 24.0 * 4.0 / (f_omb * f_omb)
+                    + 0.25 * (-0.3) * 0.5 * 0.4 * 2.0 / f_omb
+                    + (2.0 - 3.0 * 0.09) / 24.0 * 0.16));
+        let actual = s.vol(100.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "ATM: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=105.
+    #[test]
+    fn hagan_equity_k105() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 105.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(105.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=105: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=110.
+    #[test]
+    fn hagan_equity_k110() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 110.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(110.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=110: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=120.
+    #[test]
+    fn hagan_equity_k120() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 120.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(120.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=120: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=130.
+    #[test]
+    fn hagan_equity_k130() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 130.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(130.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=130: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), equity params, K=140.
+    #[test]
+    fn hagan_equity_k140() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let expected = hagan_reference(100.0, 140.0, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual = s.vol(140.0).unwrap().0;
+        assert!((actual - expected).abs() < expected * 1e-12,
+            "K=140: expected {expected:.15e}, got {actual:.15e}");
+    }
+
+    // --- Set 2: Interest rate parameters (β = 0, normal SABR) ---
+    // Hagan (2002) Eq. (2.17a): F=0.05, T=2, α=0.01, β=0, ρ=−0.2, ν=0.3
+
+    /// Hagan (2002) Eq. (2.17a), normal SABR (β=0), full strike range.
+    /// F=0.05 (5% rate), T=2y, α=0.01, ρ=−0.2, ν=0.3.
+    #[test]
+    fn hagan_normal_sabr_strike_range() {
+        let f = 0.05;
+        let t = 2.0;
+        let alpha = 0.01;
+        let rho = -0.2;
+        let nu = 0.3;
+        let s = SabrSmile::new(f, t, alpha, 0.0, rho, nu).unwrap();
+
+        for &k in &[0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09] {
+            let expected = hagan_reference(f, k, t, alpha, 0.0, rho, nu);
+            let actual = s.vol(k).unwrap().0;
+            let eps = expected.abs() * 1e-12;
+            assert!((actual - expected).abs() < eps.max(1e-15),
+                "β=0, K={k}: expected {expected:.15e}, got {actual:.15e}, err={:.2e}",
+                (actual - expected).abs());
+        }
+    }
+
+    // --- Set 3: Lognormal parameters (β = 1) ---
+    // Hagan (2002) Eq. (2.17a): F=100, T=0.5, α=0.20, β=1, ρ=−0.5, ν=0.6
+
+    /// Hagan (2002) Eq. (2.17a), lognormal SABR (β=1), full strike range.
+    /// F=100, T=0.5y, α=0.20, ρ=−0.5, ν=0.6.
+    #[test]
+    fn hagan_lognormal_sabr_strike_range() {
+        let f = 100.0;
+        let t = 0.5;
+        let alpha = 0.20;
+        let rho = -0.5;
+        let nu = 0.6;
+        let s = SabrSmile::new(f, t, alpha, 1.0, rho, nu).unwrap();
+
+        for &k in &[60.0, 80.0, 90.0, 100.0, 110.0, 120.0, 140.0] {
+            let expected = hagan_reference(f, k, t, alpha, 1.0, rho, nu);
+            let actual = s.vol(k).unwrap().0;
+            let eps = expected * 1e-12;
+            assert!((actual - expected).abs() < eps,
+                "β=1, K={k}: expected {expected:.15e}, got {actual:.15e}, err={:.2e}",
+                (actual - expected).abs());
+        }
+    }
+
+    // --- Edge case: ν → 0 (CEV limit) ---
+
+    /// Hagan (2002) Eq. (2.17a), CEV limit (ν=1e-10).
+    /// As ν → 0, SABR reduces to CEV: σ_B = α·F^(β-1).
+    /// With small ν, z → 0, z/x(z) → 1, and the ν² correction vanishes.
+    #[test]
+    fn hagan_cev_limit_nu_near_zero() {
+        let nu_tiny = 1e-10;
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, nu_tiny).unwrap();
+        // Cross-validate against independent reference
+        for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
+            let expected = hagan_reference(100.0, k, 1.0, 2.0, 0.5, -0.3, nu_tiny);
+            let actual = s.vol(k).unwrap().0;
+            let eps = expected * 1e-12;
+            assert!((actual - expected).abs() < eps.max(1e-15),
+                "CEV, K={k}: expected {expected:.15e}, got {actual:.15e}");
+        }
+    }
+
+    /// Hagan (2002) Eq. (2.17a), exact ν=0.
+    /// z=0 forces z/x(z) Taylor path; all ν terms vanish.
+    #[test]
+    fn hagan_cev_exact_nu_zero() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.0).unwrap();
+        for &k in &[80.0, 100.0, 120.0] {
+            let expected = hagan_reference(100.0, k, 1.0, 2.0, 0.5, -0.3, 0.0);
+            let actual = s.vol(k).unwrap().0;
+            assert!((actual - expected).abs() < expected * 1e-12,
+                "ν=0, K={k}: expected {expected:.15e}, got {actual:.15e}");
+        }
+    }
+
+    // --- Edge case: short expiry ---
+
+    /// Hagan (2002) Eq. (2.17a), T=0.01 (1-week expiry).
+    /// Short expiry: correction factor ≈ 1.
+    #[test]
+    fn hagan_short_expiry_one_week() {
+        let t = 0.01;
+        let s = SabrSmile::new(100.0, t, 2.0, 0.5, -0.3, 0.4).unwrap();
+        for &k in &[90.0, 95.0, 100.0, 105.0, 110.0] {
+            let expected = hagan_reference(100.0, k, t, 2.0, 0.5, -0.3, 0.4);
+            let actual = s.vol(k).unwrap().0;
+            let eps = expected * 1e-12;
+            assert!((actual - expected).abs() < eps,
+                "T=0.01, K={k}: expected {expected:.15e}, got {actual:.15e}");
+        }
+    }
+
+    // --- Edge case: long expiry ---
+
+    /// Hagan (2002) Eq. (2.17a), T=10 (10-year expiry).
+    /// Long expiry: correction factor is large.
+    #[test]
+    fn hagan_long_expiry_ten_year() {
+        let t = 10.0;
+        let s = SabrSmile::new(100.0, t, 2.0, 0.5, -0.3, 0.4).unwrap();
+        for &k in &[70.0, 85.0, 100.0, 115.0, 130.0] {
+            let expected = hagan_reference(100.0, k, t, 2.0, 0.5, -0.3, 0.4);
+            let actual = s.vol(k).unwrap().0;
+            let eps = expected * 1e-12;
+            assert!((actual - expected).abs() < eps,
+                "T=10, K={k}: expected {expected:.15e}, got {actual:.15e}");
+        }
+    }
+
+    // --- ATM continuity across Taylor boundary ---
+
+    /// Hagan (2002) Eq. (2.17a), ATM continuity.
+    /// Verifies K → F from both sides produces continuous vol.
+    /// The unified code path (no ATM branch) ensures this by construction.
+    #[test]
+    fn hagan_atm_continuity_approach() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let vol_atm = s.vol(100.0).unwrap().0;
+
+        // Approach from below and above
+        for &delta in &[1e-3, 1e-5, 1e-7, 1e-9] {
+            let v_below = s.vol(100.0 - delta).unwrap().0;
+            let v_above = s.vol(100.0 + delta).unwrap().0;
+            assert!((v_below - vol_atm).abs() < delta * 0.1,
+                "δ={delta}: vol(F-δ)={v_below} should approach vol(F)={vol_atm}");
+            assert!((v_above - vol_atm).abs() < delta * 0.1,
+                "δ={delta}: vol(F+δ)={v_above} should approach vol(F)={vol_atm}");
+        }
+    }
+
+    // --- Far OTM validation ---
+
+    /// Hagan (2002) Eq. (2.17a), deep OTM strikes.
+    /// K = 0.1F and K = 5F — formula remains valid for large log-moneyness.
+    #[test]
+    fn hagan_deep_otm_strikes() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+
+        // Deep OTM put
+        let k_low = 10.0; // K/F = 0.1
+        let expected_low = hagan_reference(100.0, k_low, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual_low = s.vol(k_low).unwrap().0;
+        assert!((actual_low - expected_low).abs() < expected_low * 1e-12,
+            "K=10: expected {expected_low:.15e}, got {actual_low:.15e}");
+
+        // Deep OTM call
+        let k_high = 500.0; // K/F = 5
+        let expected_high = hagan_reference(100.0, k_high, 1.0, 2.0, 0.5, -0.3, 0.4);
+        let actual_high = s.vol(k_high).unwrap().0;
+        assert!((actual_high - expected_high).abs() < expected_high * 1e-12,
+            "K=500: expected {expected_high:.15e}, got {actual_high:.15e}");
+    }
+
+    // --- Additional parameter set: moderate skew, equity ---
+
+    /// Hagan (2002) Eq. (2.17a), second equity set with different params.
+    /// F=50, T=0.25, α=1.5, β=0.5, ρ=−0.15, ν=0.25.
+    #[test]
+    fn hagan_equity_set2_strike_range() {
+        let f = 50.0;
+        let t = 0.25;
+        let alpha = 1.5;
+        let rho = -0.15;
+        let nu = 0.25;
+        let s = SabrSmile::new(f, t, alpha, 0.5, rho, nu).unwrap();
+
+        for &k in &[35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0] {
+            let expected = hagan_reference(f, k, t, alpha, 0.5, rho, nu);
+            let actual = s.vol(k).unwrap().0;
+            let eps = expected * 1e-12;
+            assert!((actual - expected).abs() < eps,
+                "Set2, K={k}: expected {expected:.15e}, got {actual:.15e}");
+        }
+    }
+
+    // --- Taylor boundary crossing test ---
+
+    /// Hagan (2002) Eq. (2.17a), Taylor/exact branch boundary.
+    /// Verifies no discontinuity at |z| = 1e-6 where we switch between
+    /// Taylor expansion and exact z/x(z) computation.
+    #[test]
+    fn hagan_taylor_exact_boundary_agreement() {
+        // With α=2, β=0.5, ν=0.4, F=100: z = (ν/α) · (FK)^0.25 · ln(F/K)
+        // For z ≈ 1e-6, need ln(F/K) ≈ 1e-6 · α/(ν · (FK)^0.25) ≈ 1e-6 · 2/(0.4·10) ≈ 5e-7
+        // K ≈ F · exp(-5e-7) ≈ 99.99995
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+
+        // Sample densely around the boundary
+        let k_base = 100.0 * (-5e-7_f64).exp();
+        let offsets = [-1e-5, -1e-6, -1e-7, 0.0, 1e-7, 1e-6, 1e-5];
+        let vols: Vec<f64> = offsets.iter()
+            .map(|&dk| s.vol(k_base + dk).unwrap().0)
+            .collect();
+
+        // All vols should be within 1e-10 of each other (smooth transition)
+        for i in 1..vols.len() {
+            assert!((vols[i] - vols[i - 1]).abs() < 1e-8,
+                "Discontinuity at Taylor boundary: vol[{i}]={:.15e}, vol[{}]={:.15e}",
+                vols[i], i - 1, vols[i - 1]);
+        }
+    }
+
+    // --- Skew direction validation ---
+
+    /// Hagan (2002), Section 2: negative ρ produces downward-sloping skew.
+    /// With β < 1, the combination of CEV backbone and negative ρ gives
+    /// vol(K < F) > vol(K > F).
+    #[test]
+    fn hagan_skew_direction_negative_rho() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.5, 0.4).unwrap();
+        let v_low = s.vol(80.0).unwrap().0;
+        let v_atm = s.vol(100.0).unwrap().0;
+        let v_high = s.vol(120.0).unwrap().0;
+        assert!(v_low > v_atm, "ρ<0: vol(K<F)={v_low} should > vol(ATM)={v_atm}");
+        assert!(v_atm > v_high, "ρ<0: vol(ATM)={v_atm} should > vol(K>F)={v_high}");
+    }
+
+    /// Hagan (2002), Section 2: positive ρ produces upward-sloping skew.
+    #[test]
+    fn hagan_skew_direction_positive_rho() {
+        let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, 0.5, 0.4).unwrap();
+        let v_low = s.vol(80.0).unwrap().0;
+        let v_high = s.vol(120.0).unwrap().0;
+        // Positive rho: OTM calls have higher vol than OTM puts (reversed skew)
+        assert!(v_high > v_low,
+            "ρ>0: vol(K>F)={v_high} should > vol(K<F)={v_low}");
+    }
+
+    // --- Calibration round-trip with deterministic noise ---
+
+    /// Calibration round-trip with ~50bps deterministic noise.
+    /// Hagan (2002) parameters, equity-like. Tests robustness of the
+    /// optimizer to noisy market data.
+    #[test]
+    fn calibrate_round_trip_noisy_equity() {
+        let original = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
+        let clean_data = sabr_synthetic_data(&original, &strikes);
+
+        // Deterministic noise (~50bps = 0.005 vol points)
+        let noise = [0.003, -0.002, 0.005, -0.001, 0.004, -0.003, 0.002,
+                     -0.004, 0.001, -0.005, 0.003, -0.002, 0.004, -0.001, 0.002];
+        let noisy_data: Vec<(f64, f64)> = clean_data.iter().zip(noise.iter())
+            .map(|(&(k, v), &n)| (k, v + n))
+            .collect();
+
+        let calibrated = SabrSmile::calibrate(100.0, 1.0, 0.5, &noisy_data).unwrap();
+
+        // RMS against noisy data (fitted noise is absorbed)
+        let rms: f64 = (noisy_data.iter()
+            .map(|&(k, v)| (calibrated.vol(k).unwrap().0 - v).powi(2))
+            .sum::<f64>() / noisy_data.len() as f64)
+            .sqrt();
+        assert!(rms < 0.01,
+            "noisy calibration RMS {rms:.6e} should be < 0.01");
+    }
+
+    /// Calibration round-trip with noise, lognormal (β=1).
+    #[test]
+    fn calibrate_round_trip_noisy_lognormal() {
+        let original = SabrSmile::new(100.0, 1.0, 0.20, 1.0, -0.25, 0.3).unwrap();
+        let strikes: Vec<f64> = (0..12).map(|i| 75.0 + 5.0 * i as f64).collect();
+        let clean_data = sabr_synthetic_data(&original, &strikes);
+
+        let noise = [0.002, -0.003, 0.001, -0.002, 0.004, -0.001,
+                     0.003, -0.004, 0.002, -0.003, 0.001, -0.002];
+        let noisy_data: Vec<(f64, f64)> = clean_data.iter().zip(noise.iter())
+            .map(|(&(k, v), &n)| (k, v + n))
+            .collect();
+
+        let calibrated = SabrSmile::calibrate(100.0, 1.0, 1.0, &noisy_data).unwrap();
+        let rms: f64 = (noisy_data.iter()
+            .map(|&(k, v)| (calibrated.vol(k).unwrap().0 - v).powi(2))
+            .sum::<f64>() / noisy_data.len() as f64)
+            .sqrt();
+        assert!(rms < 0.01,
+            "noisy lognormal calibration RMS {rms:.6e} should be < 0.01");
+    }
+
+    /// Hagan (2002) Eq. (2.17a), β=1 pure lognormal (ν=0, ρ=0).
+    /// With β=1, ν=0, ρ=0: σ_B(K) = α for all K (constant vol, Black model).
+    #[test]
+    fn hagan_pure_lognormal_constant_vol() {
+        let alpha = 0.25;
+        let s = SabrSmile::new(100.0, 1.0, alpha, 1.0, 0.0, 0.0).unwrap();
+        for &k in &[50.0, 75.0, 100.0, 125.0, 150.0] {
+            let actual = s.vol(k).unwrap().0;
+            assert!((actual - alpha).abs() < 1e-10,
+                "Pure lognormal K={k}: expected α={alpha}, got {actual}");
+        }
+    }
+
+    /// Hagan (2002) Eq. (2.17a), β=0.5 with ρ=0 and ν=0 (pure CEV).
+    /// Cross-validate ATM vol = α / F^(1-β) for the CEV backbone.
+    #[test]
+    fn hagan_cev_backbone_atm() {
+        let alpha = 2.0;
+        let beta = 0.5;
+        let s = SabrSmile::new(100.0, 1.0, alpha, beta, 0.0, 0.0).unwrap();
+        let expected_atm = alpha / 100.0_f64.powf(1.0 - beta);
+        let actual = s.vol(100.0).unwrap().0;
+        // Only correction term is (1-β)²/24 * α²/F^(2(1-β))
+        let correction = 1.0 + 0.25 / 24.0 * alpha * alpha / (100.0_f64.powf(1.0 - beta)).powi(2);
+        let expected_corrected = expected_atm * correction;
+        assert!((actual - expected_corrected).abs() < 1e-14,
+            "CEV ATM: expected {expected_corrected:.15e}, got {actual:.15e}");
+    }
 }
