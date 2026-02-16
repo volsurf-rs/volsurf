@@ -4,8 +4,8 @@
 //! testing fixed examples. They help catch edge cases and ensure robustness.
 
 use proptest::prelude::*;
-use volsurf::smile::{SmileSection, SplineSmile, SviSmile};
-use volsurf::surface::{PiecewiseSurface, VolSurface};
+use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
+use volsurf::surface::{PiecewiseSurface, SsviSurface, SurfaceBuilder, VolSurface};
 
 // --- Property Test 1: SVI vol non-negativity ---
 
@@ -161,6 +161,264 @@ proptest! {
                 vol_from_surface.0,
                 vol_from_smile.0,
                 strike
+            );
+        }
+    }
+}
+
+// --- Property Test 5: SABR vol non-negativity ---
+
+proptest! {
+    /// SABR smile should always return non-negative volatilities for valid
+    /// parameters and positive strikes.
+    ///
+    /// Generates random valid SABR parameters and verifies that vol(K) >= 0
+    /// for strikes in [80, 120]. SABR vol() can return Err in deep wings
+    /// (Hagan approximation breakdown), so we skip errors gracefully.
+    #[test]
+    fn sabr_vol_is_non_negative(
+        alpha in 0.05_f64..0.5,
+        beta in 0.0_f64..1.0,
+        rho in -0.9_f64..0.9,
+        nu in 0.01_f64..1.0,
+    ) {
+        let forward = 100.0;
+        let expiry = 0.25;
+
+        let sabr_result = SabrSmile::new(forward, expiry, alpha, beta, rho, nu);
+        prop_assume!(sabr_result.is_ok());
+
+        let sabr = sabr_result.unwrap();
+
+        for strike in 80..=120 {
+            let k = strike as f64;
+            if let Ok(v) = sabr.vol(k) {
+                prop_assert!(
+                    v.0 >= 0.0,
+                    "SABR vol should be non-negative, got {} at strike {}",
+                    v.0,
+                    k
+                );
+            }
+            // If vol() returns Err, that's acceptable (Hagan wing breakdown)
+        }
+    }
+}
+
+// --- Property Test 6: SABR density integrates approximately to one ---
+
+proptest! {
+    /// The risk-neutral density from Breeden-Litzenberger (d²C/dK²) should
+    /// integrate to approximately 1 over a sufficiently wide strike range.
+    ///
+    /// Uses a generous tolerance [0.5, 1.5] because:
+    /// - Breeden-Litzenberger is a finite-difference approximation
+    /// - We integrate over a truncated domain [50, 200]
+    /// - Some SABR parameter combos have fat tails
+    ///
+    /// Parameter ranges are restricted to lognormal-like regimes (beta >= 0.5)
+    /// to ensure the density is well-spread over [50, 200]. With beta near 0
+    /// (normal model) and low vol-of-vol, the density concentrates too narrowly.
+    #[test]
+    fn sabr_density_integrates_approximately_to_one(
+        alpha in 0.1_f64..0.5,
+        beta in 0.5_f64..1.0,
+        rho in -0.9_f64..0.9,
+        nu in 0.1_f64..1.0,
+    ) {
+        let forward = 100.0;
+        let expiry = 0.25;
+
+        let sabr_result = SabrSmile::new(forward, expiry, alpha, beta, rho, nu);
+        prop_assume!(sabr_result.is_ok());
+
+        let sabr = sabr_result.unwrap();
+
+        // Trapezoidal integration of density from 50 to 200
+        let n_steps = 200;
+        let k_lo = 50.0_f64;
+        let k_hi = 200.0_f64;
+        let dk = (k_hi - k_lo) / n_steps as f64;
+
+        let mut integral = 0.0;
+        let mut any_err = false;
+
+        for i in 0..=n_steps {
+            let k = k_lo + i as f64 * dk;
+            match sabr.density(k) {
+                Ok(d) => {
+                    let weight = if i == 0 || i == n_steps { 0.5 } else { 1.0 };
+                    integral += weight * d * dk;
+                }
+                Err(_) => {
+                    any_err = true;
+                    break;
+                }
+            }
+        }
+
+        // Skip if any density call failed (Hagan wing breakdown)
+        prop_assume!(!any_err);
+
+        prop_assert!(
+            integral > 0.5 && integral < 1.5,
+            "density integral should be approximately 1, got {}",
+            integral
+        );
+    }
+}
+
+// --- Property Test 7: SSVI total variance is positive ---
+
+proptest! {
+    /// SSVI total variance w(k, theta) should always be positive for valid
+    /// parameters. This is a fundamental requirement: variance cannot be negative.
+    #[test]
+    fn ssvi_total_variance_positive(
+        rho in -0.9_f64..0.9,
+        eta in 0.1_f64..2.0,
+        gamma in 0.0_f64..1.0,
+        theta1 in 0.01_f64..0.1,
+    ) {
+        let surface_result = SsviSurface::new(
+            rho, eta, gamma,
+            vec![0.25],
+            vec![100.0],
+            vec![theta1],
+        );
+        prop_assume!(surface_result.is_ok());
+
+        let surface = surface_result.unwrap();
+
+        for strike in (60..=140).step_by(10) {
+            let k = strike as f64;
+            let var = surface.black_variance(0.25, k).unwrap();
+            prop_assert!(
+                var.0 > 0.0,
+                "SSVI variance should be positive, got {} at strike {}",
+                var.0,
+                k
+            );
+        }
+    }
+}
+
+// --- Property Test 8: SSVI variance monotone in time ---
+
+proptest! {
+    /// Total variance must be non-decreasing in time (no calendar arbitrage).
+    ///
+    /// For any fixed strike K, w(T2, K) >= w(T1, K) when T2 > T1. This
+    /// follows from the requirement that call prices are non-decreasing in
+    /// maturity.
+    #[test]
+    fn ssvi_variance_monotone_in_time(
+        rho in -0.9_f64..0.9,
+        eta in 0.1_f64..2.0,
+        gamma in 0.0_f64..1.0,
+        theta1 in 0.01_f64..0.1,
+        theta_incr in 0.01_f64..0.3,
+    ) {
+        let theta2 = theta1 + theta_incr;
+
+        let surface_result = SsviSurface::new(
+            rho, eta, gamma,
+            vec![0.25, 1.0],
+            vec![100.0, 100.0],
+            vec![theta1, theta2],
+        );
+        prop_assume!(surface_result.is_ok());
+
+        let surface = surface_result.unwrap();
+
+        for strike in (70..=130).step_by(10) {
+            let k = strike as f64;
+            let var_short = surface.black_variance(0.25, k).unwrap();
+            let var_long = surface.black_variance(1.0, k).unwrap();
+            prop_assert!(
+                var_long.0 >= var_short.0,
+                "variance at T=1.0 ({}) should be >= variance at T=0.25 ({}) at strike {}",
+                var_long.0,
+                var_short.0,
+                k
+            );
+        }
+    }
+}
+
+// --- Property Test 9: SSVI calendar arbitrage analytical check clean ---
+
+proptest! {
+    /// SSVI surfaces with strictly increasing thetas should be free of
+    /// calendar arbitrage as detected by the analytical g-function check
+    /// (Gatheral-Jacquier Theorem 4.2).
+    #[test]
+    fn ssvi_calendar_arb_analytical_empty(
+        rho in -0.9_f64..0.9,
+        eta in 0.1_f64..2.0,
+        gamma in 0.0_f64..1.0,
+        theta1 in 0.01_f64..0.1,
+        theta_incr in 0.01_f64..0.3,
+    ) {
+        let theta2 = theta1 + theta_incr;
+
+        let surface_result = SsviSurface::new(
+            rho, eta, gamma,
+            vec![0.25, 1.0],
+            vec![100.0, 100.0],
+            vec![theta1, theta2],
+        );
+        prop_assume!(surface_result.is_ok());
+
+        let surface = surface_result.unwrap();
+        let violations = surface.calendar_arb_analytical();
+
+        prop_assert!(
+            violations.is_empty(),
+            "valid SSVI should be calendar-arb-free, got {} violations",
+            violations.len()
+        );
+    }
+}
+
+// --- Property Test 10: SurfaceBuilder round-trip vol close ---
+
+proptest! {
+    /// Volatilities queried from a built surface should be close to the
+    /// input vols used to construct it. The tolerance of 0.02 (2 vol points)
+    /// accounts for calibration imperfection in the parametric fit.
+    #[test]
+    fn builder_round_trip_vol_close(
+        atm_vol in 0.15_f64..0.35,
+        skew in -0.05_f64..0.05,
+    ) {
+        let spot = 100.0;
+        let rate = 0.05;
+        let expiry = 0.25;
+
+        let strikes = vec![80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0];
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| atm_vol + skew * (k - 100.0) / 100.0)
+            .collect();
+
+        let build_result = SurfaceBuilder::new()
+            .spot(spot)
+            .rate(rate)
+            .add_tenor(expiry, &strikes, &vols)
+            .build();
+        prop_assume!(build_result.is_ok());
+
+        let surface = build_result.unwrap();
+
+        for (i, &k) in strikes.iter().enumerate() {
+            let queried = surface.black_vol(expiry, k).unwrap();
+            prop_assert!(
+                (queried.0 - vols[i]).abs() < 0.02,
+                "round-trip vol at K={} should be within 0.02, got {} vs input {}",
+                k,
+                queried.0,
+                vols[i]
             );
         }
     }
