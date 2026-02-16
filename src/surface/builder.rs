@@ -20,7 +20,7 @@
 
 use crate::conventions;
 use crate::error::VolSurfError;
-use crate::smile::{SmileSection, SplineSmile, SviSmile};
+use crate::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use crate::surface::piecewise::PiecewiseSurface;
 use crate::validate::{validate_finite, validate_positive};
 
@@ -29,13 +29,24 @@ use crate::validate::{validate_finite, validate_positive};
 /// Different models have different trade-offs:
 /// - [`Svi`](SmileModel::Svi) fits a parametric 5-parameter curve (minimum 5 strikes)
 /// - [`CubicSpline`](SmileModel::CubicSpline) interpolates variance directly (minimum 3 strikes)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// - [`Sabr`](SmileModel::Sabr) fits the SABR stochastic vol model (minimum 4 strikes)
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SmileModel {
     /// SVI parametric model (Gatheral 2004). Requires ≥ 5 strikes per tenor.
     #[default]
     Svi,
     /// Cubic spline on total variance. Requires ≥ 3 strikes per tenor.
     CubicSpline,
+    /// SABR stochastic volatility model (Hagan 2002). Requires ≥ 4 strikes per tenor.
+    ///
+    /// `beta` is the CEV exponent, fixed by the user (industry convention):
+    /// - `beta = 0.0`: normal model (rates)
+    /// - `beta = 0.5`: CIR-like (equities)
+    /// - `beta = 1.0`: lognormal model
+    Sabr {
+        /// CEV exponent, must be in \[0, 1\].
+        beta: f64,
+    },
 }
 
 /// Builder for constructing volatility surfaces from market data.
@@ -143,7 +154,16 @@ impl SurfaceBuilder {
         let min_strikes = match self.model {
             SmileModel::Svi => 5,
             SmileModel::CubicSpline => 3,
+            SmileModel::Sabr { .. } => 4,
         };
+
+        if let SmileModel::Sabr { beta } = self.model
+            && (!beta.is_finite() || !(0.0..=1.0).contains(&beta))
+        {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("SABR beta must be in [0, 1] and finite, got {beta}"),
+            });
+        }
 
         for tenor in &self.tenor_data {
             if tenor.expiry <= 0.0 || !tenor.expiry.is_finite() {
@@ -200,6 +220,16 @@ impl SurfaceBuilder {
                     let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
                     let spline = SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
                     Box::new(spline)
+                }
+                SmileModel::Sabr { beta } => {
+                    let market_vols: Vec<(f64, f64)> = tenor
+                        .strikes
+                        .iter()
+                        .zip(tenor.vols.iter())
+                        .map(|(&k, &v)| (k, v))
+                        .collect();
+                    let sabr = SabrSmile::calibrate(forward, tenor.expiry, beta, &market_vols)?;
+                    Box::new(sabr)
                 }
             };
 
@@ -607,5 +637,145 @@ mod tests {
             .add_tenor(0.25, &strikes, &vols)
             .build();
         assert!(result.is_err(), "zero strike should cause build to fail");
+    }
+
+    // --- SABR model integration ---
+
+    #[test]
+    fn build_with_sabr_model() {
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 0.5 })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+
+        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        assert!(vol.0 > 0.0, "ATM vol should be positive");
+        assert!(vol.0 < 1.0, "ATM vol should be reasonable");
+    }
+
+    #[test]
+    fn sabr_with_4_strikes_succeeds() {
+        let strikes = vec![90.0, 95.0, 100.0, 110.0];
+        let vols = vec![0.24, 0.22, 0.20, 0.24];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 0.5 })
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        assert!(result.is_ok(), "SABR should work with 4 strikes");
+    }
+
+    #[test]
+    fn sabr_with_3_strikes_fails() {
+        let strikes = vec![90.0, 100.0, 110.0];
+        let vols = vec![0.24, 0.20, 0.24];
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 0.5 })
+            .add_tenor(0.25, &strikes, &vols)
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn sabr_invalid_beta_negative() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: -0.1 })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn sabr_invalid_beta_above_1() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 1.1 })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn sabr_invalid_beta_nan() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: f64::NAN })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn sabr_multi_tenor_cross_tenor_query() {
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 0.5 })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+
+        // Query between tenors
+        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        assert!(vol.0 > 0.0);
+
+        // Query at/near stored tenors
+        for t in [0.25, 0.5, 1.0] {
+            for k in [80.0, 100.0, 120.0] {
+                let v = surface.black_vol(t, k).unwrap();
+                assert!(v.0 > 0.0 && v.0 < 2.0, "vol({t}, {k}) = {} out of range", v.0);
+            }
+        }
+    }
+
+    #[test]
+    fn sabr_vol_and_variance_consistent() {
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 0.5 })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+
+        let t = 0.25;
+        let k = 100.0;
+        let vol = surface.black_vol(t, k).unwrap();
+        let var = surface.black_variance(t, k).unwrap();
+        assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn sabr_beta_zero_normal_model() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 0.0 })
+            .add_tenor(0.5, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(result.is_ok(), "beta=0 (normal SABR) should build successfully");
+    }
+
+    #[test]
+    fn sabr_beta_one_lognormal_model() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 1.0 })
+            .add_tenor(0.5, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(result.is_ok(), "beta=1 (lognormal SABR) should build successfully");
     }
 }
