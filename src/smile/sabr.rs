@@ -14,8 +14,6 @@
 //! # References
 //! - Hagan, P. et al. "Managing Smile Risk" (2002)
 
-#![allow(dead_code)] // Stub — not yet implemented (v0.2 scope)
-
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
@@ -152,20 +150,238 @@ impl SabrSmile {
 
     /// Calibrate SABR parameters from market (strike, vol) observations.
     ///
+    /// Beta is fixed by the user (industry convention) and is not calibrated.
+    /// Alpha is solved analytically from the ATM vol for each (ρ, ν) candidate.
+    /// Rho and nu are optimized via Nelder-Mead in transformed space
+    /// (`ρ = tanh(x)`, `ν = exp(y)`).
+    ///
+    /// # Arguments
+    /// * `forward` — Forward price, must be positive
+    /// * `expiry` — Time to expiry in years, must be positive
+    /// * `beta` — CEV exponent, fixed, must be in \[0, 1\]
+    /// * `market_vols` — Slice of `(strike, implied_vol)` pairs (minimum 4)
+    ///
     /// # Errors
-    /// Returns [`VolSurfError::CalibrationError`] if the optimizer fails to converge.
+    /// Returns [`VolSurfError::InvalidInput`] for bad inputs,
+    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
     pub fn calibrate(
         forward: f64,
         expiry: f64,
+        beta: f64,
         market_vols: &[(f64, f64)],
     ) -> error::Result<Self> {
-        let _ = (forward, expiry, market_vols);
-        Err(VolSurfError::CalibrationError {
-            message: "not yet implemented".to_string(),
+        #[cfg(feature = "logging")]
+        tracing::debug!(forward, expiry, beta, n_quotes = market_vols.len(), "SABR calibration started");
+
+        /// Minimum market quotes for SABR calibration.
+        const MIN_POINTS: usize = 4;
+        /// Grid search resolution for (x, y) initialization.
+        const GRID_N: usize = 15;
+        /// Nelder-Mead iteration limit.
+        const NM_MAX_ITER: usize = 300;
+        /// Simplex diameter convergence threshold.
+        const NM_DIAMETER_TOL: f64 = 1e-8;
+        /// Objective value spread convergence threshold.
+        const NM_FVALUE_TOL: f64 = 1e-12;
+        /// Maximum Newton iterations for alpha solver.
+        const ALPHA_MAX_ITER: usize = 50;
+
+        // --- Input validation ---
+        validate_positive(forward, "forward")?;
+        validate_positive(expiry, "expiry")?;
+        if !(0.0..=1.0).contains(&beta) || !beta.is_finite() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("beta must be in [0, 1], got {beta}"),
+            });
+        }
+        if market_vols.len() < MIN_POINTS {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "at least {MIN_POINTS} market points required, got {}",
+                    market_vols.len()
+                ),
+            });
+        }
+        for &(strike, vol) in market_vols {
+            validate_positive(strike, "strike")?;
+            validate_positive(vol, "implied vol")?;
+        }
+
+        // --- Interpolate ATM vol from market data ---
+        let sigma_atm = interpolate_atm_vol(forward, market_vols);
+        let f_beta = forward.powf(1.0 - beta);
+
+        // --- Alpha solver: Newton iteration on the ATM cubic ---
+        //
+        // ATM Hagan formula (K = F):
+        //   σ_ATM = (α / F^(1-β)) * [1 + T·(A·α² + B·α + C)]
+        //
+        // where:
+        //   A = (1-β)² / (24 · F^(2(1-β)))
+        //   B = ρ·β·ν / (4 · F^(1-β))
+        //   C = (2 - 3ρ²) / 24 · ν²
+        //
+        // Rearranged as f(α) = 0:
+        //   f(α) = T·A·α³ + T·B·α² + (1 + T·C)·α − σ_ATM·F^(1-β) = 0
+        let solve_alpha = |rho: f64, nu: f64| -> Option<f64> {
+            let omb = 1.0 - beta;
+            let a_coeff = omb * omb / (24.0 * f_beta * f_beta);
+            let b_coeff = rho * beta * nu / (4.0 * f_beta);
+            let c_coeff = (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu;
+            let target = sigma_atm * f_beta;
+            let t = expiry;
+
+            // f(α) = t·A·α³ + t·B·α² + (1 + t·C)·α − target
+            // f'(α) = 3·t·A·α² + 2·t·B·α + (1 + t·C)
+            let mut alpha = target; // initial guess: zeroth-order approximation
+            for _ in 0..ALPHA_MAX_ITER {
+                let a2 = alpha * alpha;
+                let f_val = t * a_coeff * a2 * alpha + t * b_coeff * a2
+                    + (1.0 + t * c_coeff) * alpha
+                    - target;
+                let f_prime =
+                    3.0 * t * a_coeff * a2 + 2.0 * t * b_coeff * alpha + (1.0 + t * c_coeff);
+                if f_prime.abs() < 1e-30 {
+                    return None;
+                }
+                let delta = f_val / f_prime;
+                alpha -= delta;
+                if alpha <= 0.0 {
+                    return None;
+                }
+                if delta.abs() < 1e-14 * alpha {
+                    break;
+                }
+            }
+            if alpha > 0.0 && alpha.is_finite() {
+                Some(alpha)
+            } else {
+                None
+            }
+        };
+
+        // --- Objective function in transformed space ---
+        // x → rho = tanh(x), y → nu = exp(y)
+        let objective = |x: f64, y: f64| -> f64 {
+            let rho = x.tanh();
+            let nu = y.exp();
+            if nu > 100.0 {
+                return f64::MAX;
+            }
+            let alpha = match solve_alpha(rho, nu) {
+                Some(a) => a,
+                None => return f64::MAX,
+            };
+            // Build a temporary SABR smile and compute RSS
+            let smile = match Self::new(forward, expiry, alpha, beta, rho, nu) {
+                Ok(s) => s,
+                Err(_) => return f64::MAX,
+            };
+            let mut rss = 0.0;
+            for &(strike, market_vol) in market_vols {
+                let model_vol = smile.hagan_implied_vol(strike);
+                if !model_vol.is_finite() || model_vol <= 0.0 {
+                    return f64::MAX;
+                }
+                let diff = model_vol - market_vol;
+                rss += diff * diff;
+            }
+            rss
+        };
+
+        // --- Grid search over transformed (x, y) space ---
+        let x_lo = -1.5_f64; // tanh(-1.5) ≈ -0.905
+        let x_hi = 1.5_f64; // tanh(1.5) ≈ 0.905
+        let y_lo = (-2.0_f64).max((0.01_f64).ln()); // nu ≥ 0.01
+        let y_hi = (2.0_f64).ln(); // nu ≤ ~7.4
+
+        let mut best_x = 0.0;
+        let mut best_y = 0.0;
+        let mut best_rss = f64::MAX;
+
+        for ix in 0..GRID_N {
+            let x = x_lo + (x_hi - x_lo) * (ix as f64) / ((GRID_N - 1) as f64);
+            for iy in 0..GRID_N {
+                let y = y_lo + (y_hi - y_lo) * (iy as f64) / ((GRID_N - 1) as f64);
+                let rss = objective(x, y);
+                if rss < best_rss {
+                    best_rss = rss;
+                    best_x = x;
+                    best_y = y;
+                }
+            }
+        }
+
+        if best_rss >= f64::MAX {
+            return Err(VolSurfError::CalibrationError {
+                message: "grid search found no valid starting point".into(),
+                model: "SABR",
+                rms_error: None,
+            });
+        }
+
+        // --- Nelder-Mead 2D refinement ---
+        let step_x = (x_hi - x_lo) / (GRID_N as f64) * 0.5;
+        let step_y = (y_hi - y_lo) / (GRID_N as f64) * 0.5;
+
+        let nm_config = crate::optim::NelderMeadConfig {
+            max_iter: NM_MAX_ITER,
+            diameter_tol: NM_DIAMETER_TOL,
+            fvalue_tol: NM_FVALUE_TOL,
+        };
+        let nm_result = crate::optim::nelder_mead_2d(
+            objective, best_x, best_y, step_x, step_y, &nm_config,
+        );
+
+        // --- Recover final parameters ---
+        let rho = nm_result.x.tanh();
+        let nu = nm_result.y.exp();
+        let alpha = solve_alpha(rho, nu).ok_or_else(|| VolSurfError::CalibrationError {
+            message: "alpha solve failed at optimal (rho, nu)".into(),
             model: "SABR",
             rms_error: None,
+        })?;
+
+        let rms = (nm_result.fval / market_vols.len() as f64).sqrt();
+
+        #[cfg(feature = "logging")]
+        tracing::debug!(alpha, beta, rho, nu, rms, "SABR calibration complete");
+
+        Self::new(forward, expiry, alpha, beta, rho, nu).map_err(|e| {
+            VolSurfError::CalibrationError {
+                message: format!("calibrated params invalid: {e}"),
+                model: "SABR",
+                rms_error: Some(rms),
+            }
         })
     }
+}
+
+/// Interpolate ATM implied vol from market data.
+///
+/// Finds the two market strikes bracketing the forward and linearly
+/// interpolates. If the forward is outside the strike range, uses
+/// the nearest market point.
+fn interpolate_atm_vol(forward: f64, market_vols: &[(f64, f64)]) -> f64 {
+    // Sort by strike distance to forward
+    let mut sorted: Vec<(f64, f64)> = market_vols.to_vec();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    // Find bracketing strikes
+    let right_idx = sorted.partition_point(|&(k, _)| k < forward);
+    if right_idx == 0 {
+        // Forward is below all strikes — use the lowest
+        return sorted[0].1;
+    }
+    if right_idx >= sorted.len() {
+        // Forward is above all strikes — use the highest
+        return sorted[sorted.len() - 1].1;
+    }
+    // Linear interpolation between bracketing strikes
+    let (k_lo, v_lo) = sorted[right_idx - 1];
+    let (k_hi, v_hi) = sorted[right_idx];
+    let alpha = (forward - k_lo) / (k_hi - k_lo);
+    (1.0 - alpha) * v_lo + alpha * v_hi
 }
 
 impl SmileSection for SabrSmile {
@@ -1037,5 +1253,211 @@ mod tests {
         assert!(v.0 > 0.0);
         let report = boxed.is_arbitrage_free().unwrap();
         assert!(report.is_free);
+    }
+
+    // ========================================================================
+    // Calibration tests (T04)
+    // ========================================================================
+
+    /// Generate synthetic market data from a known SabrSmile.
+    fn sabr_synthetic_data(smile: &SabrSmile, strikes: &[f64]) -> Vec<(f64, f64)> {
+        strikes
+            .iter()
+            .map(|&k| (k, smile.vol(k).unwrap().0))
+            .collect()
+    }
+
+    /// Compute RMS vol error between calibrated and original across strikes.
+    fn vol_rms(original: &SabrSmile, calibrated: &SabrSmile, strikes: &[f64]) -> f64 {
+        let mut sum_sq = 0.0;
+        for &k in strikes {
+            let v_orig = original.vol(k).unwrap().0;
+            let v_cal = calibrated.vol(k).unwrap().0;
+            sum_sq += (v_orig - v_cal).powi(2);
+        }
+        (sum_sq / strikes.len() as f64).sqrt()
+    }
+
+    #[test]
+    fn calibrate_round_trip_equity() {
+        // beta = 0.5 (equity convention)
+        let original = SabrSmile::new(F, T, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(F, T, 0.5, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "equity round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_round_trip_rates() {
+        // beta = 0.0 (rates convention, normal SABR)
+        let original = SabrSmile::new(F, T, 10.0, 0.0, -0.2, 0.3).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(F, T, 0.0, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "rates round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_round_trip_lognormal() {
+        // beta = 1.0 (lognormal SABR)
+        let original = SabrSmile::new(F, T, 0.20, 1.0, -0.25, 0.3).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(F, T, 1.0, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "lognormal round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_minimum_four_points() {
+        let original = SabrSmile::new(F, T, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let strikes = [85.0, 95.0, 105.0, 115.0];
+        let data = sabr_synthetic_data(&original, &strikes);
+        let result = SabrSmile::calibrate(F, T, 0.5, &data);
+        assert!(result.is_ok(), "4 points should succeed: {result:?}");
+    }
+
+    #[test]
+    fn calibrate_rejects_three_points() {
+        let data = vec![(90.0, 0.20), (100.0, 0.18), (110.0, 0.22)];
+        let result = SabrSmile::calibrate(F, T, 0.5, &data);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn calibrate_rejects_zero_points() {
+        let result = SabrSmile::calibrate(F, T, 0.5, &[]);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn calibrate_rejects_invalid_forward() {
+        let data = vec![(90.0, 0.2), (95.0, 0.19), (100.0, 0.18), (105.0, 0.19)];
+        assert!(SabrSmile::calibrate(0.0, T, 0.5, &data).is_err());
+        assert!(SabrSmile::calibrate(-1.0, T, 0.5, &data).is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_invalid_expiry() {
+        let data = vec![(90.0, 0.2), (95.0, 0.19), (100.0, 0.18), (105.0, 0.19)];
+        assert!(SabrSmile::calibrate(F, 0.0, 0.5, &data).is_err());
+        assert!(SabrSmile::calibrate(F, -1.0, 0.5, &data).is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_invalid_beta() {
+        let data = vec![(90.0, 0.2), (95.0, 0.19), (100.0, 0.18), (105.0, 0.19)];
+        assert!(SabrSmile::calibrate(F, T, -0.1, &data).is_err());
+        assert!(SabrSmile::calibrate(F, T, 1.5, &data).is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_invalid_market_data() {
+        // Negative vol
+        let data = vec![(90.0, 0.2), (95.0, -0.1), (100.0, 0.18), (105.0, 0.19)];
+        assert!(SabrSmile::calibrate(F, T, 0.5, &data).is_err());
+        // Zero strike
+        let data = vec![(0.0, 0.2), (95.0, 0.19), (100.0, 0.18), (105.0, 0.19)];
+        assert!(SabrSmile::calibrate(F, T, 0.5, &data).is_err());
+    }
+
+    #[test]
+    fn calibrate_params_pass_validation() {
+        // Calibrated params should always be valid (pass SabrSmile::new)
+        let original = SabrSmile::new(F, T, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let strikes: Vec<f64> = (0..10).map(|i| 75.0 + 5.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let cal = SabrSmile::calibrate(F, T, 0.5, &data).unwrap();
+        assert!(cal.alpha() > 0.0);
+        assert!((0.0..=1.0).contains(&cal.beta()));
+        assert!(cal.rho().abs() < 1.0);
+        assert!(cal.nu() >= 0.0);
+    }
+
+    #[test]
+    fn calibrate_positive_rho_recoverable() {
+        // Test with positive rho (non-standard, but valid)
+        let original = SabrSmile::new(F, T, 2.0, 0.5, 0.3, 0.4).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(F, T, 0.5, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "positive rho round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_zero_rho_recoverable() {
+        // rho = 0 (symmetric smile for beta=1)
+        let original = SabrSmile::new(F, T, 0.20, 1.0, 0.0, 0.3).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(F, T, 1.0, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "zero rho round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_different_forward() {
+        // Non-100 forward
+        let fwd = 50.0;
+        let original = SabrSmile::new(fwd, T, 1.5, 0.5, -0.2, 0.3).unwrap();
+        let strikes: Vec<f64> = (0..15).map(|i| 35.0 + 2.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(fwd, T, 0.5, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "F=50 round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_short_expiry() {
+        let original = SabrSmile::new(F, 0.1, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let strikes: Vec<f64> = (0..10).map(|i| 80.0 + 4.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(F, 0.1, 0.5, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "short expiry round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_performance() {
+        // Calibration should complete in < 1ms for 10 market points.
+        // We just verify it doesn't take unreasonably long (no assertion on exact time
+        // since test environments vary, but the test itself timing out would indicate a problem).
+        let original = SabrSmile::new(F, T, 2.0, 0.5, -0.3, 0.4).unwrap();
+        let strikes: Vec<f64> = (0..10).map(|i| 75.0 + 5.0 * i as f64).collect();
+        let data = sabr_synthetic_data(&original, &strikes);
+        let start = std::time::Instant::now();
+        let _cal = SabrSmile::calibrate(F, T, 0.5, &data).unwrap();
+        let elapsed = start.elapsed();
+        // Generous bound — the target is <1ms but test environments vary
+        assert!(
+            elapsed.as_millis() < 100,
+            "calibration took {}ms, should be fast",
+            elapsed.as_millis()
+        );
     }
 }
