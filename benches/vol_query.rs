@@ -96,6 +96,16 @@ fn smile_benchmarks(c: &mut Criterion) {
         b.iter(|| sabr.density(black_box(100.0)).unwrap());
     });
 
+    // SVI density — Breeden-Litzenberger via finite differences
+    group.bench_function("svi_density", |b| {
+        b.iter(|| svi.density(black_box(100.0)).unwrap());
+    });
+
+    // Spline density — Breeden-Litzenberger via finite differences
+    group.bench_function("spline_density", |b| {
+        b.iter(|| spline.density(black_box(100.0)).unwrap());
+    });
+
     // SSVI slice vol query via smile_at() — target < 100ns
     let ssvi = make_ssvi_surface();
     let slice = ssvi.smile_at(0.25).expect("SSVI smile_at should succeed");
@@ -119,6 +129,27 @@ fn surface_benchmarks(c: &mut Criterion) {
     let ssvi = make_ssvi_surface();
     group.bench_function("ssvi_vol_query", |b| {
         b.iter(|| ssvi.black_vol(black_box(0.375), black_box(105.0)).unwrap());
+    });
+
+    // --- smile_at construction ---
+    group.bench_function("piecewise_smile_at", |b| {
+        b.iter(|| surface.smile_at(black_box(0.375)).unwrap());
+    });
+    group.bench_function("ssvi_smile_at", |b| {
+        b.iter(|| ssvi.smile_at(black_box(0.375)).unwrap());
+    });
+
+    // --- diagnostics ---
+    group.bench_function("piecewise_diagnostics", |b| {
+        b.iter(|| surface.diagnostics().unwrap());
+    });
+    group.bench_function("ssvi_diagnostics", |b| {
+        b.iter(|| ssvi.diagnostics().unwrap());
+    });
+
+    // --- SSVI calendar analytical ---
+    group.bench_function("ssvi_calendar_analytical", |b| {
+        b.iter(|| ssvi.calendar_arb_analytical());
     });
 
     group.finish();
