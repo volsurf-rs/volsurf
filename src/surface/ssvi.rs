@@ -29,6 +29,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
+use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
 use crate::surface::arbitrage::SurfaceDiagnostics;
 use crate::surface::VolSurface;
@@ -329,6 +330,221 @@ impl VolSurface for SsviSurface {
         Err(VolSurfError::NumericalError {
             message: "SSVI VolSurface not yet implemented (T08)".to_string(),
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SsviSlice — single-tenor slice through an SSVI surface
+// ---------------------------------------------------------------------------
+
+/// A single-tenor slice through an SSVI surface.
+///
+/// Evaluates the SSVI total variance formula at a fixed ATM total variance θ,
+/// providing a [`SmileSection`] interface for use in surface queries and
+/// downstream consumers expecting a per-tenor smile.
+///
+/// This is a lightweight value type (6 `f64` fields) with no heap allocation.
+/// Constructed by [`SsviSurface::smile_at()`] or directly via [`SsviSlice::new()`].
+///
+/// # Formula
+///
+/// At log-moneyness `k = ln(K/F)`:
+///
+/// ```text
+/// w(k) = (θ/2) · [1 + ρ·φ·k + √((φ·k + ρ)² + (1 − ρ²))]
+/// ```
+///
+/// where `φ = η / θ^γ`.
+///
+/// # References
+/// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SsviSlice {
+    /// Forward price at this tenor.
+    forward: f64,
+    /// Time to expiry in years.
+    expiry: f64,
+    /// Global skew parameter ρ ∈ (−1, 1).
+    rho: f64,
+    /// Smile amplitude η > 0.
+    eta: f64,
+    /// Term structure decay γ ∈ [0, 1].
+    gamma: f64,
+    /// ATM total variance θ = σ²_ATM · T at this tenor.
+    theta: f64,
+}
+
+impl SsviSlice {
+    /// Create an SSVI slice at a fixed tenor.
+    ///
+    /// # Arguments
+    /// * `forward` — Forward price, must be positive
+    /// * `expiry` — Time to expiry in years, must be positive
+    /// * `rho` — Skew parameter, must be in (−1, 1)
+    /// * `eta` — Smile amplitude, must be positive
+    /// * `gamma` — Term structure decay, must be in \[0, 1\]
+    /// * `theta` — ATM total variance σ²T, must be positive
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] if any parameter is invalid.
+    pub fn new(
+        forward: f64,
+        expiry: f64,
+        rho: f64,
+        eta: f64,
+        gamma: f64,
+        theta: f64,
+    ) -> error::Result<Self> {
+        validate_positive(forward, "forward")?;
+        validate_positive(expiry, "expiry")?;
+        if rho.abs() >= 1.0 || rho.is_nan() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("|rho| must be less than 1, got {rho}"),
+            });
+        }
+        validate_positive(eta, "eta")?;
+        if !gamma.is_finite() || !(0.0..=1.0).contains(&gamma) {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("gamma must be in [0, 1], got {gamma}"),
+            });
+        }
+        validate_positive(theta, "theta")?;
+        Ok(Self { forward, expiry, rho, eta, gamma, theta })
+    }
+
+    /// ATM total variance θ at this tenor.
+    pub fn theta(&self) -> f64 {
+        self.theta
+    }
+
+    /// Power-law mixing function φ = η / θ^γ for this slice.
+    fn phi(&self) -> f64 {
+        self.eta / self.theta.powf(self.gamma)
+    }
+
+    /// SSVI total variance w(k) at log-moneyness k for this slice.
+    fn total_variance(&self, k: f64) -> f64 {
+        let phi = self.phi();
+        let phi_k = phi * k;
+        let one_minus_rho_sq = 1.0 - self.rho * self.rho;
+        (self.theta / 2.0)
+            * (1.0 + self.rho * phi_k
+                + ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt())
+    }
+
+    /// First derivative dw/dk for the g-function.
+    ///
+    /// ```text
+    /// w'(k) = (θ/2) · [ρ·φ + φ·(φ·k + ρ) / R]
+    /// ```
+    /// where `R = √((φ·k + ρ)² + (1 − ρ²))`.
+    fn w_prime(&self, k: f64) -> f64 {
+        let phi = self.phi();
+        let phi_k = phi * k;
+        let one_minus_rho_sq = 1.0 - self.rho * self.rho;
+        let r = ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt();
+        (self.theta / 2.0) * (self.rho * phi + phi * (phi_k + self.rho) / r)
+    }
+
+    /// Second derivative d²w/dk² for the g-function.
+    ///
+    /// ```text
+    /// w''(k) = (θ/2) · φ² · (1 − ρ²) / R³
+    /// ```
+    /// where `R = √((φ·k + ρ)² + (1 − ρ²))`.
+    fn w_double_prime(&self, k: f64) -> f64 {
+        let phi = self.phi();
+        let phi_k = phi * k;
+        let one_minus_rho_sq = 1.0 - self.rho * self.rho;
+        let r = ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt();
+        (self.theta / 2.0) * phi * phi * one_minus_rho_sq / (r * r * r)
+    }
+
+    /// Gatheral g-function for butterfly arbitrage detection.
+    ///
+    /// ```text
+    /// g(k) = (1 − k·w'/(2w))² − (w')²/4 · (1/w + 1/4) + w''/2
+    /// ```
+    ///
+    /// g(k) ≥ 0 for all k is the necessary and sufficient condition for
+    /// no butterfly arbitrage (Gatheral & Jacquier 2014, §4).
+    fn g_function(&self, k: f64) -> f64 {
+        let w = self.total_variance(k);
+        if w <= 0.0 {
+            return f64::NEG_INFINITY;
+        }
+        let wp = self.w_prime(k);
+        let wpp = self.w_double_prime(k);
+        let term1 = 1.0 - k * wp / (2.0 * w);
+        term1 * term1 - wp * wp / 4.0 * (1.0 / w + 0.25) + wpp / 2.0
+    }
+}
+
+impl SmileSection for SsviSlice {
+    fn vol(&self, strike: f64) -> error::Result<Vol> {
+        validate_positive(strike, "strike")?;
+        let k = (strike / self.forward).ln();
+        let w = self.total_variance(k);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("SSVI total variance is negative: w({k}) = {w}"),
+            });
+        }
+        Ok(Vol((w / self.expiry).sqrt()))
+    }
+
+    fn variance(&self, strike: f64) -> error::Result<Variance> {
+        validate_positive(strike, "strike")?;
+        let k = (strike / self.forward).ln();
+        let w = self.total_variance(k);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("SSVI total variance is negative: w({k}) = {w}"),
+            });
+        }
+        Ok(Variance(w))
+    }
+
+    fn forward(&self) -> f64 {
+        self.forward
+    }
+
+    fn expiry(&self) -> f64 {
+        self.expiry
+    }
+
+    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
+        /// Number of grid points for g-function arbitrage scan.
+        const N: usize = 200;
+        /// Minimum log-moneyness for arbitrage scan.
+        const K_MIN: f64 = -3.0;
+        /// Maximum log-moneyness for arbitrage scan.
+        const K_MAX: f64 = 3.0;
+        /// Tolerance for g-function negativity detection.
+        const TOL: f64 = 1e-10;
+
+        let mut violations = Vec::new();
+
+        for i in 0..N {
+            let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
+            let g = self.g_function(k);
+            if g < -TOL {
+                violations.push(ButterflyViolation {
+                    strike: self.forward * k.exp(),
+                    density: g,
+                    magnitude: g.abs(),
+                });
+            }
+        }
+
+        if violations.is_empty() {
+            Ok(ArbitrageReport::clean())
+        } else {
+            Ok(ArbitrageReport {
+                is_free: false,
+                butterfly_violations: violations,
+            })
+        }
     }
 }
 
@@ -689,5 +905,168 @@ mod tests {
             1.5, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04],
         ).unwrap_err();
         assert!(matches!(err, VolSurfError::InvalidInput { .. }));
+    }
+
+    // ================================================================
+    // SsviSlice tests
+    // ================================================================
+
+    /// Canonical SSVI slice for a typical equity tenor.
+    /// rho=-0.3, eta=0.5, gamma=0.5, F=100, T=1.0, theta=0.16
+    fn equity_slice() -> SsviSlice {
+        SsviSlice::new(100.0, 1.0, -0.3, 0.5, 0.5, 0.16).unwrap()
+    }
+
+    #[test]
+    fn slice_new_valid_params() {
+        let s = equity_slice();
+        assert_eq!(s.forward(), 100.0);
+        assert_eq!(s.expiry(), 1.0);
+        assert_eq!(s.theta(), 0.16);
+    }
+
+    #[test]
+    fn slice_new_rejects_invalid_params() {
+        // Bad forward
+        assert!(SsviSlice::new(0.0, 1.0, -0.3, 0.5, 0.5, 0.16).is_err());
+        // Bad expiry
+        assert!(SsviSlice::new(100.0, -1.0, -0.3, 0.5, 0.5, 0.16).is_err());
+        // Bad rho
+        assert!(SsviSlice::new(100.0, 1.0, 1.0, 0.5, 0.5, 0.16).is_err());
+        // Bad eta
+        assert!(SsviSlice::new(100.0, 1.0, -0.3, 0.0, 0.5, 0.16).is_err());
+        // Bad gamma
+        assert!(SsviSlice::new(100.0, 1.0, -0.3, 0.5, 1.5, 0.16).is_err());
+        // Bad theta
+        assert!(SsviSlice::new(100.0, 1.0, -0.3, 0.5, 0.5, 0.0).is_err());
+    }
+
+    #[test]
+    fn slice_vol_atm_equals_sqrt_theta_over_t() {
+        // ATM: strike = forward. k = 0. w(0) = theta.
+        // vol = sqrt(theta / T) = sqrt(0.16 / 1.0) = 0.4
+        let s = equity_slice();
+        let vol = s.vol(100.0).unwrap();
+        assert_abs_diff_eq!(vol.0, 0.4, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn slice_variance_atm_equals_theta() {
+        // At ATM: variance = theta exactly.
+        let s = equity_slice();
+        let var = s.variance(100.0).unwrap();
+        assert_abs_diff_eq!(var.0, 0.16, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn slice_vol_variance_consistency() {
+        // variance(K) == vol(K)^2 * T for any strike.
+        let s = equity_slice();
+        for &strike in &[80.0, 90.0, 100.0, 110.0, 120.0] {
+            let vol = s.vol(strike).unwrap();
+            let var = s.variance(strike).unwrap();
+            assert_abs_diff_eq!(var.0, vol.0 * vol.0 * s.expiry(), epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn slice_vol_matches_surface_formula() {
+        // SsviSlice vol at (T=1, K) should match SsviSurface.total_variance_at(theta, k)
+        // for the same theta.
+        let surface = equity_surface();
+        let slice = equity_slice();
+        let theta = 0.16;
+        for &strike in &[80.0, 90.0, 100.0, 110.0, 120.0] {
+            let k = (strike / 100.0_f64).ln();
+            let w_surface = surface.total_variance_at(theta, k);
+            let w_slice = slice.variance(strike).unwrap().0;
+            assert_abs_diff_eq!(w_surface, w_slice, epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn slice_vol_rejects_non_positive_strikes() {
+        let s = equity_slice();
+        assert!(s.vol(0.0).is_err());
+        assert!(s.vol(-100.0).is_err());
+        assert!(s.variance(0.0).is_err());
+        assert!(s.variance(-100.0).is_err());
+    }
+
+    #[test]
+    fn slice_skew_direction() {
+        // rho < 0: OTM puts have higher vol than OTM calls.
+        let s = equity_slice();
+        let vol_put = s.vol(80.0).unwrap().0;
+        let vol_call = s.vol(120.0).unwrap().0;
+        assert!(vol_put > vol_call, "negative rho should produce put skew");
+    }
+
+    #[test]
+    fn slice_density_positive_near_atm() {
+        // density should be positive near ATM for well-behaved params.
+        let s = equity_slice();
+        for &strike in &[90.0, 95.0, 100.0, 105.0, 110.0] {
+            let d = s.density(strike).unwrap();
+            assert!(d > 0.0, "density({strike}) = {d} should be positive");
+        }
+    }
+
+    #[test]
+    fn slice_arb_free_conservative_params() {
+        // eta * (1 + |rho|) = 0.5 * (1 + 0.3) = 0.65 < 2 => should be clean.
+        let s = equity_slice();
+        let report = s.is_arbitrage_free().unwrap();
+        assert!(report.is_free, "conservative SSVI params should be arb-free");
+        assert!(report.butterfly_violations.is_empty());
+    }
+
+    #[test]
+    fn slice_arb_free_detects_violations_extreme_params() {
+        // eta * (1 + |rho|) = 3.0 * (1 + 0.95) = 5.85 >> 2 => likely violations.
+        let s = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
+        let report = s.is_arbitrage_free().unwrap();
+        assert!(!report.is_free, "extreme SSVI params should detect butterfly violations");
+        assert!(!report.butterfly_violations.is_empty());
+    }
+
+    #[test]
+    fn slice_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SsviSlice>();
+    }
+
+    #[test]
+    fn slice_serde_round_trip() {
+        let s = equity_slice();
+        let json = serde_json::to_string(&s).unwrap();
+        let s2: SsviSlice = serde_json::from_str(&json).unwrap();
+        assert_eq!(s.forward(), s2.forward());
+        assert_eq!(s.expiry(), s2.expiry());
+        assert_eq!(s.theta(), s2.theta());
+        // Verify vol agrees after deserialization
+        assert_abs_diff_eq!(s.vol(100.0).unwrap().0, s2.vol(100.0).unwrap().0, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn slice_w_prime_finite_and_sign() {
+        // For rho < 0, w'(k) should be negative for positive k (skew).
+        let s = equity_slice();
+        let wp = s.w_prime(0.2);
+        assert!(wp.is_finite());
+        assert!(wp < 0.0, "w'(0.2) = {wp} should be negative for rho < 0");
+        // w'(k) for large negative k should be positive
+        let wp_left = s.w_prime(-1.0);
+        assert!(wp_left < wp, "smile should be steeper on put side");
+    }
+
+    #[test]
+    fn slice_w_double_prime_always_positive() {
+        // w''(k) = (theta/2) * phi^2 * (1-rho^2) / R^3 > 0 always.
+        let s = equity_slice();
+        for k in (-30..=30).map(|i| i as f64 * 0.1) {
+            let wpp = s.w_double_prime(k);
+            assert!(wpp > 0.0, "w''({k}) = {wpp} must be positive");
+        }
     }
 }

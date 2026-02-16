@@ -19,7 +19,7 @@ pub use arbitrage::{CalendarViolation, SurfaceDiagnostics};
 pub use builder::{SmileModel, SurfaceBuilder};
 pub use essvi::EssviSurface;
 pub use piecewise::PiecewiseSurface;
-pub use ssvi::SsviSurface;
+pub use ssvi::{SsviSlice, SsviSurface};
 
 use crate::error;
 use crate::smile::SmileSection;
