@@ -1,13 +1,19 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use volsurf::smile::{SmileSection, SplineSmile, SviSmile};
-use volsurf::surface::{PiecewiseSurface, SurfaceBuilder, VolSurface};
+use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
+use volsurf::surface::{PiecewiseSurface, SsviSurface, SurfaceBuilder, VolSurface};
 
 /// Build a realistic SviSmile for benchmarking (SPX-like 3M smile).
 fn make_svi_smile() -> SviSmile {
     SviSmile::new(100.0, 0.25, 0.04, 0.10, -0.30, 0.0, 0.20)
         .expect("benchmark SVI params should be valid")
+}
+
+/// Build a realistic SabrSmile for benchmarking (equity-like 3M smile).
+fn make_sabr_smile() -> SabrSmile {
+    SabrSmile::new(100.0, 0.25, 0.30, 0.5, -0.30, 0.40)
+        .expect("benchmark SABR params should be valid")
 }
 
 /// Build a SplineSmile with 20 knot points derived from an SVI smile.
@@ -54,6 +60,16 @@ fn make_surface() -> PiecewiseSurface {
     builder.build().expect("surface build should succeed")
 }
 
+/// Build a 3-tenor SsviSurface for benchmarking.
+fn make_ssvi_surface() -> SsviSurface {
+    let tenors = vec![0.25, 0.50, 1.0];
+    let forwards = vec![100.0, 100.0, 100.0];
+    // Increasing ATM total variances: vol ~20% => theta = vol^2 * T
+    let thetas = vec![0.04 * 0.25, 0.04 * 0.50, 0.04 * 1.0];
+    SsviSurface::new(-0.30, 1.0, 0.50, tenors, forwards, thetas)
+        .expect("benchmark SSVI params should be valid")
+}
+
 fn smile_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("smile");
 
@@ -69,16 +85,40 @@ fn smile_benchmarks(c: &mut Criterion) {
         b.iter(|| spline.vol(black_box(100.0)).unwrap());
     });
 
+    // SABR vol query — Hagan formula with transcendentals, target < 100ns
+    let sabr = make_sabr_smile();
+    group.bench_function("sabr_vol_query", |b| {
+        b.iter(|| sabr.vol(black_box(100.0)).unwrap());
+    });
+
+    // SABR density — Breeden-Litzenberger via finite differences
+    group.bench_function("sabr_density", |b| {
+        b.iter(|| sabr.density(black_box(100.0)).unwrap());
+    });
+
+    // SSVI slice vol query via smile_at() — target < 100ns
+    let ssvi = make_ssvi_surface();
+    let slice = ssvi.smile_at(0.25).expect("SSVI smile_at should succeed");
+    group.bench_function("ssvi_slice_vol_query", |b| {
+        b.iter(|| slice.vol(black_box(100.0)).unwrap());
+    });
+
     group.finish();
 }
 
 fn surface_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("surface");
 
-    // Surface vol query — interpolated tenor, OTM strike, target < 100ns
+    // PiecewiseSurface vol query — interpolated tenor, OTM strike, target < 100ns
     let surface = make_surface();
-    group.bench_function("surface_vol_query", |b| {
+    group.bench_function("piecewise_vol_query", |b| {
         b.iter(|| surface.black_vol(black_box(0.375), black_box(105.0)).unwrap());
+    });
+
+    // SSVI surface vol query — target < 100ns
+    let ssvi = make_ssvi_surface();
+    group.bench_function("ssvi_vol_query", |b| {
+        b.iter(|| ssvi.black_vol(black_box(0.375), black_box(105.0)).unwrap());
     });
 
     group.finish();
