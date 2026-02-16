@@ -357,4 +357,47 @@ mod tests {
         let result = black_price(100.0, f64::NAN, 0.2, 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
+
+    // --- Zero vol put edge cases ---
+
+    #[test]
+    fn black_price_zero_vol_itm_put() {
+        // ITM put: K > F, intrinsic = max(K-F, 0) = 20.0
+        let price = black_price(100.0, 120.0, 0.0, 1.0, OptionType::Put).unwrap();
+        assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn black_price_zero_vol_otm_put() {
+        // OTM put: K < F, intrinsic = max(K-F, 0) = 0.0
+        let price = black_price(100.0, 80.0, 0.0, 1.0, OptionType::Put).unwrap();
+        assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn black_price_zero_vol_atm_put() {
+        // ATM put: K = F, intrinsic = 0
+        let price = black_price(100.0, 100.0, 0.0, 1.0, OptionType::Put).unwrap();
+        assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
+    }
+
+    // --- Near-intrinsic IV stability ---
+
+    #[test]
+    fn near_intrinsic_iv_stability() {
+        // Deep ITM call: F=100, K=80, intrinsic=20.0
+        // Price just above intrinsic
+        let forward = 100.0;
+        let strike = 80.0;
+        let expiry = 1.0;
+        let price = 20.01; // just above intrinsic of 20.0
+
+        let iv = BlackImpliedVol::compute(price, forward, strike, expiry, OptionType::Call).unwrap();
+        assert!(iv.0 > 0.0, "IV should be positive for price above intrinsic");
+        assert!(iv.0.is_finite(), "IV should be finite");
+
+        // Round-trip: reprice with extracted IV should match original price
+        let reprice = black_price(forward, strike, iv.0, expiry, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(reprice, price, epsilon = 1e-8);
+    }
 }
