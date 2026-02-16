@@ -36,6 +36,25 @@ use crate::validate::validate_positive;
 /// # Error Handling
 /// Methods return `Result` so implementations can report numerical failures
 /// (e.g., negative variance, NaN) rather than panicking.
+///
+/// # Examples
+///
+/// ```
+/// use volsurf::smile::{SabrSmile, SmileSection};
+///
+/// // Create a concrete smile and use it through the trait interface
+/// let smile = SabrSmile::new(100.0, 1.0, 0.3, 1.0, -0.3, 0.4)?;
+///
+/// let vol = smile.vol(100.0)?;
+/// assert!(vol.0 > 0.0);
+///
+/// let var = smile.variance(100.0)?;
+/// assert!((var.0 - vol.0 * vol.0 * smile.expiry()).abs() < 1e-12);
+///
+/// let report = smile.is_arbitrage_free()?;
+/// assert!(report.is_free);
+/// # Ok::<(), volsurf::VolSurfError>(())
+/// ```
 pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// Implied Black volatility σ at the given strike.
     fn vol(&self, strike: f64) -> error::Result<Vol>;

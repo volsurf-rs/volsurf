@@ -374,6 +374,29 @@ impl SsviSurface {
     ///
     /// # References
     /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use volsurf::surface::{SsviSurface, VolSurface};
+    ///
+    /// let data_3m = vec![
+    ///     (80.0, 0.30), (90.0, 0.25), (95.0, 0.23),
+    ///     (100.0, 0.21), (105.0, 0.23), (110.0, 0.25), (120.0, 0.30),
+    /// ];
+    /// let data_1y = vec![
+    ///     (80.0, 0.28), (90.0, 0.24), (95.0, 0.22),
+    ///     (100.0, 0.20), (105.0, 0.22), (110.0, 0.24), (120.0, 0.28),
+    /// ];
+    /// let surface = SsviSurface::calibrate(
+    ///     &[data_3m, data_1y],
+    ///     &[0.25, 1.0],
+    ///     &[100.0, 100.0],
+    /// )?;
+    /// let vol = surface.black_vol(0.5, 100.0)?;
+    /// assert!(vol.0 > 0.0);
+    /// # Ok::<(), volsurf::VolSurfError>(())
+    /// ```
     pub fn calibrate(
         market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
@@ -714,6 +737,19 @@ impl SsviSlice {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if any parameter is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use volsurf::surface::SsviSlice;
+    /// use volsurf::SmileSection;
+    ///
+    /// // 20% ATM vol at 1Y: theta = 0.20^2 * 1.0 = 0.04
+    /// let slice = SsviSlice::new(100.0, 1.0, -0.3, 0.5, 0.5, 0.04)?;
+    /// let vol = slice.vol(100.0)?;
+    /// assert!((vol.0 - 0.20).abs() < 0.01);
+    /// # Ok::<(), volsurf::VolSurfError>(())
+    /// ```
     pub fn new(
         forward: f64,
         expiry: f64,

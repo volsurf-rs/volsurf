@@ -30,6 +30,16 @@ use crate::validate::{validate_finite, validate_positive};
 /// - [`Svi`](SmileModel::Svi) fits a parametric 5-parameter curve (minimum 5 strikes)
 /// - [`CubicSpline`](SmileModel::CubicSpline) interpolates variance directly (minimum 3 strikes)
 /// - [`Sabr`](SmileModel::Sabr) fits the SABR stochastic vol model (minimum 4 strikes)
+///
+/// # Examples
+///
+/// ```
+/// use volsurf::surface::SmileModel;
+///
+/// let svi = SmileModel::Svi;            // default, 5+ strikes
+/// let spline = SmileModel::CubicSpline; // 3+ strikes
+/// let sabr = SmileModel::Sabr { beta: 0.5 }; // 4+ strikes, equity backbone
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SmileModel {
     /// SVI parametric model (Gatheral 2004). Requires ≥ 5 strikes per tenor.
@@ -53,6 +63,27 @@ pub enum SmileModel {
 ///
 /// Accumulates spot price, risk-free rate, and per-tenor (strikes, vols)
 /// data, then calibrates smiles and assembles a [`PiecewiseSurface`].
+///
+/// # Examples
+///
+/// ```
+/// use volsurf::surface::{SurfaceBuilder, SmileModel, VolSurface};
+///
+/// let strikes = vec![80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0];
+/// let vols = vec![0.28, 0.24, 0.22, 0.20, 0.22, 0.24, 0.28];
+///
+/// let surface = SurfaceBuilder::new()
+///     .spot(100.0)
+///     .rate(0.05)
+///     .model(SmileModel::Sabr { beta: 0.5 })
+///     .add_tenor(0.25, &strikes, &vols)
+///     .add_tenor(1.00, &strikes, &vols)
+///     .build()?;
+///
+/// let vol = surface.black_vol(0.5, 100.0)?;
+/// assert!(vol.0 > 0.0);
+/// # Ok::<(), volsurf::VolSurfError>(())
+/// ```
 pub struct SurfaceBuilder {
     spot: Option<f64>,
     rate: Option<f64>,

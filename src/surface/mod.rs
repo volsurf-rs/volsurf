@@ -37,6 +37,29 @@ use crate::types::{Variance, Vol};
 /// - Local vol is computed via [`DupireLocalVol`](crate::local_vol::DupireLocalVol)
 ///   by composing it around any `VolSurface`, not as a trait method here.
 ///   This avoids forcing every surface type to embed Dupire numerics.
+///
+/// # Examples
+///
+/// ```
+/// use volsurf::surface::{SsviSurface, VolSurface};
+///
+/// let surface = SsviSurface::new(
+///     -0.3, 0.5, 0.5,
+///     vec![0.25, 0.5, 1.0],
+///     vec![100.0, 100.0, 100.0],
+///     vec![0.04, 0.08, 0.16],
+/// )?;
+///
+/// let vol = surface.black_vol(0.5, 100.0)?;
+/// assert!(vol.0 > 0.0);
+///
+/// let var = surface.black_variance(0.5, 100.0)?;
+/// assert!((var.0 - vol.0 * vol.0 * 0.5).abs() < 1e-12);
+///
+/// let smile = surface.smile_at(0.5)?;
+/// assert!(smile.vol(100.0)?.0 > 0.0);
+/// # Ok::<(), volsurf::VolSurfError>(())
+/// ```
 pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// Black implied volatility σ(T, K).
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol>;

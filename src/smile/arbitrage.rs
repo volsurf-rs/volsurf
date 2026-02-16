@@ -30,6 +30,23 @@ impl ArbitrageReport {
     /// Merge two reports, combining all violations.
     ///
     /// The merged report is arbitrage-free only if both source reports are free.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use volsurf::smile::{ArbitrageReport, ButterflyViolation};
+    ///
+    /// let clean = ArbitrageReport::clean();
+    /// let violated = ArbitrageReport {
+    ///     is_free: false,
+    ///     butterfly_violations: vec![ButterflyViolation {
+    ///         strike: 80.0, density: -0.001, magnitude: 0.001,
+    ///     }],
+    /// };
+    /// let merged = clean.merge(&violated);
+    /// assert!(!merged.is_free);
+    /// assert_eq!(merged.butterfly_violations.len(), 1);
+    /// ```
     pub fn merge(&self, other: &ArbitrageReport) -> ArbitrageReport {
         let mut violations = self.butterfly_violations.clone();
         violations.extend(other.butterfly_violations.iter().cloned());
@@ -40,6 +57,22 @@ impl ArbitrageReport {
     }
 
     /// Return the worst (largest magnitude) butterfly violation, if any.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use volsurf::smile::{ArbitrageReport, ButterflyViolation};
+    ///
+    /// let report = ArbitrageReport {
+    ///     is_free: false,
+    ///     butterfly_violations: vec![
+    ///         ButterflyViolation { strike: 80.0, density: -0.001, magnitude: 0.001 },
+    ///         ButterflyViolation { strike: 90.0, density: -0.005, magnitude: 0.005 },
+    ///     ],
+    /// };
+    /// let worst = report.worst_violation().unwrap();
+    /// assert!((worst.magnitude - 0.005).abs() < 1e-12);
+    /// ```
     pub fn worst_violation(&self) -> Option<&ButterflyViolation> {
         self.butterfly_violations
             .iter()

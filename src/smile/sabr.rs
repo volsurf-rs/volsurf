@@ -211,6 +211,21 @@ impl SabrSmile {
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for bad inputs,
     /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use volsurf::smile::{SabrSmile, SmileSection};
+    ///
+    /// let market_vols = vec![
+    ///     (80.0, 0.28), (90.0, 0.24), (100.0, 0.20),
+    ///     (110.0, 0.22), (120.0, 0.26),
+    /// ];
+    /// let smile = SabrSmile::calibrate(100.0, 1.0, 0.5, &market_vols)?;
+    /// let vol = smile.vol(100.0)?;
+    /// assert!((vol.0 - 0.20).abs() < 0.01);
+    /// # Ok::<(), volsurf::VolSurfError>(())
+    /// ```
     pub fn calibrate(
         forward: f64,
         expiry: f64,
