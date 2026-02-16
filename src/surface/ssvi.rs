@@ -248,6 +248,77 @@ impl SsviSurface {
         self.eta / theta.powf(self.gamma)
     }
 
+    /// Partial derivative ∂w/∂θ of SSVI total variance with respect to
+    /// ATM total variance θ, at a given `(θ, k)`.
+    ///
+    /// ```text
+    /// ∂w/∂θ = (1/2) · [1 + ρ·φk·(1−γ) + R − γ·φk·(φk+ρ)/R]
+    /// ```
+    ///
+    /// where `R = √((φk + ρ)² + (1 − ρ²))` and `φ = η/θ^γ`.
+    ///
+    /// This derivative is provably non-negative for all `(θ, k)` when
+    /// `|ρ| < 1` and `γ ∈ [0, 1]`. The expression is linear in γ: at
+    /// γ = 0 it equals `w/θ > 0`; at γ = 1 it equals `(1 + (1+ρφk)/R)/2 ≥ 0`
+    /// because `(1 + uρ)² ≤ R²` follows from `|ρ| < 1`. Linearity in γ
+    /// then guarantees non-negativity for all `γ ∈ [0, 1]`.
+    ///
+    /// # References
+    /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), §4
+    pub(crate) fn dw_dtheta(&self, theta: f64, k: f64) -> f64 {
+        let phi = self.eta / theta.powf(self.gamma);
+        let u = phi * k;
+        let r = ((u + self.rho).powi(2) + self.one_minus_rho_sq).sqrt();
+        0.5 * (1.0 + self.rho * u * (1.0 - self.gamma) + r
+            - self.gamma * u * (u + self.rho) / r)
+    }
+
+    /// Analytical calendar arbitrage check for this SSVI surface.
+    ///
+    /// Scans `∂w/∂θ` (see [`dw_dtheta`](Self::dw_dtheta)) on a grid of
+    /// `(θ, k)` points at each consecutive tenor pair. Returns calendar
+    /// violations where the derivative is negative, indicating total
+    /// variance would decrease with increasing ATM variance.
+    ///
+    /// For valid SSVI surfaces with power-law `φ(θ) = η/θ^γ`, `γ ∈ [0, 1]`,
+    /// and `|ρ| < 1`, this always returns an empty vector because `∂w/∂θ ≥ 0`
+    /// is mathematically guaranteed. The scan serves as empirical confirmation
+    /// of the analytical bound.
+    ///
+    /// # References
+    /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
+    pub fn calendar_arb_analytical(&self) -> Vec<CalendarViolation> {
+        const K_GRID: usize = 41;
+        const K_MIN: f64 = -2.0;
+        const K_MAX: f64 = 2.0;
+        const TOL: f64 = -1e-10;
+
+        let mut violations = Vec::new();
+
+        for i in 0..self.tenors.len().saturating_sub(1) {
+            let theta = self.thetas[i];
+            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
+
+            for j in 0..K_GRID {
+                let k = K_MIN + (K_MAX - K_MIN) * (j as f64) / ((K_GRID - 1) as f64);
+                if self.dw_dtheta(theta, k) < TOL {
+                    let strike = f_avg * k.exp();
+                    let k_short = (strike / self.forwards[i]).ln();
+                    let k_long = (strike / self.forwards[i + 1]).ln();
+                    violations.push(CalendarViolation {
+                        strike,
+                        tenor_short: self.tenors[i],
+                        tenor_long: self.tenors[i + 1],
+                        variance_short: self.total_variance_at(self.thetas[i], k_short),
+                        variance_long: self.total_variance_at(self.thetas[i + 1], k_long),
+                    });
+                }
+            }
+        }
+
+        violations
+    }
+
     /// Interpolate `(θ, F)` at an arbitrary expiry.
     ///
     /// - **Exact match** (within 1e-10): uses stored values directly.
@@ -1523,6 +1594,157 @@ mod tests {
         let diag = s.diagnostics().unwrap();
         assert!(diag.calendar_violations.is_empty());
         assert_eq!(diag.smile_reports.len(), 1);
+    }
+
+    // ========== Calendar arbitrage tests (T12) ==========
+
+    #[test]
+    fn dw_dtheta_at_atm_equals_one() {
+        // At k=0: w(0,θ) = θ, so ∂w/∂θ = 1 exactly.
+        let s = equity_surface();
+        for &theta in s.thetas() {
+            let deriv = s.dw_dtheta(theta, 0.0);
+            assert_abs_diff_eq!(deriv, 1.0, epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn dw_dtheta_non_negative_conservative() {
+        // Scan ∂w/∂θ ≥ 0 across a wide grid for conservative parameters.
+        // Gatheral-Jacquier (2014): power-law SSVI with γ ∈ [0,1] guarantees
+        // ∂w/∂θ ≥ 0 for all (θ, k).
+        let s = equity_surface();
+        for &theta in s.thetas() {
+            for i in -40..=40 {
+                let k = i as f64 * 0.1;
+                let deriv = s.dw_dtheta(theta, k);
+                assert!(
+                    deriv >= -1e-14,
+                    "dw/dθ({theta}, {k}) = {deriv} should be non-negative"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dw_dtheta_non_negative_extreme_params() {
+        // Extreme rho and eta: ∂w/∂θ ≥ 0 must still hold.
+        let s = SsviSurface::new(
+            -0.95, 3.0, 0.99,
+            vec![0.25, 0.5, 1.0],
+            vec![100.0, 100.0, 100.0],
+            vec![0.01, 0.05, 0.20],
+        ).unwrap();
+        for &theta in s.thetas() {
+            for i in -30..=30 {
+                let k = i as f64 * 0.1;
+                let deriv = s.dw_dtheta(theta, k);
+                assert!(
+                    deriv >= -1e-12,
+                    "dw/dθ({theta}, {k}) = {deriv} should be non-negative even for extreme params"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dw_dtheta_gamma_zero_equals_w_over_theta() {
+        // γ = 0 ⟹ φ is constant in θ ⟹ ∂w/∂θ = w/θ (no smile decay).
+        let s = SsviSurface::new(
+            -0.3, 0.5, 0.0,
+            vec![1.0], vec![100.0], vec![0.16],
+        ).unwrap();
+        let theta = 0.16;
+        for &k in &[-1.0, -0.5, 0.0, 0.5, 1.0] {
+            let deriv = s.dw_dtheta(theta, k);
+            let w = s.total_variance_at(theta, k);
+            assert_abs_diff_eq!(deriv, w / theta, epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn calendar_arb_analytical_clean_for_valid_surface() {
+        // Valid SSVI surface: analytical check returns no violations.
+        let s = equity_surface();
+        let violations = s.calendar_arb_analytical();
+        assert!(
+            violations.is_empty(),
+            "valid SSVI should be analytically calendar-arb-free, got {} violations",
+            violations.len()
+        );
+    }
+
+    #[test]
+    fn calendar_arb_analytical_and_numerical_agree() {
+        // Both numerical (diagnostics) and analytical checks agree:
+        // no calendar violations for a valid SSVI surface.
+        let s = equity_surface();
+        let diag = s.diagnostics().unwrap();
+        let analytical = s.calendar_arb_analytical();
+        assert!(diag.calendar_violations.is_empty(), "numerical check should find no violations");
+        assert!(analytical.is_empty(), "analytical check should find no violations");
+    }
+
+    #[test]
+    fn calendar_violation_detected_for_inverted_ssvi_slices() {
+        // Create SSVI slices with inverted thetas (short tenor has HIGHER
+        // ATM total variance) and verify calendar violations are detected
+        // when composed into a PiecewiseSurface.
+        use crate::surface::PiecewiseSurface;
+
+        let slice_short = SsviSlice::new(100.0, 0.5, -0.3, 0.5, 0.5, 0.20).unwrap();
+        let slice_long = SsviSlice::new(100.0, 1.0, -0.3, 0.5, 0.5, 0.08).unwrap();
+
+        let surface = PiecewiseSurface::new(
+            vec![0.5, 1.0],
+            vec![Box::new(slice_short), Box::new(slice_long)],
+        ).unwrap();
+
+        let diag = surface.diagnostics().unwrap();
+        assert!(!diag.is_free, "inverted SSVI slices should have calendar violations");
+        assert!(
+            !diag.calendar_violations.is_empty(),
+            "should detect calendar violations for inverted thetas"
+        );
+        // Verify violation direction: short tenor variance > long tenor variance
+        for v in &diag.calendar_violations {
+            assert!(
+                v.variance_short > v.variance_long,
+                "short tenor variance ({}) should exceed long ({})",
+                v.variance_short, v.variance_long
+            );
+        }
+    }
+
+    #[test]
+    fn calendar_arb_analytical_single_tenor() {
+        // Single tenor: no consecutive pairs, so no calendar violations.
+        let s = SsviSurface::new(
+            -0.3, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.16],
+        ).unwrap();
+        assert!(s.calendar_arb_analytical().is_empty());
+    }
+
+    #[test]
+    fn calendar_arb_clean_for_barely_increasing_thetas() {
+        // Thetas barely above each other — both checks should still pass.
+        let s = SsviSurface::new(
+            -0.3, 0.5, 0.5,
+            vec![0.5, 1.0],
+            vec![100.0, 100.0],
+            vec![0.04, 0.04001],
+        ).unwrap();
+        let diag = s.diagnostics().unwrap();
+        assert!(
+            diag.calendar_violations.is_empty(),
+            "barely increasing thetas should still pass numerical calendar checks"
+        );
+        let analytical = s.calendar_arb_analytical();
+        assert!(
+            analytical.is_empty(),
+            "barely increasing thetas should still pass analytical calendar checks"
+        );
     }
 
     // ================================================================
