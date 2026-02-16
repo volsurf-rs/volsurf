@@ -39,7 +39,7 @@ pub(crate) fn validate_finite(value: f64, name: &str) -> crate::error::Result<f6
 mod tests {
     use super::*;
 
-    // --- Gap #6: validate edge cases ---
+    // Gap #6: validate edge cases
 
     // validate_positive
 

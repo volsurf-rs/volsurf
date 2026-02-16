@@ -125,22 +125,22 @@ impl SabrSmile {
         })
     }
 
-    /// Returns the alpha (ATM vol scale) parameter.
+    /// ATM vol scale parameter.
     pub fn alpha(&self) -> f64 {
         self.alpha
     }
 
-    /// Returns the beta (CEV exponent) parameter.
+    /// CEV exponent (0 = normal, 1 = lognormal).
     pub fn beta(&self) -> f64 {
         self.beta
     }
 
-    /// Returns the rho (spot-vol correlation) parameter.
+    /// Spot-vol correlation.
     pub fn rho(&self) -> f64 {
         self.rho
     }
 
-    /// Returns the nu (vol-of-vol) parameter.
+    /// Vol-of-vol.
     pub fn nu(&self) -> f64 {
         self.nu
     }
@@ -258,7 +258,7 @@ impl SabrSmile {
         /// Maximum Newton iterations for alpha solver.
         const ALPHA_MAX_ITER: usize = 50;
 
-        // --- Input validation ---
+        // Input validation
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
         if !(0.0..=1.0).contains(&beta) || !beta.is_finite() {
@@ -279,11 +279,11 @@ impl SabrSmile {
             validate_positive(vol, "implied vol")?;
         }
 
-        // --- Interpolate ATM vol from market data ---
+        // Interpolate ATM vol from market data
         let sigma_atm = interpolate_atm_vol(forward, market_vols);
         let f_beta = forward.powf(1.0 - beta);
 
-        // --- Alpha solver: Newton iteration on the ATM cubic ---
+        // Alpha solver: Newton iteration on the ATM cubic
         //
         // ATM Hagan formula (K = F):
         //   σ_ATM = (α / F^(1-β)) * [1 + T·(A·α² + B·α + C)]
@@ -332,7 +332,7 @@ impl SabrSmile {
             }
         };
 
-        // --- Objective function in transformed space ---
+        // Objective function in transformed space
         // x → rho = tanh(x), y → nu = exp(y)
         let objective = |x: f64, y: f64| -> f64 {
             let rho = x.tanh();
@@ -361,7 +361,7 @@ impl SabrSmile {
             rss
         };
 
-        // --- Grid search over transformed (x, y) space ---
+        // Grid search over transformed (x, y) space
         let x_lo = -1.5_f64; // tanh(-1.5) ≈ -0.905
         let x_hi = 1.5_f64; // tanh(1.5) ≈ 0.905
         let y_lo = (-2.0_f64).max((0.01_f64).ln()); // nu ≥ 0.01
@@ -392,7 +392,7 @@ impl SabrSmile {
             });
         }
 
-        // --- Nelder-Mead 2D refinement ---
+        // Nelder-Mead 2D refinement
         let step_x = (x_hi - x_lo) / (GRID_N as f64) * 0.5;
         let step_y = (y_hi - y_lo) / (GRID_N as f64) * 0.5;
 
@@ -404,7 +404,7 @@ impl SabrSmile {
         let nm_result =
             crate::optim::nelder_mead_2d(objective, best_x, best_y, step_x, step_y, &nm_config);
 
-        // --- Recover final parameters ---
+        // Recover final parameters
         let rho = nm_result.x.tanh();
         let nu = nm_result.y.exp();
         let alpha = solve_alpha(rho, nu).ok_or_else(|| VolSurfError::CalibrationError {
@@ -527,8 +527,6 @@ mod tests {
         SabrSmile::new(F, T, ALPHA, BETA, RHO, NU).unwrap()
     }
 
-    // --- Valid construction ---
-
     #[test]
     fn new_valid_params() {
         let s = make_smile();
@@ -545,8 +543,6 @@ mod tests {
         let s = SabrSmile::new(F, T, ALPHA, BETA, 0.5, NU).unwrap();
         assert_eq!(s.rho(), 0.5);
     }
-
-    // --- Edge cases that must succeed ---
 
     #[test]
     fn new_beta_zero() {
@@ -587,8 +583,6 @@ mod tests {
         assert_eq!(s.rho(), 0.0);
     }
 
-    // --- Invalid forward ---
-
     #[test]
     fn new_rejects_zero_forward() {
         let r = SabrSmile::new(0.0, T, ALPHA, BETA, RHO, NU);
@@ -613,8 +607,6 @@ mod tests {
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Invalid expiry ---
-
     #[test]
     fn new_rejects_zero_expiry() {
         let r = SabrSmile::new(F, 0.0, ALPHA, BETA, RHO, NU);
@@ -632,8 +624,6 @@ mod tests {
         let r = SabrSmile::new(F, f64::NAN, ALPHA, BETA, RHO, NU);
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
-
-    // --- Invalid alpha ---
 
     #[test]
     fn new_rejects_zero_alpha() {
@@ -659,8 +649,6 @@ mod tests {
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Invalid beta ---
-
     #[test]
     fn new_rejects_negative_beta() {
         let r = SabrSmile::new(F, T, ALPHA, -0.1, RHO, NU);
@@ -684,8 +672,6 @@ mod tests {
         let r = SabrSmile::new(F, T, ALPHA, f64::INFINITY, RHO, NU);
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
-
-    // --- Invalid rho ---
 
     #[test]
     fn new_rejects_rho_plus_one() {
@@ -717,8 +703,6 @@ mod tests {
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Invalid nu ---
-
     #[test]
     fn new_rejects_negative_nu() {
         let r = SabrSmile::new(F, T, ALPHA, BETA, RHO, -0.1);
@@ -737,16 +721,12 @@ mod tests {
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Accessors from SmileSection ---
-
     #[test]
     fn smile_section_forward_and_expiry() {
         let s = make_smile();
         assert_eq!(SmileSection::forward(&s), F);
         assert_eq!(SmileSection::expiry(&s), T);
     }
-
-    // --- Serde round-trip ---
 
     #[test]
     fn serde_round_trip() {
@@ -769,8 +749,6 @@ mod tests {
     fn make_equity_smile() -> SabrSmile {
         SabrSmile::new(F, T, EQ_ALPHA, BETA, RHO, NU).unwrap()
     }
-
-    // --- ATM tests ---
 
     #[test]
     fn vol_atm_returns_positive() {
@@ -797,8 +775,6 @@ mod tests {
         );
     }
 
-    // --- General case ---
-
     #[test]
     fn vol_otm_call() {
         let s = make_equity_smile();
@@ -812,8 +788,6 @@ mod tests {
         let v = s.vol(80.0).unwrap();
         assert!(v.0 > 0.0, "ITM call vol should be positive");
     }
-
-    // --- ATM boundary continuity ---
 
     #[test]
     fn vol_atm_boundary_continuity() {
@@ -846,8 +820,6 @@ mod tests {
         );
     }
 
-    // --- beta = 0 (normal SABR) ---
-
     #[test]
     fn vol_beta_zero_normal_sabr() {
         // beta=0: normal SABR, ATM vol ≈ alpha/F
@@ -865,8 +837,6 @@ mod tests {
         assert!(s.vol(90.0).unwrap().0 > 0.0);
     }
 
-    // --- beta = 1 (lognormal SABR) ---
-
     #[test]
     fn vol_beta_one_lognormal_sabr() {
         // beta=1: lognormal SABR, ATM vol ≈ alpha
@@ -881,8 +851,6 @@ mod tests {
             "Lognormal ATM: expected {expected}, got {v}"
         );
     }
-
-    // --- nu = 0 (CEV limit) ---
 
     #[test]
     fn vol_nu_zero_cev_limit() {
@@ -922,8 +890,6 @@ mod tests {
         );
     }
 
-    // --- Skew from rho ---
-
     #[test]
     fn vol_rho_zero_symmetric_smile() {
         // rho=0, beta=1: the lognormal SABR smile is symmetric in log-moneyness
@@ -952,8 +918,6 @@ mod tests {
         );
     }
 
-    // --- Strike validation ---
-
     #[test]
     fn vol_rejects_zero_strike() {
         let s = make_equity_smile();
@@ -978,8 +942,6 @@ mod tests {
         ));
     }
 
-    // --- Variance consistency ---
-
     #[test]
     fn vol_variance_consistency() {
         // variance() = vol()² * T (from SmileSection default impl)
@@ -993,8 +955,6 @@ mod tests {
             "variance={var} should equal vol²·T={expected_var}"
         );
     }
-
-    // --- Taylor expansion boundary ---
 
     #[test]
     fn vol_taylor_boundary_smooth() {
@@ -1014,8 +974,6 @@ mod tests {
             "Taylor boundary should be smooth: {v1} vs {v2}"
         );
     }
-
-    // --- Extreme parameters ---
 
     #[test]
     fn vol_extreme_rho() {
@@ -1056,8 +1014,6 @@ mod tests {
         );
     }
 
-    // --- Cross-check: general formula approaches ATM formula ---
-
     #[test]
     fn vol_general_approaches_atm() {
         // As K → F from both sides, general formula should approach ATM formula
@@ -1072,8 +1028,6 @@ mod tests {
             );
         }
     }
-
-    // --- 12-digit accuracy: general formula self-consistency ---
 
     #[test]
     fn vol_twelve_digit_accuracy_beta_one() {
@@ -1136,8 +1090,6 @@ mod tests {
         );
     }
 
-    // --- Multi-strike consistency ---
-
     #[test]
     fn vol_multiple_strikes_reasonable() {
         let s = make_equity_smile();
@@ -1162,8 +1114,6 @@ mod tests {
     // ========================================================================
     // SmileSection trait completion tests (T03)
     // ========================================================================
-
-    // --- density() tests ---
 
     #[test]
     fn density_positive_for_typical_params() {
@@ -1215,8 +1165,6 @@ mod tests {
         );
     }
 
-    // --- variance() consistency ---
-
     #[test]
     fn variance_equals_vol_squared_times_t() {
         let s = make_equity_smile();
@@ -1230,8 +1178,6 @@ mod tests {
             );
         }
     }
-
-    // --- is_arbitrage_free() tests ---
 
     #[test]
     fn arb_free_well_behaved_params() {
@@ -1307,15 +1253,11 @@ mod tests {
         }
     }
 
-    // --- Send + Sync ---
-
     #[test]
     fn sabr_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<SabrSmile>();
     }
-
-    // --- SmileSection trait object ---
 
     #[test]
     fn sabr_as_trait_object() {
@@ -1581,7 +1523,6 @@ mod tests {
         alpha / denom * z_over_xz * correction
     }
 
-    // --- Set 1: Equity-like parameters (β = 0.5) ---
     // Hagan (2002) Eq. (2.17a): F=100, T=1, α=2.0, β=0.5, ρ=−0.3, ν=0.4
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=60 (deep ITM put).
@@ -1727,7 +1668,6 @@ mod tests {
         );
     }
 
-    // --- Set 2: Interest rate parameters (β = 0, normal SABR) ---
     // Hagan (2002) Eq. (2.17a): F=0.05, T=2, α=0.01, β=0, ρ=−0.2, ν=0.3
 
     /// Hagan (2002) Eq. (2.17a), normal SABR (β=0), full strike range.
@@ -1753,7 +1693,6 @@ mod tests {
         }
     }
 
-    // --- Set 3: Lognormal parameters (β = 1) ---
     // Hagan (2002) Eq. (2.17a): F=100, T=0.5, α=0.20, β=1, ρ=−0.5, ν=0.6
 
     /// Hagan (2002) Eq. (2.17a), lognormal SABR (β=1), full strike range.
@@ -1778,8 +1717,6 @@ mod tests {
             );
         }
     }
-
-    // --- Edge case: ν → 0 (CEV limit) ---
 
     /// Hagan (2002) Eq. (2.17a), CEV limit (ν=1e-10).
     /// As ν → 0, SABR reduces to CEV: σ_B = α·F^(β-1).
@@ -1815,8 +1752,6 @@ mod tests {
         }
     }
 
-    // --- Edge case: short expiry ---
-
     /// Hagan (2002) Eq. (2.17a), T=0.01 (1-week expiry).
     /// Short expiry: correction factor ≈ 1.
     #[test]
@@ -1834,8 +1769,6 @@ mod tests {
         }
     }
 
-    // --- Edge case: long expiry ---
-
     /// Hagan (2002) Eq. (2.17a), T=10 (10-year expiry).
     /// Long expiry: correction factor is large.
     #[test]
@@ -1852,8 +1785,6 @@ mod tests {
             );
         }
     }
-
-    // --- ATM continuity across Taylor boundary ---
 
     /// Hagan (2002) Eq. (2.17a), ATM continuity.
     /// Verifies K → F from both sides produces continuous vol.
@@ -1877,8 +1808,6 @@ mod tests {
             );
         }
     }
-
-    // --- Far OTM validation ---
 
     /// Hagan (2002) Eq. (2.17a), deep OTM strikes.
     /// K = 0.1F and K = 5F — formula remains valid for large log-moneyness.
@@ -1905,8 +1834,6 @@ mod tests {
         );
     }
 
-    // --- Additional parameter set: moderate skew, equity ---
-
     /// Hagan (2002) Eq. (2.17a), second equity set with different params.
     /// F=50, T=0.25, α=1.5, β=0.5, ρ=−0.15, ν=0.25.
     #[test]
@@ -1928,8 +1855,6 @@ mod tests {
             );
         }
     }
-
-    // --- Taylor boundary crossing test ---
 
     /// Hagan (2002) Eq. (2.17a), Taylor/exact branch boundary.
     /// Verifies no discontinuity at |z| = 1e-6 where we switch between
@@ -1960,8 +1885,6 @@ mod tests {
             );
         }
     }
-
-    // --- Skew direction validation ---
 
     /// Hagan (2002), Section 2: negative ρ produces downward-sloping skew.
     /// With β < 1, the combination of CEV backbone and negative ρ gives
@@ -1994,8 +1917,6 @@ mod tests {
             "ρ>0: vol(K>F)={v_high} should > vol(K<F)={v_low}"
         );
     }
-
-    // --- Calibration round-trip with deterministic noise ---
 
     /// Calibration round-trip with ~50bps deterministic noise.
     /// Hagan (2002) parameters, equity-like. Tests robustness of the

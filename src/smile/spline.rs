@@ -80,7 +80,7 @@ impl SplineSmile {
         strikes: Vec<f64>,
         variances: Vec<f64>,
     ) -> error::Result<Self> {
-        // --- Input validation ---
+        // Input validation
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
         if strikes.len() != variances.len() {
@@ -130,7 +130,7 @@ impl SplineSmile {
             }
         }
 
-        // --- Compute spline coefficients via Thomas algorithm ---
+        // Compute spline coefficients via Thomas algorithm
         let n = strikes.len();
         let coeffs = build_spline_coefficients(&strikes, &variances, n);
 
@@ -294,8 +294,6 @@ mod tests {
         SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.04, 0.04, 0.04]).unwrap()
     }
 
-    // --- Constructor validation tests ---
-
     #[test]
     fn rejects_fewer_than_3_points() {
         let result = SplineSmile::new(100.0, 0.25, vec![1.0, 2.0], vec![0.04, 0.04]);
@@ -371,8 +369,6 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Interpolation tests ---
-
     #[test]
     fn interpolates_through_knot_points() {
         // Spline must pass through knot points exactly.
@@ -430,8 +426,6 @@ mod tests {
         }
     }
 
-    // --- Extrapolation tests ---
-
     #[test]
     fn extrapolation_below_range_returns_first_variance() {
         let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
@@ -463,8 +457,6 @@ mod tests {
             assert!(vol.0.is_finite(), "vol at K={k} should be finite");
         }
     }
-
-    // --- Mid-interval accuracy: cubic recovery ---
 
     #[test]
     fn recovers_linear_function_exactly() {
@@ -505,8 +497,6 @@ mod tests {
         }
     }
 
-    // --- Density tests ---
-
     #[test]
     fn density_non_negative_for_convex_smile() {
         // A convex (U-shaped) variance smile should have non-negative density.
@@ -543,8 +533,6 @@ mod tests {
         assert_abs_diff_eq!(integral, 1.0, epsilon = 0.10);
     }
 
-    // --- Arbitrage check ---
-
     #[test]
     fn convex_smile_is_arbitrage_free() {
         let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
@@ -558,8 +546,6 @@ mod tests {
             report.butterfly_violations.len()
         );
     }
-
-    // --- Forward/expiry accessors ---
 
     #[test]
     fn forward_accessor() {
@@ -580,15 +566,11 @@ mod tests {
         assert_abs_diff_eq!(smile.expiry(), 0.25, epsilon = 1e-14);
     }
 
-    // --- 3-point minimum ---
-
     #[test]
     fn three_points_works() {
         let smile = SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.06, 0.04, 0.06]);
         assert!(smile.is_ok());
     }
-
-    // --- Zero variance at a knot ---
 
     #[test]
     fn zero_variance_produces_zero_vol() {
@@ -598,7 +580,7 @@ mod tests {
         assert_abs_diff_eq!(vol.0, 0.0, epsilon = 1e-14);
     }
 
-    // --- Monotonicity of variance on monotone input ---
+    // Monotonicity of variance on monotone input
 
     #[test]
     fn spline_is_smooth() {
@@ -622,8 +604,6 @@ mod tests {
             prev_vol = vol;
         }
     }
-
-    // --- Strike validation in vol()/variance() ---
 
     #[test]
     fn vol_rejects_nan_strike() {
@@ -670,7 +650,7 @@ mod tests {
         ));
     }
 
-    // --- Gap #5: negative interpolated variance error path ---
+    // Gap #5: negative interpolated variance error path
 
     /// Construct a SplineSmile that will overshoot into negative variance,
     /// bypassing new()'s validation by building with borderline-valid data
@@ -725,7 +705,7 @@ mod tests {
         );
     }
 
-    // --- Gap #16: Default density() error propagation ---
+    // Gap #16: Default density() error propagation
     //
     // SplineSmile uses the default SmileSection::density() implementation
     // (Breeden-Litzenberger via finite differences). When vol() fails,

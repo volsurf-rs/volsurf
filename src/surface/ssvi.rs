@@ -95,7 +95,7 @@ impl SsviSurface {
         forwards: Vec<f64>,
         thetas: Vec<f64>,
     ) -> error::Result<Self> {
-        // --- Scalar validation ---
+        // Scalar validation
         if rho.abs() >= 1.0 || rho.is_nan() {
             return Err(VolSurfError::InvalidInput {
                 message: format!("|rho| must be less than 1, got {rho}"),
@@ -108,7 +108,7 @@ impl SsviSurface {
             });
         }
 
-        // --- Vector length checks ---
+        // Vector length checks
         if tenors.is_empty() {
             return Err(VolSurfError::InvalidInput {
                 message: "at least one tenor is required".into(),
@@ -133,7 +133,7 @@ impl SsviSurface {
             });
         }
 
-        // --- Element-wise validation ---
+        // Element-wise validation
         for (i, &t) in tenors.iter().enumerate() {
             if !t.is_finite() || t <= 0.0 {
                 return Err(VolSurfError::InvalidInput {
@@ -156,7 +156,7 @@ impl SsviSurface {
             }
         }
 
-        // --- Monotonicity checks ---
+        // Monotonicity checks
         for w in tenors.windows(2) {
             if w[1] <= w[0] {
                 return Err(VolSurfError::InvalidInput {
@@ -408,7 +408,7 @@ impl SsviSurface {
         /// Objective value spread convergence threshold.
         const NM_FVALUE_TOL: f64 = 1e-12;
 
-        // --- Input validation ---
+        // Input validation
         if tenors.len() < MIN_TENORS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -442,7 +442,7 @@ impl SsviSurface {
             }
         }
 
-        // --- Stage 1: Per-tenor SVI calibration ---
+        // Stage 1: Per-tenor SVI calibration
         let n_tenors = tenors.len();
         let mut thetas = Vec::with_capacity(n_tenors);
         let mut rho_sum = 0.0;
@@ -467,7 +467,7 @@ impl SsviSurface {
         let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
         let one_minus_rho_sq = 1.0 - rho_global * rho_global;
 
-        // --- Prepare observation triples: (theta, log_moneyness, total_variance) ---
+        // Prepare observation triples: (theta, log_moneyness, total_variance)
         let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
         for (i, market_vols) in market_data.iter().enumerate() {
             for &(strike, vol) in market_vols {
@@ -477,7 +477,7 @@ impl SsviSurface {
             }
         }
 
-        // --- Stage 2: Optimize (eta, gamma) ---
+        // Stage 2: Optimize (eta, gamma)
         let objective = |eta: f64, gamma: f64| -> f64 {
             if eta <= 0.0 || !eta.is_finite() || !gamma.is_finite() || !(0.0..=1.0).contains(&gamma)
             {
@@ -668,10 +668,6 @@ fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
         .map(|i| forward * (ln_lo + step * i as f64).exp())
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// SsviSlice — single-tenor slice through an SSVI surface
-// ---------------------------------------------------------------------------
 
 /// A single-tenor slice through an SSVI surface.
 ///

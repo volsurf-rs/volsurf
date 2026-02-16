@@ -40,8 +40,6 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
-    // --- forward_price() tests ---
-
     #[test]
     fn forward_price_known_value() {
         // spot=100, rate=0.05, expiry=1.0 → F = 100 * e^0.05 ≈ 105.127
@@ -83,8 +81,6 @@ mod tests {
         assert_abs_diff_eq!(f2 / f1, expected_ratio, epsilon = 1e-10);
     }
 
-    // --- log_moneyness() tests ---
-
     #[test]
     fn log_moneyness_atm() {
         // ATM: strike == forward → k = ln(1) = 0
@@ -117,8 +113,6 @@ mod tests {
         let k2 = log_moneyness(100.0, 120.0);
         assert_abs_diff_eq!(k1, -k2, epsilon = 1e-10);
     }
-
-    // --- moneyness() tests ---
 
     #[test]
     fn moneyness_atm() {
@@ -161,7 +155,7 @@ mod tests {
         assert_abs_diff_eq!(m1 * m2, 1.0, epsilon = 1e-10);
     }
 
-    // --- Gap #3: log_moneyness/moneyness with zero forward ---
+    // Gap #3: log_moneyness/moneyness with zero forward
 
     #[test]
     fn log_moneyness_zero_forward_returns_inf() {
@@ -194,7 +188,7 @@ mod tests {
         assert_abs_diff_eq!(m, 0.0, epsilon = 1e-15);
     }
 
-    // --- Gap #4: NaN and Inf inputs ---
+    // Gap #4: NaN and Inf inputs
 
     #[test]
     fn log_moneyness_nan_strike_returns_nan() {
@@ -233,7 +227,7 @@ mod tests {
         assert!(forward_price(100.0, 0.05, f64::NAN).is_nan());
     }
 
-    // --- Gap #5: StickyKind enum ---
+    // Gap #5: StickyKind enum
 
     #[test]
     fn sticky_kind_debug_display() {

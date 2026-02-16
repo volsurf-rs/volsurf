@@ -40,7 +40,7 @@ pub enum VolSurfError {
 mod tests {
     use super::*;
 
-    // --- Gap #2: Structured error field access ---
+    // Gap #2: Structured error field access
 
     #[test]
     fn calibration_error_fields_accessible() {

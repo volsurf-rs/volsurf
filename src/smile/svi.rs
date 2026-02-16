@@ -111,7 +111,7 @@ impl SviSmile {
         })
     }
 
-    /// Returns the SVI rho (skew) parameter.
+    /// Skew parameter.
     pub fn rho(&self) -> f64 {
         self.rho
     }
@@ -153,7 +153,7 @@ impl SviSmile {
         /// Objective value spread convergence threshold.
         const NM_FVALUE_TOL: f64 = 1e-12;
 
-        // --- Input validation ---
+        // Input validation
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
         if market_vols.len() < MIN_POINTS {
@@ -169,7 +169,7 @@ impl SviSmile {
             validate_positive(vol, "implied vol")?;
         }
 
-        // --- Convert to log-moneyness / total-variance ---
+        // Convert to log-moneyness / total-variance
         let k_vals: Vec<f64> = market_vols
             .iter()
             .map(|&(s, _)| (s / forward).ln())
@@ -180,7 +180,7 @@ impl SviSmile {
         let k_max = k_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let k_range = (k_max - k_min).max(0.1);
 
-        // --- Inner linear solve: for fixed (m, sigma), solve for (a, b*rho, b) ---
+        // Inner linear solve: for fixed (m, sigma), solve for (a, b*rho, b)
         let inner_solve = |m: f64, sigma: f64| -> Option<(f64, f64, f64, f64)> {
             let n = k_vals.len();
             let a_mat = DMatrix::<f64>::from_fn(n, 3, |i, j| {
@@ -229,7 +229,7 @@ impl SviSmile {
             }
         };
 
-        // --- Grid search ---
+        // Grid search
         let m_lo = k_min - 0.5 * k_range;
         let m_hi = k_max + 0.5 * k_range;
         let sigma_lo = 0.01_f64;
@@ -260,7 +260,7 @@ impl SviSmile {
             });
         }
 
-        // --- Nelder-Mead 2D optimization over (m, sigma) ---
+        // Nelder-Mead 2D optimization over (m, sigma)
         let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
         let step_s = ((sigma_hi - sigma_lo) / (GRID_N as f64) * 0.5).max(0.001);
 
@@ -272,7 +272,7 @@ impl SviSmile {
         let nm_result =
             crate::optim::nelder_mead_2d(objective, best_m, best_sigma, step_m, step_s, &nm_config);
 
-        // --- Recover final parameters ---
+        // Recover final parameters
         let (opt_m, opt_sigma) = (nm_result.x, nm_result.y);
 
         let (a, b_rho, b, _rss) =
@@ -458,8 +458,6 @@ mod tests {
         SviSmile::new(F, T, A, B, RHO, M, SIGMA).unwrap()
     }
 
-    // --- Constructor validation ---
-
     #[test]
     fn new_valid_params() {
         let smile = SviSmile::new(F, T, A, B, RHO, M, SIGMA);
@@ -554,8 +552,6 @@ mod tests {
         assert!(r.is_ok());
     }
 
-    // --- vol() basic behavior ---
-
     #[test]
     fn vol_atm() {
         let smile = make_smile();
@@ -591,8 +587,6 @@ mod tests {
         assert_abs_diff_eq!(vol.0, expected_vol, epsilon = 1e-14);
     }
 
-    // --- ATM symmetry with rho=0, m=0 ---
-
     #[test]
     fn atm_symmetry_rho_zero() {
         let smile = SviSmile::new(F, T, A, B, 0.0, 0.0, SIGMA).unwrap();
@@ -605,8 +599,6 @@ mod tests {
             assert_abs_diff_eq!(v1.0, v2.0, epsilon = 1e-14);
         }
     }
-
-    // --- Skew with rho < 0 ---
 
     #[test]
     fn skew_negative_rho() {
@@ -633,8 +625,6 @@ mod tests {
         );
     }
 
-    // --- vol() error cases ---
-
     #[test]
     fn vol_rejects_zero_strike() {
         let smile = make_smile();
@@ -649,8 +639,6 @@ mod tests {
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- variance() default impl consistency ---
-
     #[test]
     fn variance_consistent_with_vol() {
         let smile = make_smile();
@@ -659,8 +647,6 @@ mod tests {
         // variance = vol^2 * T
         assert_abs_diff_eq!(var.0, vol.0 * vol.0 * T, epsilon = 1e-14);
     }
-
-    // --- b = 0 gives flat smile ---
 
     #[test]
     fn flat_smile_with_zero_b() {
@@ -675,16 +661,12 @@ mod tests {
         assert_abs_diff_eq!(vol_120.0, expected, epsilon = 1e-14);
     }
 
-    // --- forward() and expiry() ---
-
     #[test]
     fn forward_and_expiry_accessors() {
         let smile = make_smile();
         assert_eq!(smile.forward(), F);
         assert_eq!(smile.expiry(), T);
     }
-
-    // --- density() tests ---
 
     fn make_arb_free_smile() -> SviSmile {
         // Wider sigma for clean arb-free behavior
@@ -775,8 +757,6 @@ mod tests {
         }
     }
 
-    // --- is_arbitrage_free() tests ---
-
     #[test]
     fn arb_free_params_clean_report() {
         let smile = make_arb_free_smile();
@@ -808,8 +788,6 @@ mod tests {
         let report = smile.is_arbitrage_free().unwrap();
         assert!(report.is_free);
     }
-
-    // --- calibrate() tests ---
 
     /// Generate synthetic market data from known SVI params.
     fn synthetic_market_data(smile: &SviSmile, strikes: &[f64]) -> Vec<(f64, f64)> {
@@ -947,7 +925,7 @@ mod tests {
         );
     }
 
-    // --- Gap #4: m and a parameter validation ---
+    // Gap #4: m and a parameter validation
 
     #[test]
     fn new_rejects_nan_m() {
@@ -979,7 +957,7 @@ mod tests {
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Gap #2: vol() negative variance error path ---
+    // Gap #2: vol() negative variance error path
 
     /// Construct an SVI with invalid params (bypassing new() validation)
     /// to test error paths that require negative total variance.
@@ -1008,7 +986,7 @@ mod tests {
         );
     }
 
-    // --- Gap #3: density() non-positive variance error path ---
+    // Gap #3: density() non-positive variance error path
 
     #[test]
     fn density_returns_error_when_total_variance_non_positive() {

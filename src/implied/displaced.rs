@@ -70,7 +70,7 @@ impl DisplacedImpliedVol {
 mod tests {
     use super::*;
 
-    // --- Gap #15: Beta boundary values ---
+    // Gap #15: Beta boundary values
 
     #[test]
     fn new_accepts_beta_zero() {

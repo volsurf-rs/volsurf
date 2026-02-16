@@ -156,7 +156,9 @@ volsurf
 ├── conventions    StickyKind, log_moneyness, forward_price
 ├── error          VolSurfError, Result<T>
 ├── implied
-│   └── black      BlackImpliedVol, black_price
+│   ├── black      BlackImpliedVol, black_price
+│   ├── normal     NormalImpliedVol (v0.3)
+│   └── displaced  DisplacedImpliedVol (v0.3)
 ├── smile
 │   ├── svi        SviSmile (Gatheral 2006)
 │   ├── sabr       SabrSmile (Hagan 2002)
@@ -164,6 +166,7 @@ volsurf
 │   └── arbitrage  ArbitrageReport, ButterflyViolation
 ├── surface
 │   ├── ssvi       SsviSurface (Gatheral-Jacquier 2014)
+│   ├── essvi      EssviSurface (v0.3)
 │   ├── piecewise  PiecewiseSurface (per-tenor interpolation)
 │   ├── builder    SurfaceBuilder, SmileModel
 │   └── arbitrage  SurfaceDiagnostics, CalendarViolation

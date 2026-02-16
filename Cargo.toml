@@ -6,6 +6,10 @@ license = "Apache-2.0"
 description = "Production-ready volatility surface library for derivatives pricing"
 keywords = ["volatility", "finance", "quant", "options", "derivatives"]
 categories = ["mathematics", "finance"]
+repository = "https://github.com/volsurf-rs/volsurf"
+homepage = "https://volsurf-rs.github.io"
+documentation = "https://docs.rs/volsurf"
+readme = "README.md"
 
 [features]
 default = []

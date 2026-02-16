@@ -85,7 +85,7 @@ pub enum OptionType {
 mod tests {
     use super::*;
 
-    // --- Gap #1: Serde round-trip ---
+    // Gap #1: Serde round-trip
 
     #[test]
     fn strike_serde_round_trip() {

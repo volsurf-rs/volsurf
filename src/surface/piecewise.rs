@@ -357,8 +357,6 @@ mod tests {
         Box::new(SplineSmile::new(forward, expiry, strikes, variances).unwrap())
     }
 
-    // --- Constructor validation ---
-
     #[test]
     fn rejects_empty_tenors() {
         let result = PiecewiseSurface::new(vec![], vec![]);
@@ -402,8 +400,6 @@ mod tests {
         assert!(surface.is_ok());
     }
 
-    // --- Exact tenor query ---
-
     #[test]
     fn exact_tenor_matches_stored_smile() {
         let s1 = flat_smile(100.0, 0.25, 0.20);
@@ -418,8 +414,6 @@ mod tests {
         let vol = surface.black_vol(1.0, 100.0).unwrap();
         assert_abs_diff_eq!(vol.0, 0.25, epsilon = 1e-10);
     }
-
-    // --- Midpoint tenor interpolation ---
 
     #[test]
     fn midpoint_tenor_has_averaged_variance() {
@@ -440,8 +434,6 @@ mod tests {
         assert_abs_diff_eq!(var.0, w_mid, epsilon = 1e-10);
     }
 
-    // --- Vol and variance consistency ---
-
     #[test]
     fn black_vol_and_black_variance_are_consistent() {
         let s1 = flat_smile(100.0, 0.25, 0.20);
@@ -456,8 +448,6 @@ mod tests {
             }
         }
     }
-
-    // --- Extrapolation ---
 
     #[test]
     fn extrapolation_before_first_tenor_uses_flat_vol() {
@@ -484,8 +474,6 @@ mod tests {
         let v = surface.black_vol(2.0, 100.0).unwrap();
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-10);
     }
-
-    // --- smile_at() ---
 
     #[test]
     fn smile_at_exact_tenor_returns_queryable_section() {
@@ -530,8 +518,6 @@ mod tests {
         ));
     }
 
-    // --- Diagnostics ---
-
     #[test]
     fn clean_surface_reports_no_violations() {
         // Increasing vol with tenor → no calendar violations
@@ -563,8 +549,6 @@ mod tests {
         );
     }
 
-    // --- Error handling ---
-
     #[test]
     fn black_vol_rejects_zero_expiry() {
         let s1 = flat_smile(100.0, 1.0, 0.20);
@@ -585,8 +569,6 @@ mod tests {
         ));
     }
 
-    // --- Debug impl ---
-
     #[test]
     fn debug_impl_does_not_panic() {
         let s1 = flat_smile(100.0, 1.0, 0.20);
@@ -595,9 +577,7 @@ mod tests {
         assert!(debug_str.contains("PiecewiseSurface"));
     }
 
-    // --- Multi-tenor interpolation ---
-
-    // --- Gap #10: Infinity tenor rejected ---
+    // Gap #10: Infinity tenor rejected
 
     #[test]
     fn rejects_infinity_tenor() {
@@ -619,7 +599,7 @@ mod tests {
         );
     }
 
-    // --- Gap #11: Single-tenor unit tests ---
+    // Gap #11: Single-tenor unit tests
 
     #[test]
     fn single_tenor_extrapolation_before() {
@@ -671,7 +651,7 @@ mod tests {
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-4);
     }
 
-    // --- Gap #12: Tenor tolerance boundary ---
+    // Gap #12: Tenor tolerance boundary
 
     #[test]
     fn near_exact_tenor_within_tolerance_matches() {
@@ -698,7 +678,7 @@ mod tests {
         assert_abs_diff_eq!(vol.0, 0.20, epsilon = 0.01);
     }
 
-    // --- (continued from existing tests) ---
+    // (continued from existing tests)
 
     #[test]
     fn three_tenor_surface_interpolates_correctly() {

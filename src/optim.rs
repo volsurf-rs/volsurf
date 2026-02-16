@@ -44,7 +44,6 @@ where
     ];
 
     for _ in 0..config.max_iter {
-        // Sort by objective value
         let mut idx = [0usize, 1, 2];
         idx.sort_by(|&a, &b| {
             f_vals[a]
@@ -54,7 +53,6 @@ where
         simplex = [simplex[idx[0]], simplex[idx[1]], simplex[idx[2]]];
         f_vals = [f_vals[idx[0]], f_vals[idx[1]], f_vals[idx[2]]];
 
-        // Check convergence
         let diameter = simplex
             .iter()
             .flat_map(|a| {
@@ -118,7 +116,6 @@ where
         }
     }
 
-    // Return best vertex
     let best_idx = if f_vals[0] <= f_vals[1] && f_vals[0] <= f_vals[2] {
         0
     } else if f_vals[1] <= f_vals[2] {
@@ -145,8 +142,6 @@ mod tests {
             fvalue_tol: 1e-14,
         }
     }
-
-    // --- Convergence on known minima ---
 
     #[test]
     fn converges_on_sphere_function() {
@@ -212,8 +207,6 @@ mod tests {
         assert!(result.fval < 1e-12);
     }
 
-    // --- Convergence criteria ---
-
     #[test]
     fn respects_max_iter_limit() {
         // Rosenbrock with only 5 iterations — should NOT converge
@@ -254,8 +247,6 @@ mod tests {
         // Just verify it returns a result without panicking
         assert!(result.fval.is_finite(), "should return finite fval");
     }
-
-    // --- Edge cases ---
 
     #[test]
     fn handles_small_step_gracefully() {

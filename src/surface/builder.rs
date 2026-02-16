@@ -158,7 +158,7 @@ impl SurfaceBuilder {
             "surface build started"
         );
 
-        // --- Validate required fields ---
+        // Validate required fields
         let spot = self.spot.ok_or_else(|| VolSurfError::InvalidInput {
             message: "spot price is required".into(),
         })?;
@@ -174,7 +174,7 @@ impl SurfaceBuilder {
             });
         }
 
-        // --- Per-tenor validation, forward calculation, and calibration ---
+        // Per-tenor validation, forward calculation, and calibration
         let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> =
             Vec::with_capacity(self.tenor_data.len());
 
@@ -261,11 +261,11 @@ impl SurfaceBuilder {
             tenor_smile_pairs.push((tenor.expiry, smile));
         }
 
-        // --- Sort by tenor ---
+        // Sort by tenor
         tenor_smile_pairs
             .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // --- Assemble PiecewiseSurface ---
+        // Assemble PiecewiseSurface
         let (tenors, smiles): (Vec<f64>, Vec<Box<dyn SmileSection>>) =
             tenor_smile_pairs.into_iter().unzip();
 
@@ -296,8 +296,6 @@ mod tests {
     fn sample_vols() -> Vec<f64> {
         vec![0.28, 0.24, 0.22, 0.20, 0.22, 0.24, 0.28]
     }
-
-    // --- Happy path ---
 
     #[test]
     fn build_single_tenor_surface() {
@@ -399,8 +397,6 @@ mod tests {
         assert!(surface.is_ok());
     }
 
-    // --- Validation errors ---
-
     #[test]
     fn missing_spot_returns_invalid_input() {
         let result = SurfaceBuilder::new()
@@ -489,8 +485,6 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- SmileModel selector ---
-
     #[test]
     fn default_model_is_svi() {
         let builder = SurfaceBuilder::new();
@@ -542,7 +536,7 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Gap #6: CubicSpline with NaN and duplicate strikes ---
+    // Gap #6: CubicSpline with NaN and duplicate strikes
 
     #[test]
     fn cubic_spline_with_nan_strike_returns_error() {
@@ -592,8 +586,6 @@ mod tests {
         );
     }
 
-    // --- Default trait ---
-
     #[test]
     fn default_is_same_as_new() {
         let builder = SurfaceBuilder::default();
@@ -602,7 +594,7 @@ mod tests {
         assert!(result.is_err()); // no spot/rate/tenors
     }
 
-    // --- Gap #7: Inf rate rejected, large negative rate accepted ---
+    // Gap #7: Inf rate rejected, large negative rate accepted
 
     #[test]
     fn inf_rate_returns_invalid_input() {
@@ -624,7 +616,7 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Gap #8: Mismatched lengths error message content ---
+    // Gap #8: Mismatched lengths error message content
 
     #[test]
     fn mismatched_lengths_error_message_contains_counts() {
@@ -646,7 +638,7 @@ mod tests {
         }
     }
 
-    // --- Gap #9: Negative strikes cause calibration failure ---
+    // Gap #9: Negative strikes cause calibration failure
 
     #[test]
     fn negative_strikes_cause_calibration_error() {
@@ -674,8 +666,6 @@ mod tests {
             .build();
         assert!(result.is_err(), "zero strike should cause build to fail");
     }
-
-    // --- SABR model integration ---
 
     #[test]
     fn build_with_sabr_model() {

@@ -110,8 +110,6 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
-    // --- Round-trip tests: price → IV → reprice ---
-
     #[test]
     fn round_trip_atm_call() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
@@ -203,8 +201,6 @@ mod tests {
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
-    // --- black_price tests ---
-
     #[test]
     fn black_price_call_put_parity() {
         let (f, k, t, sigma) = (100.0, 110.0, 1.0, 0.25);
@@ -234,8 +230,6 @@ mod tests {
         let price = black_price(100.0, 80.0, 0.20, 0.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
-
-    // --- Validation error tests ---
 
     #[test]
     fn compute_rejects_negative_price() {
@@ -310,7 +304,7 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Gap #13: Zero strike + zero vol combined edge case ---
+    // Gap #13: Zero strike + zero vol combined edge case
 
     #[test]
     fn black_price_rejects_zero_strike() {
@@ -325,7 +319,7 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Gap #14: Infinite strike ---
+    // Gap #14: Infinite strike
 
     #[test]
     fn compute_rejects_infinite_strike() {
@@ -351,8 +345,6 @@ mod tests {
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
-    // --- Zero vol put edge cases ---
-
     #[test]
     fn black_price_zero_vol_itm_put() {
         // ITM put: K > F, intrinsic = max(K-F, 0) = 20.0
@@ -373,8 +365,6 @@ mod tests {
         let price = black_price(100.0, 100.0, 0.0, 1.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
     }
-
-    // --- Near-intrinsic IV stability ---
 
     #[test]
     fn near_intrinsic_iv_stability() {
