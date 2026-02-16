@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use volsurf::surface::{PiecewiseSurface, SsviSurface, SurfaceBuilder, VolSurface};
 
@@ -122,7 +122,11 @@ fn surface_benchmarks(c: &mut Criterion) {
     // PiecewiseSurface vol query — interpolated tenor, OTM strike, target < 100ns
     let surface = make_surface();
     group.bench_function("piecewise_vol_query", |b| {
-        b.iter(|| surface.black_vol(black_box(0.375), black_box(105.0)).unwrap());
+        b.iter(|| {
+            surface
+                .black_vol(black_box(0.375), black_box(105.0))
+                .unwrap()
+        });
     });
 
     // SSVI surface vol query — target < 100ns

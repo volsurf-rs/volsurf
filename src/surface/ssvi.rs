@@ -29,10 +29,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
-use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
+use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::surface::VolSurface;
+use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
 
@@ -137,27 +137,21 @@ impl SsviSurface {
         for (i, &t) in tenors.iter().enumerate() {
             if !t.is_finite() || t <= 0.0 {
                 return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "tenors must be positive and finite, got tenors[{i}]={t}"
-                    ),
+                    message: format!("tenors must be positive and finite, got tenors[{i}]={t}"),
                 });
             }
         }
         for (i, &f) in forwards.iter().enumerate() {
             if !f.is_finite() || f <= 0.0 {
                 return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "forwards must be positive and finite, got forwards[{i}]={f}"
-                    ),
+                    message: format!("forwards must be positive and finite, got forwards[{i}]={f}"),
                 });
             }
         }
         for (i, &th) in thetas.iter().enumerate() {
             if !th.is_finite() || th <= 0.0 {
                 return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "thetas must be positive and finite, got thetas[{i}]={th}"
-                    ),
+                    message: format!("thetas must be positive and finite, got thetas[{i}]={th}"),
                 });
             }
         }
@@ -238,8 +232,7 @@ impl SsviSurface {
         let phi = self.eta / theta.powf(self.gamma);
         let phi_k = phi * k;
         (theta / 2.0)
-            * (1.0 + self.rho * phi_k
-                + ((phi_k + self.rho).powi(2) + self.one_minus_rho_sq).sqrt())
+            * (1.0 + self.rho * phi_k + ((phi_k + self.rho).powi(2) + self.one_minus_rho_sq).sqrt())
     }
 
     /// Evaluate the power-law mixing function φ(θ) = η / θ^γ.
@@ -269,8 +262,7 @@ impl SsviSurface {
         let phi = self.eta / theta.powf(self.gamma);
         let u = phi * k;
         let r = ((u + self.rho).powi(2) + self.one_minus_rho_sq).sqrt();
-        0.5 * (1.0 + self.rho * u * (1.0 - self.gamma) + r
-            - self.gamma * u * (u + self.rho) / r)
+        0.5 * (1.0 + self.rho * u * (1.0 - self.gamma) + r - self.gamma * u * (u + self.rho) / r)
     }
 
     /// Analytical calendar arbitrage check for this SSVI surface.
@@ -487,10 +479,7 @@ impl SsviSurface {
 
         // --- Stage 2: Optimize (eta, gamma) ---
         let objective = |eta: f64, gamma: f64| -> f64 {
-            if eta <= 0.0
-                || !eta.is_finite()
-                || !gamma.is_finite()
-                || !(0.0..=1.0).contains(&gamma)
+            if eta <= 0.0 || !eta.is_finite() || !gamma.is_finite() || !(0.0..=1.0).contains(&gamma)
             {
                 return f64::MAX;
             }
@@ -524,8 +513,7 @@ impl SsviSurface {
         for ie in 0..GRID_N {
             let eta = eta_lo + (eta_hi - eta_lo) * (ie as f64) / ((GRID_N - 1) as f64);
             for ig in 0..GRID_N {
-                let gamma =
-                    gamma_lo + (gamma_hi - gamma_lo) * (ig as f64) / ((GRID_N - 1) as f64);
+                let gamma = gamma_lo + (gamma_hi - gamma_lo) * (ig as f64) / ((GRID_N - 1) as f64);
                 let rss = objective(eta, gamma);
                 if rss < best_rss {
                     best_rss = rss;
@@ -553,12 +541,7 @@ impl SsviSurface {
             fvalue_tol: NM_FVALUE_TOL,
         };
         let nm_result = crate::optim::nelder_mead_2d(
-            objective,
-            best_eta,
-            best_gamma,
-            step_eta,
-            step_gamma,
-            &nm_config,
+            objective, best_eta, best_gamma, step_eta, step_gamma, &nm_config,
         );
 
         let opt_eta = nm_result.x.max(1e-6);
@@ -633,8 +616,12 @@ impl VolSurface for SsviSurface {
         let mut smile_reports = Vec::with_capacity(self.tenors.len());
         for (i, &tenor) in self.tenors.iter().enumerate() {
             let slice = SsviSlice::new(
-                self.forwards[i], tenor,
-                self.rho, self.eta, self.gamma, self.thetas[i],
+                self.forwards[i],
+                tenor,
+                self.rho,
+                self.eta,
+                self.gamma,
+                self.thetas[i],
             )?;
             smile_reports.push(slice.is_arbitrage_free()?);
         }
@@ -662,8 +649,7 @@ impl VolSurface for SsviSurface {
             }
         }
 
-        let is_free =
-            smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
 
         Ok(SurfaceDiagnostics {
             smile_reports,
@@ -772,7 +758,14 @@ impl SsviSlice {
             });
         }
         validate_positive(theta, "theta")?;
-        Ok(Self { forward, expiry, rho, eta, gamma, theta })
+        Ok(Self {
+            forward,
+            expiry,
+            rho,
+            eta,
+            gamma,
+            theta,
+        })
     }
 
     /// ATM total variance θ at this tenor.
@@ -791,8 +784,7 @@ impl SsviSlice {
         let phi_k = phi * k;
         let one_minus_rho_sq = 1.0 - self.rho * self.rho;
         (self.theta / 2.0)
-            * (1.0 + self.rho * phi_k
-                + ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt())
+            * (1.0 + self.rho * phi_k + ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt())
     }
 
     /// First derivative dw/dk for the g-function.
@@ -919,12 +911,12 @@ mod tests {
     /// Canonical SSVI parameters for a typical equity surface.
     fn equity_surface() -> SsviSurface {
         SsviSurface::new(
-            -0.3,                         // rho
-            0.5,                          // eta
-            0.5,                          // gamma
-            vec![0.25, 0.5, 1.0, 2.0],   // tenors
+            -0.3,                             // rho
+            0.5,                              // eta
+            0.5,                              // gamma
+            vec![0.25, 0.5, 1.0, 2.0],        // tenors
             vec![100.0, 100.0, 100.0, 100.0], // forwards
-            vec![0.04, 0.08, 0.16, 0.32], // thetas (σ_ATM=40% flat)
+            vec![0.04, 0.08, 0.16, 0.32],     // thetas (σ_ATM=40% flat)
         )
         .unwrap()
     }
@@ -944,10 +936,7 @@ mod tests {
 
     #[test]
     fn new_single_tenor() {
-        let s = SsviSurface::new(
-            0.0, 1.0, 0.5,
-            vec![1.0], vec![100.0], vec![0.04],
-        );
+        let s = SsviSurface::new(0.0, 1.0, 0.5, vec![1.0], vec![100.0], vec![0.04]);
         assert!(s.is_ok());
     }
 
@@ -964,7 +953,9 @@ mod tests {
 
     #[test]
     fn new_rho_inf_rejected() {
-        assert!(SsviSurface::new(f64::INFINITY, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04]).is_err());
+        assert!(
+            SsviSurface::new(f64::INFINITY, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04]).is_err()
+        );
     }
 
     #[test]
@@ -997,15 +988,29 @@ mod tests {
     #[test]
     fn new_length_mismatch_rejected() {
         // tenors vs forwards mismatch
-        assert!(SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![0.5, 1.0], vec![100.0], vec![0.04, 0.08],
-        ).is_err());
+        assert!(
+            SsviSurface::new(
+                -0.3,
+                0.5,
+                0.5,
+                vec![0.5, 1.0],
+                vec![100.0],
+                vec![0.04, 0.08],
+            )
+            .is_err()
+        );
         // tenors vs thetas mismatch
-        assert!(SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04],
-        ).is_err());
+        assert!(
+            SsviSurface::new(
+                -0.3,
+                0.5,
+                0.5,
+                vec![0.5, 1.0],
+                vec![100.0, 100.0],
+                vec![0.04],
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1028,28 +1033,56 @@ mod tests {
 
     #[test]
     fn new_tenors_not_increasing_rejected() {
-        assert!(SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![1.0, 0.5], vec![100.0, 100.0], vec![0.04, 0.08],
-        ).is_err());
+        assert!(
+            SsviSurface::new(
+                -0.3,
+                0.5,
+                0.5,
+                vec![1.0, 0.5],
+                vec![100.0, 100.0],
+                vec![0.04, 0.08],
+            )
+            .is_err()
+        );
         // Equal tenors also rejected
-        assert!(SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![1.0, 1.0], vec![100.0, 100.0], vec![0.04, 0.08],
-        ).is_err());
+        assert!(
+            SsviSurface::new(
+                -0.3,
+                0.5,
+                0.5,
+                vec![1.0, 1.0],
+                vec![100.0, 100.0],
+                vec![0.04, 0.08],
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn new_thetas_not_increasing_rejected() {
-        assert!(SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.08, 0.04],
-        ).is_err());
+        assert!(
+            SsviSurface::new(
+                -0.3,
+                0.5,
+                0.5,
+                vec![0.5, 1.0],
+                vec![100.0, 100.0],
+                vec![0.08, 0.04],
+            )
+            .is_err()
+        );
         // Equal thetas also rejected
-        assert!(SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04, 0.04],
-        ).is_err());
+        assert!(
+            SsviSurface::new(
+                -0.3,
+                0.5,
+                0.5,
+                vec![0.5, 1.0],
+                vec![100.0, 100.0],
+                vec![0.04, 0.04],
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1061,9 +1094,15 @@ mod tests {
 
     #[test]
     fn new_inf_in_vectors_rejected() {
-        assert!(SsviSurface::new(-0.3, 0.5, 0.5, vec![f64::INFINITY], vec![100.0], vec![0.04]).is_err());
-        assert!(SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![f64::INFINITY], vec![0.04]).is_err());
-        assert!(SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![f64::INFINITY]).is_err());
+        assert!(
+            SsviSurface::new(-0.3, 0.5, 0.5, vec![f64::INFINITY], vec![100.0], vec![0.04]).is_err()
+        );
+        assert!(
+            SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![f64::INFINITY], vec![0.04]).is_err()
+        );
+        assert!(
+            SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![f64::INFINITY]).is_err()
+        );
     }
 
     // ========== SSVI formula ==========
@@ -1080,10 +1119,7 @@ mod tests {
     #[test]
     fn total_variance_symmetric_when_rho_zero() {
         // When ρ = 0, the formula is symmetric in k: w(k, θ) = w(-k, θ).
-        let s = SsviSurface::new(
-            0.0, 0.5, 0.5,
-            vec![1.0], vec![100.0], vec![0.16],
-        ).unwrap();
+        let s = SsviSurface::new(0.0, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.16]).unwrap();
         let theta = 0.16;
         for &k in &[-0.5, -0.2, -0.1, 0.1, 0.2, 0.5] {
             assert_abs_diff_eq!(
@@ -1146,10 +1182,7 @@ mod tests {
     #[test]
     fn phi_gamma_zero_is_constant() {
         // gamma = 0 => phi(theta) = eta / theta^0 = eta for all theta.
-        let s = SsviSurface::new(
-            -0.3, 0.5, 0.0,
-            vec![1.0], vec![100.0], vec![0.16],
-        ).unwrap();
+        let s = SsviSurface::new(-0.3, 0.5, 0.0, vec![1.0], vec![100.0], vec![0.16]).unwrap();
         assert_abs_diff_eq!(s.phi(0.04), 0.5, epsilon = 1e-14);
         assert_abs_diff_eq!(s.phi(1.0), 0.5, epsilon = 1e-14);
         assert_abs_diff_eq!(s.phi(10.0), 0.5, epsilon = 1e-14);
@@ -1158,10 +1191,7 @@ mod tests {
     #[test]
     fn phi_gamma_one_is_inverse() {
         // gamma = 1 => phi(theta) = eta / theta.
-        let s = SsviSurface::new(
-            -0.3, 0.5, 1.0,
-            vec![1.0], vec![100.0], vec![0.16],
-        ).unwrap();
+        let s = SsviSurface::new(-0.3, 0.5, 1.0, vec![1.0], vec![100.0], vec![0.16]).unwrap();
         assert_abs_diff_eq!(s.phi(0.04), 0.5 / 0.04, epsilon = 1e-14);
         assert_abs_diff_eq!(s.phi(1.0), 0.5, epsilon = 1e-14);
     }
@@ -1209,11 +1239,14 @@ mod tests {
     #[test]
     fn theta_forward_interpolation_with_different_forwards() {
         let s = SsviSurface::new(
-            -0.3, 0.5, 0.5,
+            -0.3,
+            0.5,
+            0.5,
             vec![0.5, 1.0],
             vec![100.0, 105.0],
             vec![0.08, 0.16],
-        ).unwrap();
+        )
+        .unwrap();
         // At T=0.75: alpha = (0.75 - 0.5) / (1.0 - 0.5) = 0.5
         let (theta, fwd) = s.theta_and_forward_at(0.75);
         assert_abs_diff_eq!(theta, 0.12, epsilon = 1e-14);
@@ -1294,7 +1327,9 @@ mod tests {
     fn calibrate_round_trip_2_tenors() {
         // Minimum: 2 tenors
         let original = SsviSurface::new(
-            -0.3, 0.5, 0.5,
+            -0.3,
+            0.5,
+            0.5,
             vec![0.5, 1.0],
             vec![100.0, 100.0],
             vec![0.08, 0.16],
@@ -1320,14 +1355,19 @@ mod tests {
             }
         }
         let rms = (total_rss / n_points as f64).sqrt();
-        assert!(rms < 0.005, "2-tenor round-trip RMS {rms} should be < 0.005");
+        assert!(
+            rms < 0.005,
+            "2-tenor round-trip RMS {rms} should be < 0.005"
+        );
     }
 
     #[test]
     fn calibrate_round_trip_varying_forwards() {
         // Different forward prices per tenor (term structure).
         let original = SsviSurface::new(
-            -0.3, 0.5, 0.5,
+            -0.3,
+            0.5,
+            0.5,
             vec![0.25, 0.5, 1.0],
             vec![100.0, 102.0, 105.0],
             vec![0.04, 0.08, 0.16],
@@ -1353,13 +1393,20 @@ mod tests {
             }
         }
         let rms = (total_rss / n_points as f64).sqrt();
-        assert!(rms < 0.005, "varying-forwards round-trip RMS {rms} should be < 0.005");
+        assert!(
+            rms < 0.005,
+            "varying-forwards round-trip RMS {rms} should be < 0.005"
+        );
     }
 
     #[test]
     fn calibrate_rejects_single_tenor() {
         let data = vec![vec![
-            (90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2),
+            (90.0, 0.2),
+            (95.0, 0.2),
+            (100.0, 0.2),
+            (105.0, 0.2),
+            (110.0, 0.2),
         ]];
         let result = SsviSurface::calibrate(&data, &[1.0], &[100.0]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
@@ -1374,8 +1421,20 @@ mod tests {
     #[test]
     fn calibrate_rejects_length_mismatch() {
         let data = vec![
-            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
-            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
         ];
         // tenors has 2 but forwards has 1
         let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[100.0]);
@@ -1385,8 +1444,20 @@ mod tests {
     #[test]
     fn calibrate_rejects_negative_forward() {
         let data = vec![
-            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
-            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
         ];
         let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[-100.0, 100.0]);
         assert!(result.is_err());
@@ -1395,8 +1466,20 @@ mod tests {
     #[test]
     fn calibrate_rejects_zero_tenor() {
         let data = vec![
-            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
-            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
         ];
         let result = SsviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
         assert!(result.is_err());
@@ -1484,9 +1567,7 @@ mod tests {
 
     #[test]
     fn validation_errors_are_invalid_input() {
-        let err = SsviSurface::new(
-            1.5, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04],
-        ).unwrap_err();
+        let err = SsviSurface::new(1.5, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04]).unwrap_err();
         assert!(matches!(err, VolSurfError::InvalidInput { .. }));
     }
 
@@ -1517,10 +1598,7 @@ mod tests {
             for &strike in &[80.0, 100.0, 120.0] {
                 let vol = s.black_vol(expiry, strike).unwrap();
                 let var = s.black_variance(expiry, strike).unwrap();
-                assert_abs_diff_eq!(
-                    vol.0 * vol.0 * expiry, var.0,
-                    epsilon = 1e-12
-                );
+                assert_abs_diff_eq!(vol.0 * vol.0 * expiry, var.0, epsilon = 1e-12);
             }
         }
     }
@@ -1610,11 +1688,14 @@ mod tests {
     fn diagnostics_detects_butterfly_violations() {
         // Extreme params: eta * (1 + |rho|) = 3 * 1.95 = 5.85 >> 2.
         let s = SsviSurface::new(
-            -0.95, 3.0, 0.5,
+            -0.95,
+            3.0,
+            0.5,
             vec![0.5, 1.0],
             vec![100.0, 100.0],
             vec![0.08, 0.16],
-        ).unwrap();
+        )
+        .unwrap();
         let diag = s.diagnostics().unwrap();
         assert!(!diag.is_free);
         // At least one tenor should have butterfly violations
@@ -1623,10 +1704,7 @@ mod tests {
 
     #[test]
     fn diagnostics_single_tenor_no_calendar() {
-        let s = SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![1.0], vec![100.0], vec![0.16],
-        ).unwrap();
+        let s = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.16]).unwrap();
         let diag = s.diagnostics().unwrap();
         assert!(diag.calendar_violations.is_empty());
         assert_eq!(diag.smile_reports.len(), 1);
@@ -1666,11 +1744,14 @@ mod tests {
     fn dw_dtheta_non_negative_extreme_params() {
         // Extreme rho and eta: ∂w/∂θ ≥ 0 must still hold.
         let s = SsviSurface::new(
-            -0.95, 3.0, 0.99,
+            -0.95,
+            3.0,
+            0.99,
             vec![0.25, 0.5, 1.0],
             vec![100.0, 100.0, 100.0],
             vec![0.01, 0.05, 0.20],
-        ).unwrap();
+        )
+        .unwrap();
         for &theta in s.thetas() {
             for i in -30..=30 {
                 let k = i as f64 * 0.1;
@@ -1686,10 +1767,7 @@ mod tests {
     #[test]
     fn dw_dtheta_gamma_zero_equals_w_over_theta() {
         // γ = 0 ⟹ φ is constant in θ ⟹ ∂w/∂θ = w/θ (no smile decay).
-        let s = SsviSurface::new(
-            -0.3, 0.5, 0.0,
-            vec![1.0], vec![100.0], vec![0.16],
-        ).unwrap();
+        let s = SsviSurface::new(-0.3, 0.5, 0.0, vec![1.0], vec![100.0], vec![0.16]).unwrap();
         let theta = 0.16;
         for &k in &[-1.0, -0.5, 0.0, 0.5, 1.0] {
             let deriv = s.dw_dtheta(theta, k);
@@ -1717,8 +1795,14 @@ mod tests {
         let s = equity_surface();
         let diag = s.diagnostics().unwrap();
         let analytical = s.calendar_arb_analytical();
-        assert!(diag.calendar_violations.is_empty(), "numerical check should find no violations");
-        assert!(analytical.is_empty(), "analytical check should find no violations");
+        assert!(
+            diag.calendar_violations.is_empty(),
+            "numerical check should find no violations"
+        );
+        assert!(
+            analytical.is_empty(),
+            "analytical check should find no violations"
+        );
     }
 
     #[test]
@@ -1734,10 +1818,14 @@ mod tests {
         let surface = PiecewiseSurface::new(
             vec![0.5, 1.0],
             vec![Box::new(slice_short), Box::new(slice_long)],
-        ).unwrap();
+        )
+        .unwrap();
 
         let diag = surface.diagnostics().unwrap();
-        assert!(!diag.is_free, "inverted SSVI slices should have calendar violations");
+        assert!(
+            !diag.is_free,
+            "inverted SSVI slices should have calendar violations"
+        );
         assert!(
             !diag.calendar_violations.is_empty(),
             "should detect calendar violations for inverted thetas"
@@ -1747,7 +1835,8 @@ mod tests {
             assert!(
                 v.variance_short > v.variance_long,
                 "short tenor variance ({}) should exceed long ({})",
-                v.variance_short, v.variance_long
+                v.variance_short,
+                v.variance_long
             );
         }
     }
@@ -1755,10 +1844,7 @@ mod tests {
     #[test]
     fn calendar_arb_analytical_single_tenor() {
         // Single tenor: no consecutive pairs, so no calendar violations.
-        let s = SsviSurface::new(
-            -0.3, 0.5, 0.5,
-            vec![1.0], vec![100.0], vec![0.16],
-        ).unwrap();
+        let s = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.16]).unwrap();
         assert!(s.calendar_arb_analytical().is_empty());
     }
 
@@ -1766,11 +1852,14 @@ mod tests {
     fn calendar_arb_clean_for_barely_increasing_thetas() {
         // Thetas barely above each other — both checks should still pass.
         let s = SsviSurface::new(
-            -0.3, 0.5, 0.5,
+            -0.3,
+            0.5,
+            0.5,
             vec![0.5, 1.0],
             vec![100.0, 100.0],
             vec![0.04, 0.04001],
-        ).unwrap();
+        )
+        .unwrap();
         let diag = s.diagnostics().unwrap();
         assert!(
             diag.calendar_violations.is_empty(),
@@ -1893,7 +1982,10 @@ mod tests {
         // eta * (1 + |rho|) = 0.5 * (1 + 0.3) = 0.65 < 2 => should be clean.
         let s = equity_slice();
         let report = s.is_arbitrage_free().unwrap();
-        assert!(report.is_free, "conservative SSVI params should be arb-free");
+        assert!(
+            report.is_free,
+            "conservative SSVI params should be arb-free"
+        );
         assert!(report.butterfly_violations.is_empty());
     }
 
@@ -1902,7 +1994,10 @@ mod tests {
         // eta * (1 + |rho|) = 3.0 * (1 + 0.95) = 5.85 >> 2 => likely violations.
         let s = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
         let report = s.is_arbitrage_free().unwrap();
-        assert!(!report.is_free, "extreme SSVI params should detect butterfly violations");
+        assert!(
+            !report.is_free,
+            "extreme SSVI params should detect butterfly violations"
+        );
         assert!(!report.butterfly_violations.is_empty());
     }
 
@@ -1921,7 +2016,11 @@ mod tests {
         assert_eq!(s.expiry(), s2.expiry());
         assert_eq!(s.theta(), s2.theta());
         // Verify vol agrees after deserialization
-        assert_abs_diff_eq!(s.vol(100.0).unwrap().0, s2.vol(100.0).unwrap().0, epsilon = 1e-14);
+        assert_abs_diff_eq!(
+            s.vol(100.0).unwrap().0,
+            s2.vol(100.0).unwrap().0,
+            epsilon = 1e-14
+        );
     }
 
     #[test]

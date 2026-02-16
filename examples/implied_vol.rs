@@ -7,8 +7,8 @@
 //!
 //! Run with: `cargo run --example implied_vol`
 
-use volsurf::implied::{black_price, BlackImpliedVol};
 use volsurf::OptionType;
+use volsurf::implied::{BlackImpliedVol, black_price};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let forward = 100.0;
@@ -65,7 +65,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
 
     println!("\n--- IV extraction across strikes ---\n");
-    println!("{:>8} {:>12} {:>12} {:>14}", "Strike", "Call Price", "IV", "Round-trip err");
+    println!(
+        "{:>8} {:>12} {:>12} {:>14}",
+        "Strike", "Call Price", "IV", "Round-trip err"
+    );
     println!("{}", "-".repeat(50));
 
     for k in [80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0] {

@@ -166,7 +166,10 @@ mod tests {
     #[test]
     fn log_moneyness_zero_forward_returns_inf() {
         let k = log_moneyness(100.0, 0.0);
-        assert!(k.is_infinite(), "log_moneyness(100, 0) should be Inf, got {k}");
+        assert!(
+            k.is_infinite(),
+            "log_moneyness(100, 0) should be Inf, got {k}"
+        );
         assert!(k.is_sign_positive());
     }
 
@@ -179,8 +182,10 @@ mod tests {
     #[test]
     fn log_moneyness_zero_strike_returns_neg_inf() {
         let k = log_moneyness(0.0, 100.0);
-        assert!(k.is_infinite() && k.is_sign_negative(),
-            "log_moneyness(0, 100) should be -Inf, got {k}");
+        assert!(
+            k.is_infinite() && k.is_sign_negative(),
+            "log_moneyness(0, 100) should be -Inf, got {k}"
+        );
     }
 
     #[test]

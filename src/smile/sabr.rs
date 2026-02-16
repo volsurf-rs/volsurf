@@ -17,8 +17,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
+use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::types::Vol;
 use crate::validate::{validate_non_negative, validate_positive};
 
@@ -175,7 +175,11 @@ impl SabrSmile {
             * (1.0 + omb_sq / 24.0 * ln_fk_sq + omb_sq * omb_sq / 1920.0 * ln_fk_sq * ln_fk_sq);
 
         // z/x(z) ratio — Taylor expansion for small z handles ATM and CEV limits
-        let z = if nu == 0.0 { 0.0 } else { (nu / alpha) * fk_mid * ln_fk };
+        let z = if nu == 0.0 {
+            0.0
+        } else {
+            (nu / alpha) * fk_mid * ln_fk
+        };
         let z_ratio = if z.abs() < 1e-6 {
             // Taylor: z/x(z) ≈ 1 − ρz/2 + (2−3ρ²)/12 · z²
             1.0 - 0.5 * rho * z + (2.0 - 3.0 * rho * rho) / 12.0 * z * z
@@ -233,7 +237,13 @@ impl SabrSmile {
         market_vols: &[(f64, f64)],
     ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
-        tracing::debug!(forward, expiry, beta, n_quotes = market_vols.len(), "SABR calibration started");
+        tracing::debug!(
+            forward,
+            expiry,
+            beta,
+            n_quotes = market_vols.len(),
+            "SABR calibration started"
+        );
 
         /// Minimum market quotes for SABR calibration.
         const MIN_POINTS: usize = 4;
@@ -298,9 +308,9 @@ impl SabrSmile {
             let mut alpha = target; // initial guess: zeroth-order approximation
             for _ in 0..ALPHA_MAX_ITER {
                 let a2 = alpha * alpha;
-                let f_val = t * a_coeff * a2 * alpha + t * b_coeff * a2
-                    + (1.0 + t * c_coeff) * alpha
-                    - target;
+                let f_val =
+                    t * a_coeff * a2 * alpha + t * b_coeff * a2 + (1.0 + t * c_coeff) * alpha
+                        - target;
                 let f_prime =
                     3.0 * t * a_coeff * a2 + 2.0 * t * b_coeff * alpha + (1.0 + t * c_coeff);
                 if f_prime.abs() < 1e-30 {
@@ -391,9 +401,8 @@ impl SabrSmile {
             diameter_tol: NM_DIAMETER_TOL,
             fvalue_tol: NM_FVALUE_TOL,
         };
-        let nm_result = crate::optim::nelder_mead_2d(
-            objective, best_x, best_y, step_x, step_y, &nm_config,
-        );
+        let nm_result =
+            crate::optim::nelder_mead_2d(objective, best_x, best_y, step_x, step_y, &nm_config);
 
         // --- Recover final parameters ---
         let rho = nm_result.x.tanh();
@@ -866,9 +875,7 @@ mod tests {
         let v = s.vol(F).unwrap().0;
         // σ_ATM = α * [1 + T*(¼ρνα + (2-3ρ²)/24*ν²)]
         let expected = alpha
-            * (1.0
-                + T * (0.25 * RHO * NU * alpha
-                    + (2.0 - 3.0 * RHO * RHO) / 24.0 * NU * NU));
+            * (1.0 + T * (0.25 * RHO * NU * alpha + (2.0 - 3.0 * RHO * RHO) / 24.0 * NU * NU));
         assert!(
             (v - expected).abs() < 1e-14,
             "Lognormal ATM: expected {expected}, got {v}"
@@ -885,8 +892,8 @@ mod tests {
         let omb = 1.0 - BETA;
         let f_omb = F.powf(omb);
         // Only the (1-β)²/24 * α²/F^(2(1-β)) term survives
-        let expected = EQ_ALPHA / f_omb
-            * (1.0 + T * omb * omb / 24.0 * EQ_ALPHA * EQ_ALPHA / (f_omb * f_omb));
+        let expected =
+            EQ_ALPHA / f_omb * (1.0 + T * omb * omb / 24.0 * EQ_ALPHA * EQ_ALPHA / (f_omb * f_omb));
         assert!(
             (v_atm - expected).abs() < 1e-14,
             "CEV ATM: expected {expected}, got {v_atm}"
@@ -950,10 +957,7 @@ mod tests {
     #[test]
     fn vol_rejects_zero_strike() {
         let s = make_equity_smile();
-        assert!(matches!(
-            s.vol(0.0),
-            Err(VolSurfError::InvalidInput { .. })
-        ));
+        assert!(matches!(s.vol(0.0), Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
@@ -1246,14 +1250,20 @@ mod tests {
     fn arb_free_beta_one() {
         let s = SabrSmile::new(F, T, 0.20, 1.0, -0.25, 0.30).unwrap();
         let report = s.is_arbitrage_free().unwrap();
-        assert!(report.is_free, "β=1 with moderate params should be arb-free");
+        assert!(
+            report.is_free,
+            "β=1 with moderate params should be arb-free"
+        );
     }
 
     #[test]
     fn arb_free_beta_zero() {
         let s = SabrSmile::new(F, T, 10.0, 0.0, -0.2, 0.30).unwrap();
         let report = s.is_arbitrage_free().unwrap();
-        assert!(report.is_free, "β=0 with moderate params should be arb-free");
+        assert!(
+            report.is_free,
+            "β=0 with moderate params should be arb-free"
+        );
     }
 
     #[test]
@@ -1348,10 +1358,7 @@ mod tests {
         let data = sabr_synthetic_data(&original, &strikes);
         let calibrated = SabrSmile::calibrate(F, T, 0.5, &data).unwrap();
         let rms = vol_rms(&original, &calibrated, &strikes);
-        assert!(
-            rms < 0.001,
-            "equity round-trip RMS {rms} should be < 0.001"
-        );
+        assert!(rms < 0.001, "equity round-trip RMS {rms} should be < 0.001");
     }
 
     #[test]
@@ -1362,10 +1369,7 @@ mod tests {
         let data = sabr_synthetic_data(&original, &strikes);
         let calibrated = SabrSmile::calibrate(F, T, 0.0, &data).unwrap();
         let rms = vol_rms(&original, &calibrated, &strikes);
-        assert!(
-            rms < 0.001,
-            "rates round-trip RMS {rms} should be < 0.001"
-        );
+        assert!(rms < 0.001, "rates round-trip RMS {rms} should be < 0.001");
     }
 
     #[test]
@@ -1485,10 +1489,7 @@ mod tests {
         let data = sabr_synthetic_data(&original, &strikes);
         let calibrated = SabrSmile::calibrate(fwd, T, 0.5, &data).unwrap();
         let rms = vol_rms(&original, &calibrated, &strikes);
-        assert!(
-            rms < 0.001,
-            "F=50 round-trip RMS {rms} should be < 0.001"
-        );
+        assert!(rms < 0.001, "F=50 round-trip RMS {rms} should be < 0.001");
     }
 
     #[test]
@@ -1550,8 +1551,7 @@ mod tests {
         // Denominator D from Eq. (2.17a)
         let omb2 = one_minus_beta * one_minus_beta;
         let log2 = log_ratio * log_ratio;
-        let denom = fk_half_power
-            * (1.0 + omb2 / 24.0 * log2 + omb2 * omb2 / 1920.0 * log2 * log2);
+        let denom = fk_half_power * (1.0 + omb2 / 24.0 * log2 + omb2 * omb2 / 1920.0 * log2 * log2);
 
         // z and z/x(z) ratio
         let z = if nu.abs() < 1e-30 {
@@ -1591,8 +1591,11 @@ mod tests {
         let expected = hagan_reference(100.0, 60.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(60.0).unwrap().0;
         let eps = expected * 1e-12;
-        assert!((actual - expected).abs() < eps,
-            "K=60: expected {expected:.15e}, got {actual:.15e}, err={:.2e}", (actual - expected).abs());
+        assert!(
+            (actual - expected).abs() < eps,
+            "K=60: expected {expected:.15e}, got {actual:.15e}, err={:.2e}",
+            (actual - expected).abs()
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=70.
@@ -1601,8 +1604,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 70.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(70.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=70: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=70: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=80.
@@ -1611,8 +1616,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 80.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(80.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=80: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=80: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=90.
@@ -1621,8 +1628,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 90.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(90.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=90: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=90: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=95.
@@ -1631,8 +1640,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 95.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(95.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=95: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=95: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=100 (ATM).
@@ -1645,12 +1656,15 @@ mod tests {
         let f_omb = f.powf(omb);
         let expected = 2.0 / f_omb
             * (1.0
-                + 1.0 * (omb * omb / 24.0 * 4.0 / (f_omb * f_omb)
-                    + 0.25 * (-0.3) * 0.5 * 0.4 * 2.0 / f_omb
-                    + (2.0 - 3.0 * 0.09) / 24.0 * 0.16));
+                + 1.0
+                    * (omb * omb / 24.0 * 4.0 / (f_omb * f_omb)
+                        + 0.25 * (-0.3) * 0.5 * 0.4 * 2.0 / f_omb
+                        + (2.0 - 3.0 * 0.09) / 24.0 * 0.16));
         let actual = s.vol(100.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "ATM: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "ATM: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=105.
@@ -1659,8 +1673,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 105.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(105.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=105: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=105: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=110.
@@ -1669,8 +1685,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 110.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(110.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=110: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=110: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=120.
@@ -1679,8 +1697,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 120.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(120.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=120: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=120: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=130.
@@ -1689,8 +1709,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 130.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(130.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=130: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=130: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), equity params, K=140.
@@ -1699,8 +1721,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 140.0, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual = s.vol(140.0).unwrap().0;
-        assert!((actual - expected).abs() < expected * 1e-12,
-            "K=140: expected {expected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected).abs() < expected * 1e-12,
+            "K=140: expected {expected:.15e}, got {actual:.15e}"
+        );
     }
 
     // --- Set 2: Interest rate parameters (β = 0, normal SABR) ---
@@ -1721,9 +1745,11 @@ mod tests {
             let expected = hagan_reference(f, k, t, alpha, 0.0, rho, nu);
             let actual = s.vol(k).unwrap().0;
             let eps = expected.abs() * 1e-12;
-            assert!((actual - expected).abs() < eps.max(1e-15),
+            assert!(
+                (actual - expected).abs() < eps.max(1e-15),
                 "β=0, K={k}: expected {expected:.15e}, got {actual:.15e}, err={:.2e}",
-                (actual - expected).abs());
+                (actual - expected).abs()
+            );
         }
     }
 
@@ -1745,9 +1771,11 @@ mod tests {
             let expected = hagan_reference(f, k, t, alpha, 1.0, rho, nu);
             let actual = s.vol(k).unwrap().0;
             let eps = expected * 1e-12;
-            assert!((actual - expected).abs() < eps,
+            assert!(
+                (actual - expected).abs() < eps,
                 "β=1, K={k}: expected {expected:.15e}, got {actual:.15e}, err={:.2e}",
-                (actual - expected).abs());
+                (actual - expected).abs()
+            );
         }
     }
 
@@ -1765,8 +1793,10 @@ mod tests {
             let expected = hagan_reference(100.0, k, 1.0, 2.0, 0.5, -0.3, nu_tiny);
             let actual = s.vol(k).unwrap().0;
             let eps = expected * 1e-12;
-            assert!((actual - expected).abs() < eps.max(1e-15),
-                "CEV, K={k}: expected {expected:.15e}, got {actual:.15e}");
+            assert!(
+                (actual - expected).abs() < eps.max(1e-15),
+                "CEV, K={k}: expected {expected:.15e}, got {actual:.15e}"
+            );
         }
     }
 
@@ -1778,8 +1808,10 @@ mod tests {
         for &k in &[80.0, 100.0, 120.0] {
             let expected = hagan_reference(100.0, k, 1.0, 2.0, 0.5, -0.3, 0.0);
             let actual = s.vol(k).unwrap().0;
-            assert!((actual - expected).abs() < expected * 1e-12,
-                "ν=0, K={k}: expected {expected:.15e}, got {actual:.15e}");
+            assert!(
+                (actual - expected).abs() < expected * 1e-12,
+                "ν=0, K={k}: expected {expected:.15e}, got {actual:.15e}"
+            );
         }
     }
 
@@ -1795,8 +1827,10 @@ mod tests {
             let expected = hagan_reference(100.0, k, t, 2.0, 0.5, -0.3, 0.4);
             let actual = s.vol(k).unwrap().0;
             let eps = expected * 1e-12;
-            assert!((actual - expected).abs() < eps,
-                "T=0.01, K={k}: expected {expected:.15e}, got {actual:.15e}");
+            assert!(
+                (actual - expected).abs() < eps,
+                "T=0.01, K={k}: expected {expected:.15e}, got {actual:.15e}"
+            );
         }
     }
 
@@ -1812,8 +1846,10 @@ mod tests {
             let expected = hagan_reference(100.0, k, t, 2.0, 0.5, -0.3, 0.4);
             let actual = s.vol(k).unwrap().0;
             let eps = expected * 1e-12;
-            assert!((actual - expected).abs() < eps,
-                "T=10, K={k}: expected {expected:.15e}, got {actual:.15e}");
+            assert!(
+                (actual - expected).abs() < eps,
+                "T=10, K={k}: expected {expected:.15e}, got {actual:.15e}"
+            );
         }
     }
 
@@ -1831,10 +1867,14 @@ mod tests {
         for &delta in &[1e-3, 1e-5, 1e-7, 1e-9] {
             let v_below = s.vol(100.0 - delta).unwrap().0;
             let v_above = s.vol(100.0 + delta).unwrap().0;
-            assert!((v_below - vol_atm).abs() < delta * 0.1,
-                "δ={delta}: vol(F-δ)={v_below} should approach vol(F)={vol_atm}");
-            assert!((v_above - vol_atm).abs() < delta * 0.1,
-                "δ={delta}: vol(F+δ)={v_above} should approach vol(F)={vol_atm}");
+            assert!(
+                (v_below - vol_atm).abs() < delta * 0.1,
+                "δ={delta}: vol(F-δ)={v_below} should approach vol(F)={vol_atm}"
+            );
+            assert!(
+                (v_above - vol_atm).abs() < delta * 0.1,
+                "δ={delta}: vol(F+δ)={v_above} should approach vol(F)={vol_atm}"
+            );
         }
     }
 
@@ -1850,15 +1890,19 @@ mod tests {
         let k_low = 10.0; // K/F = 0.1
         let expected_low = hagan_reference(100.0, k_low, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual_low = s.vol(k_low).unwrap().0;
-        assert!((actual_low - expected_low).abs() < expected_low * 1e-12,
-            "K=10: expected {expected_low:.15e}, got {actual_low:.15e}");
+        assert!(
+            (actual_low - expected_low).abs() < expected_low * 1e-12,
+            "K=10: expected {expected_low:.15e}, got {actual_low:.15e}"
+        );
 
         // Deep OTM call
         let k_high = 500.0; // K/F = 5
         let expected_high = hagan_reference(100.0, k_high, 1.0, 2.0, 0.5, -0.3, 0.4);
         let actual_high = s.vol(k_high).unwrap().0;
-        assert!((actual_high - expected_high).abs() < expected_high * 1e-12,
-            "K=500: expected {expected_high:.15e}, got {actual_high:.15e}");
+        assert!(
+            (actual_high - expected_high).abs() < expected_high * 1e-12,
+            "K=500: expected {expected_high:.15e}, got {actual_high:.15e}"
+        );
     }
 
     // --- Additional parameter set: moderate skew, equity ---
@@ -1878,8 +1922,10 @@ mod tests {
             let expected = hagan_reference(f, k, t, alpha, 0.5, rho, nu);
             let actual = s.vol(k).unwrap().0;
             let eps = expected * 1e-12;
-            assert!((actual - expected).abs() < eps,
-                "Set2, K={k}: expected {expected:.15e}, got {actual:.15e}");
+            assert!(
+                (actual - expected).abs() < eps,
+                "Set2, K={k}: expected {expected:.15e}, got {actual:.15e}"
+            );
         }
     }
 
@@ -1898,15 +1944,20 @@ mod tests {
         // Sample densely around the boundary
         let k_base = 100.0 * (-5e-7_f64).exp();
         let offsets = [-1e-5, -1e-6, -1e-7, 0.0, 1e-7, 1e-6, 1e-5];
-        let vols: Vec<f64> = offsets.iter()
+        let vols: Vec<f64> = offsets
+            .iter()
             .map(|&dk| s.vol(k_base + dk).unwrap().0)
             .collect();
 
         // All vols should be within 1e-10 of each other (smooth transition)
         for i in 1..vols.len() {
-            assert!((vols[i] - vols[i - 1]).abs() < 1e-8,
+            assert!(
+                (vols[i] - vols[i - 1]).abs() < 1e-8,
                 "Discontinuity at Taylor boundary: vol[{i}]={:.15e}, vol[{}]={:.15e}",
-                vols[i], i - 1, vols[i - 1]);
+                vols[i],
+                i - 1,
+                vols[i - 1]
+            );
         }
     }
 
@@ -1921,8 +1972,14 @@ mod tests {
         let v_low = s.vol(80.0).unwrap().0;
         let v_atm = s.vol(100.0).unwrap().0;
         let v_high = s.vol(120.0).unwrap().0;
-        assert!(v_low > v_atm, "ρ<0: vol(K<F)={v_low} should > vol(ATM)={v_atm}");
-        assert!(v_atm > v_high, "ρ<0: vol(ATM)={v_atm} should > vol(K>F)={v_high}");
+        assert!(
+            v_low > v_atm,
+            "ρ<0: vol(K<F)={v_low} should > vol(ATM)={v_atm}"
+        );
+        assert!(
+            v_atm > v_high,
+            "ρ<0: vol(ATM)={v_atm} should > vol(K>F)={v_high}"
+        );
     }
 
     /// Hagan (2002), Section 2: positive ρ produces upward-sloping skew.
@@ -1932,8 +1989,10 @@ mod tests {
         let v_low = s.vol(80.0).unwrap().0;
         let v_high = s.vol(120.0).unwrap().0;
         // Positive rho: OTM calls have higher vol than OTM puts (reversed skew)
-        assert!(v_high > v_low,
-            "ρ>0: vol(K>F)={v_high} should > vol(K<F)={v_low}");
+        assert!(
+            v_high > v_low,
+            "ρ>0: vol(K>F)={v_high} should > vol(K<F)={v_low}"
+        );
     }
 
     // --- Calibration round-trip with deterministic noise ---
@@ -1948,21 +2007,29 @@ mod tests {
         let clean_data = sabr_synthetic_data(&original, &strikes);
 
         // Deterministic noise (~50bps = 0.005 vol points)
-        let noise = [0.003, -0.002, 0.005, -0.001, 0.004, -0.003, 0.002,
-                     -0.004, 0.001, -0.005, 0.003, -0.002, 0.004, -0.001, 0.002];
-        let noisy_data: Vec<(f64, f64)> = clean_data.iter().zip(noise.iter())
+        let noise = [
+            0.003, -0.002, 0.005, -0.001, 0.004, -0.003, 0.002, -0.004, 0.001, -0.005, 0.003,
+            -0.002, 0.004, -0.001, 0.002,
+        ];
+        let noisy_data: Vec<(f64, f64)> = clean_data
+            .iter()
+            .zip(noise.iter())
             .map(|(&(k, v), &n)| (k, v + n))
             .collect();
 
         let calibrated = SabrSmile::calibrate(100.0, 1.0, 0.5, &noisy_data).unwrap();
 
         // RMS against noisy data (fitted noise is absorbed)
-        let rms: f64 = (noisy_data.iter()
+        let rms: f64 = (noisy_data
+            .iter()
             .map(|&(k, v)| (calibrated.vol(k).unwrap().0 - v).powi(2))
-            .sum::<f64>() / noisy_data.len() as f64)
+            .sum::<f64>()
+            / noisy_data.len() as f64)
             .sqrt();
-        assert!(rms < 0.01,
-            "noisy calibration RMS {rms:.6e} should be < 0.01");
+        assert!(
+            rms < 0.01,
+            "noisy calibration RMS {rms:.6e} should be < 0.01"
+        );
     }
 
     /// Calibration round-trip with noise, lognormal (β=1).
@@ -1972,19 +2039,27 @@ mod tests {
         let strikes: Vec<f64> = (0..12).map(|i| 75.0 + 5.0 * i as f64).collect();
         let clean_data = sabr_synthetic_data(&original, &strikes);
 
-        let noise = [0.002, -0.003, 0.001, -0.002, 0.004, -0.001,
-                     0.003, -0.004, 0.002, -0.003, 0.001, -0.002];
-        let noisy_data: Vec<(f64, f64)> = clean_data.iter().zip(noise.iter())
+        let noise = [
+            0.002, -0.003, 0.001, -0.002, 0.004, -0.001, 0.003, -0.004, 0.002, -0.003, 0.001,
+            -0.002,
+        ];
+        let noisy_data: Vec<(f64, f64)> = clean_data
+            .iter()
+            .zip(noise.iter())
             .map(|(&(k, v), &n)| (k, v + n))
             .collect();
 
         let calibrated = SabrSmile::calibrate(100.0, 1.0, 1.0, &noisy_data).unwrap();
-        let rms: f64 = (noisy_data.iter()
+        let rms: f64 = (noisy_data
+            .iter()
             .map(|&(k, v)| (calibrated.vol(k).unwrap().0 - v).powi(2))
-            .sum::<f64>() / noisy_data.len() as f64)
+            .sum::<f64>()
+            / noisy_data.len() as f64)
             .sqrt();
-        assert!(rms < 0.01,
-            "noisy lognormal calibration RMS {rms:.6e} should be < 0.01");
+        assert!(
+            rms < 0.01,
+            "noisy lognormal calibration RMS {rms:.6e} should be < 0.01"
+        );
     }
 
     /// Hagan (2002) Eq. (2.17a), β=1 pure lognormal (ν=0, ρ=0).
@@ -1995,8 +2070,10 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, alpha, 1.0, 0.0, 0.0).unwrap();
         for &k in &[50.0, 75.0, 100.0, 125.0, 150.0] {
             let actual = s.vol(k).unwrap().0;
-            assert!((actual - alpha).abs() < 1e-10,
-                "Pure lognormal K={k}: expected α={alpha}, got {actual}");
+            assert!(
+                (actual - alpha).abs() < 1e-10,
+                "Pure lognormal K={k}: expected α={alpha}, got {actual}"
+            );
         }
     }
 
@@ -2012,7 +2089,9 @@ mod tests {
         // Only correction term is (1-β)²/24 * α²/F^(2(1-β))
         let correction = 1.0 + 0.25 / 24.0 * alpha * alpha / (100.0_f64.powf(1.0 - beta)).powi(2);
         let expected_corrected = expected_atm * correction;
-        assert!((actual - expected_corrected).abs() < 1e-14,
-            "CEV ATM: expected {expected_corrected:.15e}, got {actual:.15e}");
+        assert!(
+            (actual - expected_corrected).abs() < 1e-14,
+            "CEV ATM: expected {expected_corrected:.15e}, got {actual:.15e}"
+        );
     }
 }

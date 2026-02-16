@@ -25,21 +25,15 @@ pub enum VolSurfError {
 
     /// Input data is invalid (e.g., negative vol, zero expiry, mismatched grid sizes).
     #[error("invalid input: {message}")]
-    InvalidInput {
-        message: String,
-    },
+    InvalidInput { message: String },
 
     /// Numerical computation failed (e.g., NaN, ill-conditioned matrix).
     #[error("numerical error: {message}")]
-    NumericalError {
-        message: String,
-    },
+    NumericalError { message: String },
 
     /// Arbitrage violation detected in the surface.
     #[error("arbitrage detected: {message}")]
-    ArbitrageViolation {
-        message: String,
-    },
+    ArbitrageViolation { message: String },
 }
 
 #[cfg(test)]
@@ -56,7 +50,11 @@ mod tests {
             rms_error: Some(0.05),
         };
         match &err {
-            VolSurfError::CalibrationError { message, model, rms_error } => {
+            VolSurfError::CalibrationError {
+                message,
+                model,
+                rms_error,
+            } => {
                 assert_eq!(message, "convergence failed");
                 assert_eq!(*model, "SVI");
                 assert_eq!(*rms_error, Some(0.05));

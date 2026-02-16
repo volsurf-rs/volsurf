@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
 use volsurf::surface::{SmileModel, SsviSurface, SurfaceBuilder, VolSurface};
 
@@ -102,8 +102,15 @@ fn calibration_benchmarks(c: &mut Criterion) {
     // Generate data from an actual SSVI surface for clean round-trip calibration.
     let ssvi_tenors = vec![0.25, 0.50, 1.0];
     let ssvi_forwards = vec![100.0, 100.0, 100.0];
-    let ssvi_source = SsviSurface::new(-0.30, 1.0, 0.50, ssvi_tenors.clone(), ssvi_forwards.clone(), vec![0.01, 0.02, 0.04])
-        .expect("benchmark SSVI params should be valid");
+    let ssvi_source = SsviSurface::new(
+        -0.30,
+        1.0,
+        0.50,
+        ssvi_tenors.clone(),
+        ssvi_forwards.clone(),
+        vec![0.01, 0.02, 0.04],
+    )
+    .expect("benchmark SSVI params should be valid");
     let ssvi_market_data: Vec<Vec<(f64, f64)>> = ssvi_tenors
         .iter()
         .zip(ssvi_forwards.iter())
@@ -113,7 +120,10 @@ fn calibration_benchmarks(c: &mut Criterion) {
             (0..10)
                 .map(|i| {
                     let k = k_min + (k_max - k_min) * (i as f64 / 9.0);
-                    let v = ssvi_source.black_vol(t, k).expect("SSVI vol should succeed").0;
+                    let v = ssvi_source
+                        .black_vol(t, k)
+                        .expect("SSVI vol should succeed")
+                        .0;
                     (k, v)
                 })
                 .collect()
@@ -143,7 +153,9 @@ fn construction_benchmarks(c: &mut Criterion) {
     let data_5 = generate_surface_data(spot, rate, 5, 20);
     group.bench_function("svi_surface_5_tenors", |b| {
         b.iter(|| {
-            let mut builder = SurfaceBuilder::new().spot(black_box(spot)).rate(black_box(rate));
+            let mut builder = SurfaceBuilder::new()
+                .spot(black_box(spot))
+                .rate(black_box(rate));
             for (t, strikes, vols) in &data_5 {
                 builder = builder.add_tenor(*t, strikes, vols);
             }
@@ -155,7 +167,9 @@ fn construction_benchmarks(c: &mut Criterion) {
     let data_20 = generate_surface_data(spot, rate, 20, 30);
     group.bench_function("svi_surface_20_tenors", |b| {
         b.iter(|| {
-            let mut builder = SurfaceBuilder::new().spot(black_box(spot)).rate(black_box(rate));
+            let mut builder = SurfaceBuilder::new()
+                .spot(black_box(spot))
+                .rate(black_box(rate));
             for (t, strikes, vols) in &data_20 {
                 builder = builder.add_tenor(*t, strikes, vols);
             }

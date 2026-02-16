@@ -20,8 +20,8 @@ use std::f64::consts::PI;
 use nalgebra::{DMatrix, DVector};
 
 use crate::error::{self, VolSurfError};
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
+use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::types::Vol;
 use crate::validate::validate_positive;
 
@@ -68,23 +68,17 @@ impl SviSmile {
         validate_positive(expiry, "expiry")?;
         if b < 0.0 || b.is_nan() {
             return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "b must be non-negative, got {b}"
-                ),
+                message: format!("b must be non-negative, got {b}"),
             });
         }
         if rho.abs() >= 1.0 || rho.is_nan() {
             return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "|rho| must be less than 1, got {rho}"
-                ),
+                message: format!("|rho| must be less than 1, got {rho}"),
             });
         }
         if sigma <= 0.0 || sigma.is_nan() {
             return Err(VolSurfError::InvalidInput {
-                message: format!(
-                "sigma must be positive, got {sigma}"
-                ),
+                message: format!("sigma must be positive, got {sigma}"),
             });
         }
         if !m.is_finite() {
@@ -101,7 +95,7 @@ impl SviSmile {
         if min_variance < 0.0 || min_variance.is_nan() {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
-                "minimum variance is negative: a + b*sigma*sqrt(1-rho^2) = {min_variance}"
+                    "minimum variance is negative: a + b*sigma*sqrt(1-rho^2) = {min_variance}"
                 ),
             });
         }
@@ -139,13 +133,14 @@ impl SviSmile {
     ///
     /// # References
     /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
-    pub fn calibrate(
-        forward: f64,
-        expiry: f64,
-        market_vols: &[(f64, f64)],
-    ) -> error::Result<Self> {
+    pub fn calibrate(forward: f64, expiry: f64, market_vols: &[(f64, f64)]) -> error::Result<Self> {
         #[cfg(feature = "logging")]
-        tracing::debug!(forward, expiry, n_quotes = market_vols.len(), "SVI calibration started");
+        tracing::debug!(
+            forward,
+            expiry,
+            n_quotes = market_vols.len(),
+            "SVI calibration started"
+        );
 
         /// Minimum market quotes for SVI calibration (5 free params).
         const MIN_POINTS: usize = 5;
@@ -164,8 +159,8 @@ impl SviSmile {
         if market_vols.len() < MIN_POINTS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
-                "at least {MIN_POINTS} market points required, got {}",
-                market_vols.len()
+                    "at least {MIN_POINTS} market points required, got {}",
+                    market_vols.len()
                 ),
             });
         }
@@ -175,7 +170,10 @@ impl SviSmile {
         }
 
         // --- Convert to log-moneyness / total-variance ---
-        let k_vals: Vec<f64> = market_vols.iter().map(|&(s, _)| (s / forward).ln()).collect();
+        let k_vals: Vec<f64> = market_vols
+            .iter()
+            .map(|&(s, _)| (s / forward).ln())
+            .collect();
         let w_vals: Vec<f64> = market_vols.iter().map(|&(_, v)| v * v * expiry).collect();
 
         let k_min = k_vals.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -217,7 +215,11 @@ impl SviSmile {
                         return f64::MAX;
                     }
                     let b_clamped = b.max(0.0);
-                    let rho = if b_clamped < 1e-10 { 0.0 } else { (b_rho / b_clamped).clamp(-0.999, 0.999) };
+                    let rho = if b_clamped < 1e-10 {
+                        0.0
+                    } else {
+                        (b_rho / b_clamped).clamp(-0.999, 0.999)
+                    };
                     let min_var = a + b_clamped * sigma * (1.0 - rho * rho).sqrt();
                     if min_var < -1e-10 {
                         return f64::MAX;
@@ -267,25 +269,18 @@ impl SviSmile {
             diameter_tol: NM_DIAMETER_TOL,
             fvalue_tol: NM_FVALUE_TOL,
         };
-        let nm_result = crate::optim::nelder_mead_2d(
-            objective,
-            best_m,
-            best_sigma,
-            step_m,
-            step_s,
-            &nm_config,
-        );
+        let nm_result =
+            crate::optim::nelder_mead_2d(objective, best_m, best_sigma, step_m, step_s, &nm_config);
 
         // --- Recover final parameters ---
         let (opt_m, opt_sigma) = (nm_result.x, nm_result.y);
 
-        let (a, b_rho, b, _rss) = inner_solve(opt_m, opt_sigma).ok_or_else(|| {
-            VolSurfError::CalibrationError {
+        let (a, b_rho, b, _rss) =
+            inner_solve(opt_m, opt_sigma).ok_or_else(|| VolSurfError::CalibrationError {
                 message: "linear solve failed at optimal (m, sigma)".into(),
                 model: "SVI",
                 rms_error: None,
-            }
-        })?;
+            })?;
 
         let b = b.max(0.0);
         let rho = if b < 1e-10 {
@@ -295,14 +290,22 @@ impl SviSmile {
         };
 
         #[cfg(feature = "logging")]
-        tracing::debug!(a, b, rho, m = opt_m, sigma = opt_sigma, "SVI calibration complete");
+        tracing::debug!(
+            a,
+            b,
+            rho,
+            m = opt_m,
+            sigma = opt_sigma,
+            "SVI calibration complete"
+        );
 
-        Self::new(forward, expiry, a, b, rho, opt_m, opt_sigma.max(1e-6))
-            .map_err(|e| VolSurfError::CalibrationError {
+        Self::new(forward, expiry, a, b, rho, opt_m, opt_sigma.max(1e-6)).map_err(|e| {
+            VolSurfError::CalibrationError {
                 message: format!("calibrated params invalid: {e}"),
                 model: "SVI",
                 rms_error: None,
-            })
+            }
+        })
     }
 
     /// Evaluate the raw SVI total variance w(k) at log-moneyness k.
@@ -819,20 +822,20 @@ mod tests {
     #[test]
     fn calibrate_round_trip_canonical() {
         let original = make_smile();
-        let strikes: Vec<f64> = (0..20)
-            .map(|i| 60.0 + 4.0 * i as f64)
-            .collect();
+        let strikes: Vec<f64> = (0..20).map(|i| 60.0 + 4.0 * i as f64).collect();
         let data = synthetic_market_data(&original, &strikes);
 
         let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
 
         // Check round-trip RMS
-        let rms = (data.iter()
+        let rms = (data
+            .iter()
             .map(|&(k, sigma)| {
                 let fitted = calibrated.vol(k).unwrap().0;
                 (fitted - sigma).powi(2)
             })
-            .sum::<f64>() / data.len() as f64)
+            .sum::<f64>()
+            / data.len() as f64)
             .sqrt();
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
@@ -846,12 +849,14 @@ mod tests {
 
         let calibrated = SviSmile::calibrate(100.0, 0.5, &data).unwrap();
 
-        let rms = (data.iter()
+        let rms = (data
+            .iter()
             .map(|&(k, sigma)| {
                 let fitted = calibrated.vol(k).unwrap().0;
                 (fitted - sigma).powi(2)
             })
-            .sum::<f64>() / data.len() as f64)
+            .sum::<f64>()
+            / data.len() as f64)
             .sqrt();
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
@@ -864,12 +869,14 @@ mod tests {
 
         let calibrated = SviSmile::calibrate(100.0, 1.0, &data).unwrap();
 
-        let rms = (data.iter()
+        let rms = (data
+            .iter()
             .map(|&(k, sigma)| {
                 let fitted = calibrated.vol(k).unwrap().0;
                 (fitted - sigma).powi(2)
             })
-            .sum::<f64>() / data.len() as f64)
+            .sum::<f64>()
+            / data.len() as f64)
             .sqrt();
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
@@ -883,14 +890,26 @@ mod tests {
 
     #[test]
     fn calibrate_rejects_negative_forward() {
-        let data = vec![(80.0, 0.2), (90.0, 0.2), (100.0, 0.2), (110.0, 0.2), (120.0, 0.2)];
+        let data = vec![
+            (80.0, 0.2),
+            (90.0, 0.2),
+            (100.0, 0.2),
+            (110.0, 0.2),
+            (120.0, 0.2),
+        ];
         let result = SviSmile::calibrate(-100.0, 1.0, &data);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn calibrate_rejects_negative_vol() {
-        let data = vec![(80.0, 0.2), (90.0, -0.1), (100.0, 0.2), (110.0, 0.2), (120.0, 0.2)];
+        let data = vec![
+            (80.0, 0.2),
+            (90.0, -0.1),
+            (100.0, 0.2),
+            (110.0, 0.2),
+            (120.0, 0.2),
+        ];
         let result = SviSmile::calibrate(100.0, 1.0, &data);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
@@ -913,14 +932,19 @@ mod tests {
         let strikes = [80.0, 90.0, 100.0, 110.0, 120.0];
         let data = synthetic_market_data(&original, &strikes);
         let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
-        let rms = (data.iter()
+        let rms = (data
+            .iter()
             .map(|&(k, sigma)| {
                 let fitted = calibrated.vol(k).unwrap().0;
                 (fitted - sigma).powi(2)
             })
-            .sum::<f64>() / data.len() as f64)
+            .sum::<f64>()
+            / data.len() as f64)
             .sqrt();
-        assert!(rms < 0.001, "round-trip RMS {rms} with 5 points should be < 0.001");
+        assert!(
+            rms < 0.001,
+            "round-trip RMS {rms} with 5 points should be < 0.001"
+        );
     }
 
     // --- Gap #4: m and a parameter validation ---

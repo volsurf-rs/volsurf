@@ -36,11 +36,7 @@ pub(crate) fn nelder_mead_2d<F>(
 where
     F: Fn(f64, f64) -> f64,
 {
-    let mut simplex = [
-        (x0, y0),
-        (x0 + step_x, y0),
-        (x0, y0 + step_y),
-    ];
+    let mut simplex = [(x0, y0), (x0 + step_x, y0), (x0, y0 + step_y)];
     let mut f_vals = [
         objective(simplex[0].0, simplex[0].1),
         objective(simplex[1].0, simplex[1].1),
@@ -158,7 +154,11 @@ mod tests {
         let result = nelder_mead_2d(|x, y| x * x + y * y, 1.0, 1.0, 0.5, 0.5, &default_config());
         assert!((result.x).abs() < 1e-6, "x should be ~0, got {}", result.x);
         assert!((result.y).abs() < 1e-6, "y should be ~0, got {}", result.y);
-        assert!(result.fval < 1e-12, "fval should be ~0, got {}", result.fval);
+        assert!(
+            result.fval < 1e-12,
+            "fval should be ~0, got {}",
+            result.fval
+        );
     }
 
     #[test]

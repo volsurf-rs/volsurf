@@ -52,7 +52,14 @@ impl DisplacedImpliedVol {
         expiry: f64,
         option_type: OptionType,
     ) -> crate::error::Result<Vol> {
-        let _ = (self.beta, option_price, forward, strike, expiry, option_type);
+        let _ = (
+            self.beta,
+            option_price,
+            forward,
+            strike,
+            expiry,
+            option_type,
+        );
         Err(VolSurfError::NumericalError {
             message: "not yet implemented".to_string(),
         })

@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
-use crate::surface::arbitrage::SurfaceDiagnostics;
 use crate::surface::VolSurface;
+use crate::surface::arbitrage::SurfaceDiagnostics;
 use crate::types::{Variance, Vol};
 
 /// Extended SSVI surface with calendar-spread no-arbitrage guarantees.

@@ -159,15 +159,11 @@ impl SurfaceBuilder {
         );
 
         // --- Validate required fields ---
-        let spot = self.spot.ok_or_else(|| {
-            VolSurfError::InvalidInput {
-                message: "spot price is required".into(),
-            }
+        let spot = self.spot.ok_or_else(|| VolSurfError::InvalidInput {
+            message: "spot price is required".into(),
         })?;
-        let rate = self.rate.ok_or_else(|| {
-            VolSurfError::InvalidInput {
-                message: "risk-free rate is required".into(),
-            }
+        let rate = self.rate.ok_or_else(|| VolSurfError::InvalidInput {
+            message: "risk-free rate is required".into(),
         })?;
 
         validate_positive(spot, "spot")?;
@@ -199,10 +195,7 @@ impl SurfaceBuilder {
         for tenor in &self.tenor_data {
             if tenor.expiry <= 0.0 || !tenor.expiry.is_finite() {
                 return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "expiry must be positive and finite, got {}",
-                        tenor.expiry
-                    ),
+                    message: format!("expiry must be positive and finite, got {}", tenor.expiry),
                 });
             }
             if tenor.strikes.len() != tenor.vols.len() {
@@ -247,7 +240,8 @@ impl SurfaceBuilder {
                         .zip(tenor.vols.iter())
                         .map(|(&k, &v)| (k, v * v * tenor.expiry))
                         .collect();
-                    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    pairs
+                        .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
                     let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
                     let spline = SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
                     Box::new(spline)
@@ -575,7 +569,10 @@ mod tests {
             .add_tenor(0.25, &strikes, &vols)
             .build();
         // SplineSmile::new rejects non-strictly-increasing strikes
-        assert!(result.is_err(), "duplicate strikes should cause build to fail");
+        assert!(
+            result.is_err(),
+            "duplicate strikes should cause build to fail"
+        );
     }
 
     #[test]
@@ -589,7 +586,10 @@ mod tests {
             .model(SmileModel::CubicSpline)
             .add_tenor(0.25, &strikes, &vols)
             .build();
-        assert!(result.is_ok(), "unsorted strikes should be sorted by builder");
+        assert!(
+            result.is_ok(),
+            "unsorted strikes should be sorted by builder"
+        );
     }
 
     // --- Default trait ---
@@ -637,8 +637,10 @@ mod tests {
             .build();
         match result {
             Err(VolSurfError::InvalidInput { message }) => {
-                assert!(message.contains("5") && message.contains("3"),
-                    "error should mention both lengths: {message}");
+                assert!(
+                    message.contains("5") && message.contains("3"),
+                    "error should mention both lengths: {message}"
+                );
             }
             other => panic!("expected InvalidInput, got {other:?}"),
         }
@@ -655,7 +657,10 @@ mod tests {
             .rate(0.05)
             .add_tenor(0.25, &strikes, &vols)
             .build();
-        assert!(result.is_err(), "negative strikes should cause build to fail");
+        assert!(
+            result.is_err(),
+            "negative strikes should cause build to fail"
+        );
     }
 
     #[test]
@@ -766,7 +771,11 @@ mod tests {
         for t in [0.25, 0.5, 1.0] {
             for k in [80.0, 100.0, 120.0] {
                 let v = surface.black_vol(t, k).unwrap();
-                assert!(v.0 > 0.0 && v.0 < 2.0, "vol({t}, {k}) = {} out of range", v.0);
+                assert!(
+                    v.0 > 0.0 && v.0 < 2.0,
+                    "vol({t}, {k}) = {} out of range",
+                    v.0
+                );
             }
         }
     }
@@ -796,7 +805,10 @@ mod tests {
             .model(SmileModel::Sabr { beta: 0.0 })
             .add_tenor(0.5, &sample_strikes(), &sample_vols())
             .build();
-        assert!(result.is_ok(), "beta=0 (normal SABR) should build successfully");
+        assert!(
+            result.is_ok(),
+            "beta=0 (normal SABR) should build successfully"
+        );
     }
 
     #[test]
@@ -807,6 +819,9 @@ mod tests {
             .model(SmileModel::Sabr { beta: 1.0 })
             .add_tenor(0.5, &sample_strikes(), &sample_vols())
             .build();
-        assert!(result.is_ok(), "beta=1 (lognormal SABR) should build successfully");
+        assert!(
+            result.is_ok(),
+            "beta=1 (lognormal SABR) should build successfully"
+        );
     }
 }

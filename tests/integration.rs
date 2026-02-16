@@ -8,10 +8,10 @@ use std::sync::Arc;
 use std::thread;
 
 use approx::assert_abs_diff_eq;
+use volsurf::VolSurfError;
 use volsurf::smile::spline::SplineSmile;
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
 use volsurf::surface::{PiecewiseSurface, SmileModel, SsviSurface, SurfaceBuilder, VolSurface};
-use volsurf::VolSurfError;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,7 +58,11 @@ fn build_3_tenor_surface() -> PiecewiseSurface {
         &SviParams {
             forward: spot * (rate * 0.25_f64).exp(),
             expiry: 0.25,
-            a: 0.005, b: 0.05, rho: -0.3, m: 0.0, sigma: 0.25,
+            a: 0.005,
+            b: 0.05,
+            rho: -0.3,
+            m: 0.0,
+            sigma: 0.25,
         },
         &strikes,
     );
@@ -67,7 +71,11 @@ fn build_3_tenor_surface() -> PiecewiseSurface {
         &SviParams {
             forward: spot * (rate * 0.5_f64).exp(),
             expiry: 0.5,
-            a: 0.01, b: 0.04, rho: -0.25, m: 0.0, sigma: 0.35,
+            a: 0.01,
+            b: 0.04,
+            rho: -0.25,
+            m: 0.0,
+            sigma: 0.35,
         },
         &strikes,
     );
@@ -76,7 +84,11 @@ fn build_3_tenor_surface() -> PiecewiseSurface {
         &SviParams {
             forward: spot * (rate * 1.0_f64).exp(),
             expiry: 1.0,
-            a: 0.02, b: 0.04, rho: -0.2, m: 0.0, sigma: 0.4,
+            a: 0.02,
+            b: 0.04,
+            rho: -0.2,
+            m: 0.0,
+            sigma: 0.4,
         },
         &strikes,
     );
@@ -198,11 +210,7 @@ fn three_tenor_vol_variance_consistency() -> Result<(), Box<dyn std::error::Erro
         for k in [80.0, 90.0, 100.0, 110.0, 120.0] {
             let vol = surface.black_vol(t, k)?;
             let var = surface.black_variance(t, k)?;
-            assert_abs_diff_eq!(
-                vol.0 * vol.0 * t,
-                var.0,
-                epsilon = 1e-10
-            );
+            assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
         }
     }
 
@@ -307,7 +315,10 @@ fn butterfly_violation_detected_via_diagnostics() -> Result<(), Box<dyn std::err
             "Non-free report should have violations"
         );
         for v in &report.butterfly_violations {
-            assert!(v.density < 0.0, "Butterfly violation should have negative density");
+            assert!(
+                v.density < 0.0,
+                "Butterfly violation should have negative density"
+            );
         }
     }
 
@@ -484,7 +495,11 @@ fn cubic_spline_surface_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
         &SviParams {
             forward: spot * (rate * 0.25_f64).exp(),
             expiry: 0.25,
-            a: 0.005, b: 0.05, rho: -0.3, m: 0.0, sigma: 0.25,
+            a: 0.005,
+            b: 0.05,
+            rho: -0.3,
+            m: 0.0,
+            sigma: 0.25,
         },
         &strikes,
     );
@@ -492,7 +507,11 @@ fn cubic_spline_surface_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
         &SviParams {
             forward: spot * (rate * 1.0_f64).exp(),
             expiry: 1.0,
-            a: 0.02, b: 0.04, rho: -0.2, m: 0.0, sigma: 0.4,
+            a: 0.02,
+            b: 0.04,
+            rho: -0.2,
+            m: 0.0,
+            sigma: 0.4,
         },
         &strikes,
     );
@@ -625,7 +644,14 @@ fn build_sabr_surface() -> PiecewiseSurface {
     for &(t, alpha) in &[(0.25, 2.0), (0.50, 2.0), (1.0, 2.0)] {
         let fwd = spot * (rate * t).exp();
         let data = sabr_market_data(
-            &SabrParams { forward: fwd, expiry: t, alpha, beta: 0.5, rho: -0.30, nu: 0.40 },
+            &SabrParams {
+                forward: fwd,
+                expiry: t,
+                alpha,
+                beta: 0.5,
+                rho: -0.30,
+                nu: 0.40,
+            },
             &strikes,
         );
         let (ks, vs): (Vec<f64>, Vec<f64>) = data.into_iter().unzip();
@@ -654,7 +680,12 @@ fn sabr_calibration_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     let forward = 100.0;
     let expiry = 0.5;
     let params = SabrParams {
-        forward, expiry, alpha: 0.30, beta: 0.5, rho: -0.30, nu: 0.40,
+        forward,
+        expiry,
+        alpha: 0.30,
+        beta: 0.5,
+        rho: -0.30,
+        nu: 0.40,
     };
     let strikes = standard_strikes();
     let market_data = sabr_market_data(&params, &strikes);
@@ -681,7 +712,12 @@ fn sabr_calibration_round_trip_lognormal() -> Result<(), Box<dyn std::error::Err
     let forward = 100.0;
     let expiry = 1.0;
     let params = SabrParams {
-        forward, expiry, alpha: 0.20, beta: 1.0, rho: -0.40, nu: 0.30,
+        forward,
+        expiry,
+        alpha: 0.20,
+        beta: 1.0,
+        rho: -0.40,
+        nu: 0.30,
     };
     let strikes = standard_strikes();
     let market_data = sabr_market_data(&params, &strikes);
@@ -740,11 +776,7 @@ fn sabr_surface_vol_variance_consistency() -> Result<(), Box<dyn std::error::Err
         for k in [80.0, 90.0, 100.0, 110.0, 120.0] {
             let vol = surface.black_vol(t, k)?;
             let var = surface.black_variance(t, k)?;
-            assert_abs_diff_eq!(
-                vol.0 * vol.0 * t,
-                var.0,
-                epsilon = 1e-10
-            );
+            assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
         }
     }
 
@@ -859,11 +891,7 @@ fn ssvi_vol_variance_consistency() -> Result<(), Box<dyn std::error::Error>> {
         for k in [80.0, 90.0, 100.0, 110.0, 120.0] {
             let vol = surface.black_vol(t, k)?;
             let var = surface.black_variance(t, k)?;
-            assert_abs_diff_eq!(
-                vol.0 * vol.0 * t,
-                var.0,
-                epsilon = 1e-10
-            );
+            assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
         }
     }
 
@@ -937,7 +965,13 @@ fn svi_vs_sabr_produce_plausible_vols() -> Result<(), Box<dyn std::error::Error>
     let strikes = standard_strikes();
     let market_data = svi_market_data(
         &SviParams {
-            forward, expiry, a: 0.01, b: 0.10, rho: -0.30, m: 0.0, sigma: 0.30,
+            forward,
+            expiry,
+            a: 0.01,
+            b: 0.10,
+            rho: -0.30,
+            m: 0.0,
+            sigma: 0.30,
         },
         &strikes,
     );

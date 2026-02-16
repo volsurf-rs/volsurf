@@ -146,6 +146,9 @@ mod tests {
     fn error_message_includes_field_name() {
         let err = validate_positive(-1.0, "my_field").unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("my_field"), "error should include field name: {msg}");
+        assert!(
+            msg.contains("my_field"),
+            "error should include field name: {msg}"
+        );
     }
 }

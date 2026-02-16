@@ -110,14 +110,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             report.butterfly_violations.len()
         );
     }
-    println!(
-        "Calendar violations: {}",
-        diag.calendar_violations.len()
-    );
-    println!(
-        "Surface is arbitrage-free: {}",
-        diag.is_free
-    );
+    println!("Calendar violations: {}", diag.calendar_violations.len());
+    println!("Surface is arbitrage-free: {}", diag.is_free);
 
     Ok(())
 }

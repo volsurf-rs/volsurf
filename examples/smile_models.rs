@@ -48,15 +48,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Compare outputs
     // ---------------------------------------------------------------
 
-    println!("{:>8} {:>12} {:>12} {:>12}", "Strike", "Market", "SVI", "Spline");
+    println!(
+        "{:>8} {:>12} {:>12} {:>12}",
+        "Strike", "Market", "SVI", "Spline"
+    );
     println!("{}", "-".repeat(48));
 
     for &(k, market_vol) in &market_data {
         let svi_vol = svi.vol(k)?.0;
         let spline_vol = spline.vol(k)?.0;
-        println!(
-            "{k:>8.0} {market_vol:>11.4}% {svi_vol:>11.4}% {spline_vol:>11.4}%",
-        );
+        println!("{k:>8.0} {market_vol:>11.4}% {svi_vol:>11.4}% {spline_vol:>11.4}%",);
     }
 
     // Also query at off-grid strikes

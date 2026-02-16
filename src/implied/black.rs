@@ -51,17 +51,15 @@ impl BlackImpliedVol {
             .expiry(expiry)
             .is_call(is_call)
             .build()
-            .ok_or_else(|| {
-                VolSurfError::InvalidInput {
-                    message: "implied-vol rejected inputs as outside model domain".into(),
-                }
+            .ok_or_else(|| VolSurfError::InvalidInput {
+                message: "implied-vol rejected inputs as outside model domain".into(),
             })?;
 
-        let sigma = iv.calculate::<DefaultSpecialFn>().ok_or_else(|| {
-            VolSurfError::NumericalError {
-                message: "option price is outside the attainable range".into(),
-            }
-        })?;
+        let sigma =
+            iv.calculate::<DefaultSpecialFn>()
+                .ok_or_else(|| VolSurfError::NumericalError {
+                    message: "option price is outside the attainable range".into(),
+                })?;
 
         Ok(Vol(sigma))
     }
@@ -99,10 +97,8 @@ pub fn black_price(
         .expiry(expiry)
         .is_call(is_call)
         .build()
-        .ok_or_else(|| {
-            VolSurfError::InvalidInput {
-                message: "implied-vol rejected pricing inputs as outside model domain".into(),
-            }
+        .ok_or_else(|| VolSurfError::InvalidInput {
+            message: "implied-vol rejected pricing inputs as outside model domain".into(),
         })?
         .calculate::<DefaultSpecialFn>();
 
@@ -249,8 +245,7 @@ mod tests {
 
     #[test]
     fn compute_rejects_nan_price() {
-        let result =
-            BlackImpliedVol::compute(f64::NAN, 100.0, 100.0, 1.0, OptionType::Call);
+        let result = BlackImpliedVol::compute(f64::NAN, 100.0, 100.0, 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -268,8 +263,7 @@ mod tests {
 
     #[test]
     fn compute_rejects_infinite_forward() {
-        let result =
-            BlackImpliedVol::compute(5.0, f64::INFINITY, 100.0, 1.0, OptionType::Call);
+        let result = BlackImpliedVol::compute(5.0, f64::INFINITY, 100.0, 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -294,8 +288,7 @@ mod tests {
     #[test]
     fn compute_rejects_price_above_forward() {
         // Call price cannot exceed forward price
-        let result =
-            BlackImpliedVol::compute(150.0, 100.0, 100.0, 1.0, OptionType::Call);
+        let result = BlackImpliedVol::compute(150.0, 100.0, 100.0, 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::NumericalError { .. })));
     }
 
@@ -392,8 +385,12 @@ mod tests {
         let expiry = 1.0;
         let price = 20.01; // just above intrinsic of 20.0
 
-        let iv = BlackImpliedVol::compute(price, forward, strike, expiry, OptionType::Call).unwrap();
-        assert!(iv.0 > 0.0, "IV should be positive for price above intrinsic");
+        let iv =
+            BlackImpliedVol::compute(price, forward, strike, expiry, OptionType::Call).unwrap();
+        assert!(
+            iv.0 > 0.0,
+            "IV should be positive for price above intrinsic"
+        );
         assert!(iv.0.is_finite(), "IV should be finite");
 
         // Round-trip: reprice with extracted IV should match original price

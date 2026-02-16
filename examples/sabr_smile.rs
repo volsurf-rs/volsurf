@@ -22,16 +22,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Typical equity parameters: beta=0.5 (CIR-like), negative skew
     let smile = SabrSmile::new(
-        forward,
-        expiry,
-        0.3,  // alpha: ATM vol scale
+        forward, expiry, 0.3,  // alpha: ATM vol scale
         1.0,  // beta: lognormal backbone (simplest case)
         -0.3, // rho: negative skew (equity)
         0.4,  // nu: vol-of-vol (smile curvature)
     )?;
 
-    println!("SABR smile: alpha={:.2}, beta={:.1}, rho={:.2}, nu={:.2}",
-        smile.alpha(), smile.beta(), smile.rho(), smile.nu());
+    println!(
+        "SABR smile: alpha={:.2}, beta={:.1}, rho={:.2}, nu={:.2}",
+        smile.alpha(),
+        smile.beta(),
+        smile.rho(),
+        smile.nu()
+    );
     println!("Forward={forward}, Expiry={expiry}y\n");
 
     // ---------------------------------------------------------------
@@ -77,11 +80,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "Original:   alpha={:.6}, rho={:.6}, nu={:.6}",
-        smile.alpha(), smile.rho(), smile.nu()
+        smile.alpha(),
+        smile.rho(),
+        smile.nu()
     );
     println!(
         "Calibrated: alpha={:.6}, rho={:.6}, nu={:.6}",
-        calibrated.alpha(), calibrated.rho(), calibrated.nu()
+        calibrated.alpha(),
+        calibrated.rho(),
+        calibrated.nu()
     );
 
     // Compare vols
@@ -100,7 +107,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let svi = SviSmile::calibrate(forward, expiry, &market_vols)?;
 
-    println!("{:>8} {:>10} {:>10} {:>10}", "Strike", "SABR", "SVI", "Diff(bp)");
+    println!(
+        "{:>8} {:>10} {:>10} {:>10}",
+        "Strike", "SABR", "SVI", "Diff(bp)"
+    );
     println!("{}", "-".repeat(42));
 
     for &(k, _) in &market_vols {
@@ -126,20 +136,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let strikes_wide = vec![80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0];
 
     // Generate realistic smiles at three tenors
-    let vols_3m: Vec<f64> = strikes_wide.iter().map(|&k| {
-        SabrSmile::new(forward, 0.25, 0.3, 1.0, -0.3, 0.4)
-            .unwrap().vol(k).unwrap().0
-    }).collect();
+    let vols_3m: Vec<f64> = strikes_wide
+        .iter()
+        .map(|&k| {
+            SabrSmile::new(forward, 0.25, 0.3, 1.0, -0.3, 0.4)
+                .unwrap()
+                .vol(k)
+                .unwrap()
+                .0
+        })
+        .collect();
 
-    let vols_1y: Vec<f64> = strikes_wide.iter().map(|&k| {
-        SabrSmile::new(forward, 1.0, 0.25, 1.0, -0.25, 0.35)
-            .unwrap().vol(k).unwrap().0
-    }).collect();
+    let vols_1y: Vec<f64> = strikes_wide
+        .iter()
+        .map(|&k| {
+            SabrSmile::new(forward, 1.0, 0.25, 1.0, -0.25, 0.35)
+                .unwrap()
+                .vol(k)
+                .unwrap()
+                .0
+        })
+        .collect();
 
-    let vols_2y: Vec<f64> = strikes_wide.iter().map(|&k| {
-        SabrSmile::new(forward, 2.0, 0.22, 1.0, -0.20, 0.30)
-            .unwrap().vol(k).unwrap().0
-    }).collect();
+    let vols_2y: Vec<f64> = strikes_wide
+        .iter()
+        .map(|&k| {
+            SabrSmile::new(forward, 2.0, 0.22, 1.0, -0.20, 0.30)
+                .unwrap()
+                .vol(k)
+                .unwrap()
+                .0
+        })
+        .collect();
 
     let surface = SurfaceBuilder::new()
         .spot(spot)

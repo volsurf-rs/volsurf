@@ -18,8 +18,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::smile::SmileSection;
+use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
 
@@ -86,9 +86,9 @@ impl SplineSmile {
         if strikes.len() != variances.len() {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
-                "strikes and variances must have the same length, got {} and {}",
-                strikes.len(),
-                variances.len()
+                    "strikes and variances must have the same length, got {} and {}",
+                    strikes.len(),
+                    variances.len()
                 ),
             });
         }
@@ -100,38 +100,32 @@ impl SplineSmile {
         for k in &strikes {
             if !k.is_finite() {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "strikes must be finite, got {k}"
-                ),
+                    message: format!("strikes must be finite, got {k}"),
                 });
             }
         }
         for (i, w) in strikes.windows(2).enumerate() {
             if w[1] <= w[0] {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "strikes must be strictly increasing, but strikes[{}]={} >= strikes[{}]={}",
-                    i,
-                    w[0],
-                    i + 1,
-                    w[1]
-                ),
+                    message: format!(
+                        "strikes must be strictly increasing, but strikes[{}]={} >= strikes[{}]={}",
+                        i,
+                        w[0],
+                        i + 1,
+                        w[1]
+                    ),
                 });
             }
         }
         for v in &variances {
             if *v < 0.0 || v.is_nan() {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "variances must be non-negative, got {v}"
-                ),
+                    message: format!("variances must be non-negative, got {v}"),
                 });
             }
             if !v.is_finite() {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "variances must be finite, got {v}"
-                ),
+                    message: format!("variances must be finite, got {v}"),
                 });
             }
         }
@@ -175,11 +169,7 @@ impl SplineSmile {
 /// per-interval coefficients.
 ///
 /// Uses the Thomas algorithm: O(n) forward elimination + back substitution.
-fn build_spline_coefficients(
-    x: &[f64],
-    y: &[f64],
-    n: usize,
-) -> Vec<SplineCoeff> {
+fn build_spline_coefficients(x: &[f64], y: &[f64], n: usize) -> Vec<SplineCoeff> {
     // Interval widths
     let h: Vec<f64> = x.windows(2).map(|w| w[1] - w[0]).collect();
 
@@ -241,9 +231,7 @@ impl SmileSection for SplineSmile {
         let w = self.eval_variance(strike);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
-                message: format!(
-                "negative interpolated variance {w} at strike {strike}"
-                ),
+                message: format!("negative interpolated variance {w} at strike {strike}"),
             });
         }
         Ok(Vol((w / self.expiry).sqrt()))
@@ -254,9 +242,7 @@ impl SmileSection for SplineSmile {
         let w = self.eval_variance(strike);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
-                message: format!(
-                "negative interpolated variance {w} at strike {strike}"
-                ),
+                message: format!("negative interpolated variance {w} at strike {strike}"),
             });
         }
         Ok(Variance(w))
@@ -318,23 +304,13 @@ mod tests {
 
     #[test]
     fn rejects_mismatched_lengths() {
-        let result = SplineSmile::new(
-            100.0,
-            0.25,
-            vec![1.0, 2.0, 3.0],
-            vec![0.04, 0.04],
-        );
+        let result = SplineSmile::new(100.0, 0.25, vec![1.0, 2.0, 3.0], vec![0.04, 0.04]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn rejects_unsorted_strikes() {
-        let result = SplineSmile::new(
-            100.0,
-            0.25,
-            vec![3.0, 1.0, 2.0],
-            vec![0.04, 0.04, 0.04],
-        );
+        let result = SplineSmile::new(100.0, 0.25, vec![3.0, 1.0, 2.0], vec![0.04, 0.04, 0.04]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -351,23 +327,13 @@ mod tests {
 
     #[test]
     fn rejects_negative_variance() {
-        let result = SplineSmile::new(
-            100.0,
-            0.25,
-            vec![1.0, 2.0, 3.0],
-            vec![0.04, -0.01, 0.04],
-        );
+        let result = SplineSmile::new(100.0, 0.25, vec![1.0, 2.0, 3.0], vec![0.04, -0.01, 0.04]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn rejects_nan_variance() {
-        let result = SplineSmile::new(
-            100.0,
-            0.25,
-            vec![1.0, 2.0, 3.0],
-            vec![0.04, f64::NAN, 0.04],
-        );
+        let result = SplineSmile::new(100.0, 0.25, vec![1.0, 2.0, 3.0], vec![0.04, f64::NAN, 0.04]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -395,23 +361,13 @@ mod tests {
 
     #[test]
     fn rejects_zero_expiry() {
-        let result = SplineSmile::new(
-            100.0,
-            0.0,
-            vec![1.0, 2.0, 3.0],
-            vec![0.04, 0.04, 0.04],
-        );
+        let result = SplineSmile::new(100.0, 0.0, vec![1.0, 2.0, 3.0], vec![0.04, 0.04, 0.04]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn rejects_negative_forward() {
-        let result = SplineSmile::new(
-            -100.0,
-            0.25,
-            vec![1.0, 2.0, 3.0],
-            vec![0.04, 0.04, 0.04],
-        );
+        let result = SplineSmile::new(-100.0, 0.25, vec![1.0, 2.0, 3.0], vec![0.04, 0.04, 0.04]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -423,8 +379,7 @@ mod tests {
         let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
         let variances = vec![0.065, 0.045, 0.04, 0.045, 0.065];
         let expiry = 1.0;
-        let smile = SplineSmile::new(100.0, expiry, strikes.clone(), variances.clone())
-            .unwrap();
+        let smile = SplineSmile::new(100.0, expiry, strikes.clone(), variances.clone()).unwrap();
 
         for (k, w) in strikes.iter().zip(variances.iter()) {
             let vol = smile.vol(*k).unwrap();
@@ -437,8 +392,7 @@ mod tests {
     fn variance_passes_through_knot_points() {
         let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
         let variances = vec![0.065, 0.045, 0.04, 0.045, 0.065];
-        let smile = SplineSmile::new(100.0, 1.0, strikes.clone(), variances.clone())
-            .unwrap();
+        let smile = SplineSmile::new(100.0, 1.0, strikes.clone(), variances.clone()).unwrap();
 
         for (k, w) in strikes.iter().zip(variances.iter()) {
             let var = smile.variance(*k).unwrap();
@@ -609,13 +563,8 @@ mod tests {
 
     #[test]
     fn forward_accessor() {
-        let smile = SplineSmile::new(
-            105.0,
-            0.5,
-            vec![80.0, 100.0, 120.0],
-            vec![0.04, 0.04, 0.04],
-        )
-        .unwrap();
+        let smile =
+            SplineSmile::new(105.0, 0.5, vec![80.0, 100.0, 120.0], vec![0.04, 0.04, 0.04]).unwrap();
         assert_abs_diff_eq!(smile.forward(), 105.0, epsilon = 1e-14);
     }
 
@@ -635,12 +584,7 @@ mod tests {
 
     #[test]
     fn three_points_works() {
-        let smile = SplineSmile::new(
-            100.0,
-            1.0,
-            vec![80.0, 100.0, 120.0],
-            vec![0.06, 0.04, 0.06],
-        );
+        let smile = SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.06, 0.04, 0.06]);
         assert!(smile.is_ok());
     }
 
@@ -648,13 +592,8 @@ mod tests {
 
     #[test]
     fn zero_variance_produces_zero_vol() {
-        let smile = SplineSmile::new(
-            100.0,
-            1.0,
-            vec![80.0, 100.0, 120.0],
-            vec![0.04, 0.0, 0.04],
-        )
-        .unwrap();
+        let smile =
+            SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.04, 0.0, 0.04]).unwrap();
         let vol = smile.vol(100.0).unwrap();
         assert_abs_diff_eq!(vol.0, 0.0, epsilon = 1e-14);
     }

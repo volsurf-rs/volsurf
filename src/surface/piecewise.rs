@@ -25,10 +25,10 @@
 use std::fmt;
 
 use crate::error::{self, VolSurfError};
-use crate::smile::spline::SplineSmile;
 use crate::smile::SmileSection;
-use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
+use crate::smile::spline::SplineSmile;
 use crate::surface::VolSurface;
+use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
 
@@ -87,16 +87,13 @@ impl PiecewiseSurface {
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if lengths mismatch, tenors
     /// are empty, not strictly increasing, or not positive.
-    pub fn new(
-        tenors: Vec<f64>,
-        smiles: Vec<Box<dyn SmileSection>>,
-    ) -> error::Result<Self> {
+    pub fn new(tenors: Vec<f64>, smiles: Vec<Box<dyn SmileSection>>) -> error::Result<Self> {
         if tenors.len() != smiles.len() {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
-                "tenors and smiles must have the same length, got {} and {}",
-                tenors.len(),
-                smiles.len()
+                    "tenors and smiles must have the same length, got {} and {}",
+                    tenors.len(),
+                    smiles.len()
                 ),
             });
         }
@@ -108,19 +105,17 @@ impl PiecewiseSurface {
         for (i, t) in tenors.iter().enumerate() {
             if !t.is_finite() || *t <= 0.0 {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors must be positive and finite, got tenors[{i}]={t}"
-                ),
+                    message: format!("tenors must be positive and finite, got tenors[{i}]={t}"),
                 });
             }
         }
         for w in tenors.windows(2) {
             if w[1] <= w[0] {
                 return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors must be strictly increasing, but {} >= {}",
-                    w[0], w[1]
-                ),
+                    message: format!(
+                        "tenors must be strictly increasing, but {} >= {}",
+                        w[0], w[1]
+                    ),
                 });
             }
         }
@@ -311,8 +306,7 @@ impl VolSurface for PiecewiseSurface {
             }
         }
 
-        let is_free =
-            smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
 
         Ok(SurfaceDiagnostics {
             smile_reports,
@@ -344,12 +338,7 @@ mod tests {
 
     /// Helper: create a U-shaped smile at a given tenor.
     #[allow(dead_code)]
-    fn u_shaped_smile(
-        forward: f64,
-        expiry: f64,
-        atm_vol: f64,
-        skew: f64,
-    ) -> Box<dyn SmileSection> {
+    fn u_shaped_smile(forward: f64, expiry: f64, atm_vol: f64, skew: f64) -> Box<dyn SmileSection> {
         let strikes = vec![
             forward * 0.7,
             forward * 0.85,
@@ -549,8 +538,7 @@ mod tests {
         let s1 = flat_smile(100.0, 0.25, 0.18);
         let s2 = flat_smile(100.0, 0.5, 0.20);
         let s3 = flat_smile(100.0, 1.0, 0.22);
-        let surface =
-            PiecewiseSurface::new(vec![0.25, 0.5, 1.0], vec![s1, s2, s3]).unwrap();
+        let surface = PiecewiseSurface::new(vec![0.25, 0.5, 1.0], vec![s1, s2, s3]).unwrap();
 
         let diag = surface.diagnostics().unwrap();
         assert!(
@@ -717,8 +705,7 @@ mod tests {
         let s1 = flat_smile(100.0, 0.25, 0.18);
         let s2 = flat_smile(100.0, 0.5, 0.20);
         let s3 = flat_smile(100.0, 1.0, 0.25);
-        let surface =
-            PiecewiseSurface::new(vec![0.25, 0.5, 1.0], vec![s1, s2, s3]).unwrap();
+        let surface = PiecewiseSurface::new(vec![0.25, 0.5, 1.0], vec![s1, s2, s3]).unwrap();
 
         // Between first and second tenor (T=0.375, alpha=0.5)
         let w1 = 0.18 * 0.18 * 0.25;

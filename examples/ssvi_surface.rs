@@ -18,9 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
 
     // Three global parameters control the entire surface
-    let rho = -0.3;   // skew: negative for equity
-    let eta = 0.5;    // smile amplitude
-    let gamma = 0.5;  // term structure decay
+    let rho = -0.3; // skew: negative for equity
+    let eta = 0.5; // smile amplitude
+    let gamma = 0.5; // term structure decay
 
     // Per-tenor data: expiries, forwards, ATM total variances
     let tenors = vec![0.25, 0.50, 1.0, 2.0];
@@ -28,13 +28,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let thetas = vec![0.01, 0.02, 0.04, 0.08]; // θ_i = σ²_ATM,i · T_i
 
     let surface = SsviSurface::new(
-        rho, eta, gamma,
+        rho,
+        eta,
+        gamma,
         tenors.clone(),
         forwards.clone(),
         thetas.clone(),
     )?;
 
-    println!("SSVI surface: rho={:.2}, eta={:.2}, gamma={:.2}", rho, eta, gamma);
+    println!(
+        "SSVI surface: rho={:.2}, eta={:.2}, gamma={:.2}",
+        rho, eta, gamma
+    );
     println!("Tenors: {:?}", tenors);
     println!("Thetas: {:?}\n", thetas);
 
@@ -72,8 +77,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let k = 100.0;
     let vol = surface.black_vol(t, k)?;
     let var = surface.black_variance(t, k)?;
-    println!("At T={t}, K={k}: vol={:.6}, var={:.6}, vol^2*T={:.6}",
-        vol.0, var.0, vol.0 * vol.0 * t);
+    println!(
+        "At T={t}, K={k}: vol={:.6}, var={:.6}, vol^2*T={:.6}",
+        vol.0,
+        var.0,
+        vol.0 * vol.0 * t
+    );
 
     // ---------------------------------------------------------------
     // 4. Extract smile sections at various tenors
@@ -147,11 +156,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "Original:   rho={:.4}, eta={:.4}, gamma={:.4}",
-        surface.rho(), surface.eta(), surface.gamma()
+        surface.rho(),
+        surface.eta(),
+        surface.gamma()
     );
     println!(
         "Calibrated: rho={:.4}, eta={:.4}, gamma={:.4}",
-        calibrated.rho(), calibrated.eta(), calibrated.gamma()
+        calibrated.rho(),
+        calibrated.eta(),
+        calibrated.gamma()
     );
 
     // Compare at a few points
@@ -185,7 +198,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let piecewise = builder.build()?;
 
-    println!("{:>8} {:>10} {:>10} {:>10}", "T,K", "SSVI", "Piecewise", "Diff(bp)");
+    println!(
+        "{:>8} {:>10} {:>10} {:>10}",
+        "T,K", "SSVI", "Piecewise", "Diff(bp)"
+    );
     println!("{}", "-".repeat(42));
 
     for &t in &[0.25, 1.0, 2.0] {

@@ -16,8 +16,8 @@
 pub mod conventions;
 pub mod error;
 pub mod implied;
-mod optim;
 pub mod local_vol;
+mod optim;
 pub mod smile;
 pub mod surface;
 pub mod types;

@@ -74,13 +74,11 @@ impl ArbitrageReport {
     /// assert!((worst.magnitude - 0.005).abs() < 1e-12);
     /// ```
     pub fn worst_violation(&self) -> Option<&ButterflyViolation> {
-        self.butterfly_violations
-            .iter()
-            .max_by(|a, b| {
-                a.magnitude
-                    .partial_cmp(&b.magnitude)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        self.butterfly_violations.iter().max_by(|a, b| {
+            a.magnitude
+                .partial_cmp(&b.magnitude)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     }
 }
 
@@ -111,10 +109,7 @@ mod tests {
     fn violated_report() -> ArbitrageReport {
         ArbitrageReport {
             is_free: false,
-            butterfly_violations: vec![
-                make_violation(80.0, -0.001),
-                make_violation(85.0, -0.005),
-            ],
+            butterfly_violations: vec![make_violation(80.0, -0.001), make_violation(85.0, -0.005)],
         }
     }
 
@@ -219,7 +214,10 @@ mod tests {
         use crate::smile::SabrSmile;
         let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
         let report = sabr.is_arbitrage_free().unwrap();
-        assert!(!report.is_free, "extreme nu should produce butterfly violations");
+        assert!(
+            !report.is_free,
+            "extreme nu should produce butterfly violations"
+        );
         assert!(!report.butterfly_violations.is_empty());
         let worst = report.worst_violation().unwrap();
         assert!(worst.magnitude > 0.0);
@@ -242,7 +240,10 @@ mod tests {
         use crate::surface::SsviSlice;
         let slice = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
         let report = slice.is_arbitrage_free().unwrap();
-        assert!(!report.is_free, "extreme SSVI params should detect violations");
+        assert!(
+            !report.is_free,
+            "extreme SSVI params should detect violations"
+        );
         let worst = report.worst_violation().unwrap();
         assert!(worst.magnitude > 0.0);
     }

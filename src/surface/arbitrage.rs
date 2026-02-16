@@ -90,7 +90,9 @@ mod tests {
         assert!(!diag.is_free);
         assert_eq!(diag.calendar_violations.len(), 1);
         assert_eq!(diag.calendar_violations[0].strike, 100.0);
-        assert!(diag.calendar_violations[0].variance_short > diag.calendar_violations[0].variance_long);
+        assert!(
+            diag.calendar_violations[0].variance_short > diag.calendar_violations[0].variance_long
+        );
     }
 
     #[test]
@@ -152,9 +154,15 @@ mod tests {
 
         assert_eq!(roundtrip.is_free, diag.is_free);
         assert_eq!(roundtrip.smile_reports.len(), diag.smile_reports.len());
-        assert_eq!(roundtrip.calendar_violations.len(), diag.calendar_violations.len());
+        assert_eq!(
+            roundtrip.calendar_violations.len(),
+            diag.calendar_violations.len()
+        );
         assert_eq!(roundtrip.calendar_violations[0].strike, 105.0);
-        assert_eq!(roundtrip.smile_reports[1].butterfly_violations[0].strike, 95.0);
+        assert_eq!(
+            roundtrip.smile_reports[1].butterfly_violations[0].strike,
+            95.0
+        );
     }
 
     #[test]
