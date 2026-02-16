@@ -117,6 +117,11 @@ impl SviSmile {
         })
     }
 
+    /// Returns the SVI rho (skew) parameter.
+    pub fn rho(&self) -> f64 {
+        self.rho
+    }
+
     /// Calibrate SVI parameters from market (strike, vol) observations.
     ///
     /// Uses the Zeliade (2009) quasi-explicit method: for fixed (m, σ),

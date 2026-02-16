@@ -286,18 +286,219 @@ impl SsviSurface {
         (theta, forward)
     }
 
-    /// Calibrate an SSVI surface from market data.
+    /// Calibrate an SSVI surface from multi-tenor market data.
+    ///
+    /// Uses a two-stage approach:
+    /// 1. Per-tenor SVI calibration to extract ATM total variances (θ) and skew (ρ)
+    /// 2. Global optimization of (η, γ) with ρ fixed from the SVI average
+    ///
+    /// # Arguments
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (min 5 per tenor)
+    /// * `tenors` — Expiry times in years (min 2, all positive)
+    /// * `forwards` — Forward prices at each tenor (all positive)
     ///
     /// # Errors
-    /// Returns [`VolSurfError::CalibrationError`] if calibration fails.
-    #[allow(dead_code)]
+    /// Returns [`VolSurfError::InvalidInput`] for insufficient or invalid data,
+    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    ///
+    /// # References
+    /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
     pub fn calibrate(
-        _market_data: &[Vec<(f64, f64)>],
-        _tenors: &[f64],
-        _forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
     ) -> error::Result<Self> {
-        Err(VolSurfError::NumericalError {
-            message: "SSVI calibration not yet implemented".to_string(),
+        #[cfg(feature = "logging")]
+        tracing::debug!(n_tenors = tenors.len(), "SSVI calibration started");
+
+        /// Minimum number of tenors for SSVI calibration.
+        const MIN_TENORS: usize = 2;
+        /// Grid search resolution for (eta, gamma) initialization.
+        const GRID_N: usize = 15;
+        /// Nelder-Mead iteration limit.
+        const NM_MAX_ITER: usize = 300;
+        /// Simplex diameter convergence threshold.
+        const NM_DIAMETER_TOL: f64 = 1e-8;
+        /// Objective value spread convergence threshold.
+        const NM_FVALUE_TOL: f64 = 1e-12;
+
+        // --- Input validation ---
+        if tenors.len() < MIN_TENORS {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "at least {MIN_TENORS} tenors required for SSVI calibration, got {}",
+                    tenors.len()
+                ),
+            });
+        }
+        if tenors.len() != forwards.len() || tenors.len() != market_data.len() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "tenors, forwards, and market_data must have the same length: {}, {}, {}",
+                    tenors.len(),
+                    forwards.len(),
+                    market_data.len()
+                ),
+            });
+        }
+        for (i, &t) in tenors.iter().enumerate() {
+            if !t.is_finite() || t <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("tenors[{i}] must be positive and finite, got {t}"),
+                });
+            }
+        }
+        for (i, &f) in forwards.iter().enumerate() {
+            if !f.is_finite() || f <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("forwards[{i}] must be positive and finite, got {f}"),
+                });
+            }
+        }
+
+        // --- Stage 1: Per-tenor SVI calibration ---
+        let n_tenors = tenors.len();
+        let mut thetas = Vec::with_capacity(n_tenors);
+        let mut rho_sum = 0.0;
+
+        for (i, market_vols) in market_data.iter().enumerate() {
+            let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
+                .map_err(|e| VolSurfError::CalibrationError {
+                    message: format!(
+                        "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
+                        tenors[i]
+                    ),
+                    model: "SSVI",
+                    rms_error: None,
+                })?;
+            // Extract ATM total variance (theta) from calibrated SVI
+            let theta = svi.variance(forwards[i])?.0;
+            thetas.push(theta);
+            rho_sum += svi.rho();
+        }
+
+        // Average rho from per-tenor SVI fits, clamped to valid range
+        let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
+        let one_minus_rho_sq = 1.0 - rho_global * rho_global;
+
+        // --- Prepare observation triples: (theta, log_moneyness, total_variance) ---
+        let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
+        for (i, market_vols) in market_data.iter().enumerate() {
+            for &(strike, vol) in market_vols {
+                let k = (strike / forwards[i]).ln();
+                let w_obs = vol * vol * tenors[i];
+                all_points.push((thetas[i], k, w_obs));
+            }
+        }
+
+        // --- Stage 2: Optimize (eta, gamma) ---
+        let objective = |eta: f64, gamma: f64| -> f64 {
+            if eta <= 0.0
+                || !eta.is_finite()
+                || !gamma.is_finite()
+                || !(0.0..=1.0).contains(&gamma)
+            {
+                return f64::MAX;
+            }
+            let mut rss = 0.0;
+            for &(theta, k, w_obs) in &all_points {
+                let theta_c = theta.max(1e-10);
+                let phi = eta / theta_c.powf(gamma);
+                let phi_k = phi * k;
+                let w_pred = (theta / 2.0)
+                    * (1.0
+                        + rho_global * phi_k
+                        + ((phi_k + rho_global).powi(2) + one_minus_rho_sq).sqrt());
+                if !w_pred.is_finite() {
+                    return f64::MAX;
+                }
+                rss += (w_pred - w_obs).powi(2);
+            }
+            rss
+        };
+
+        // Grid search over (eta, gamma)
+        let eta_lo = 0.01_f64;
+        let eta_hi = 3.0_f64;
+        let gamma_lo = 0.0_f64;
+        let gamma_hi = 1.0_f64;
+
+        let mut best_eta = 0.5;
+        let mut best_gamma = 0.5;
+        let mut best_rss = f64::MAX;
+
+        for ie in 0..GRID_N {
+            let eta = eta_lo + (eta_hi - eta_lo) * (ie as f64) / ((GRID_N - 1) as f64);
+            for ig in 0..GRID_N {
+                let gamma =
+                    gamma_lo + (gamma_hi - gamma_lo) * (ig as f64) / ((GRID_N - 1) as f64);
+                let rss = objective(eta, gamma);
+                if rss < best_rss {
+                    best_rss = rss;
+                    best_eta = eta;
+                    best_gamma = gamma;
+                }
+            }
+        }
+
+        if best_rss >= f64::MAX {
+            return Err(VolSurfError::CalibrationError {
+                message: "grid search found no valid starting point".into(),
+                model: "SSVI",
+                rms_error: None,
+            });
+        }
+
+        // Nelder-Mead refinement
+        let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
+        let step_gamma = (gamma_hi - gamma_lo) / (GRID_N as f64) * 0.5;
+
+        let nm_config = crate::optim::NelderMeadConfig {
+            max_iter: NM_MAX_ITER,
+            diameter_tol: NM_DIAMETER_TOL,
+            fvalue_tol: NM_FVALUE_TOL,
+        };
+        let nm_result = crate::optim::nelder_mead_2d(
+            objective,
+            best_eta,
+            best_gamma,
+            step_eta,
+            step_gamma,
+            &nm_config,
+        );
+
+        let opt_eta = nm_result.x.max(1e-6);
+        let opt_gamma = nm_result.y.clamp(0.0, 1.0);
+
+        // Compute RMS for diagnostics
+        let n_points = all_points.len();
+        let rms = if n_points > 0 {
+            (nm_result.fval / n_points as f64).sqrt()
+        } else {
+            0.0
+        };
+
+        #[cfg(feature = "logging")]
+        tracing::debug!(
+            rho = rho_global,
+            eta = opt_eta,
+            gamma = opt_gamma,
+            rms,
+            "SSVI calibration complete"
+        );
+
+        Self::new(
+            rho_global,
+            opt_eta,
+            opt_gamma,
+            tenors.to_vec(),
+            forwards.to_vec(),
+            thetas,
+        )
+        .map_err(|e| VolSurfError::CalibrationError {
+            message: format!("calibrated SSVI params invalid: {e}"),
+            model: "SSVI",
+            rms_error: Some(rms),
         })
     }
 }
@@ -935,9 +1136,240 @@ mod tests {
         assert_send_sync::<SsviSurface>();
     }
 
+    // ========== Calibration tests (T09) ==========
+
+    /// Generate synthetic SSVI market data by sampling a known surface.
+    fn synthetic_ssvi_data(
+        surface: &SsviSurface,
+        tenors: &[f64],
+        strikes_per_tenor: &[Vec<f64>],
+    ) -> Vec<Vec<(f64, f64)>> {
+        tenors
+            .iter()
+            .zip(strikes_per_tenor)
+            .map(|(&t, strikes)| {
+                strikes
+                    .iter()
+                    .map(|&k| (k, surface.black_vol(t, k).unwrap().0))
+                    .collect()
+            })
+            .collect()
+    }
+
     #[test]
-    fn calibrate_stub_returns_error() {
+    fn calibrate_round_trip_equity() {
+        // Create a known SSVI surface, sample it, calibrate, compare.
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+
+        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+        let mut total_rss = 0.0;
+        let mut n_points = 0;
+        for (i, &t) in tenors.iter().enumerate() {
+            for &(strike, vol_obs) in &market_data[i] {
+                let vol_fit = calibrated.black_vol(t, strike).unwrap().0;
+                total_rss += (vol_fit - vol_obs).powi(2);
+                n_points += 1;
+            }
+        }
+        let rms = (total_rss / n_points as f64).sqrt();
+        assert!(rms < 0.005, "round-trip RMS {rms} should be < 0.005");
+    }
+
+    #[test]
+    fn calibrate_round_trip_2_tenors() {
+        // Minimum: 2 tenors
+        let original = SsviSurface::new(
+            -0.3, 0.5, 0.5,
+            vec![0.5, 1.0],
+            vec![100.0, 100.0],
+            vec![0.08, 0.16],
+        )
+        .unwrap();
+        let tenors = vec![0.5, 1.0];
+        let forwards = vec![100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..10).map(|i| 75.0 + 5.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+
+        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+        let mut total_rss = 0.0;
+        let mut n_points = 0;
+        for (i, &t) in tenors.iter().enumerate() {
+            for &(strike, vol_obs) in &market_data[i] {
+                let vol_fit = calibrated.black_vol(t, strike).unwrap().0;
+                total_rss += (vol_fit - vol_obs).powi(2);
+                n_points += 1;
+            }
+        }
+        let rms = (total_rss / n_points as f64).sqrt();
+        assert!(rms < 0.005, "2-tenor round-trip RMS {rms} should be < 0.005");
+    }
+
+    #[test]
+    fn calibrate_round_trip_varying_forwards() {
+        // Different forward prices per tenor (term structure).
+        let original = SsviSurface::new(
+            -0.3, 0.5, 0.5,
+            vec![0.25, 0.5, 1.0],
+            vec![100.0, 102.0, 105.0],
+            vec![0.04, 0.08, 0.16],
+        )
+        .unwrap();
+        let tenors = vec![0.25, 0.5, 1.0];
+        let forwards = vec![100.0, 102.0, 105.0];
+        let strikes: Vec<Vec<f64>> = forwards
+            .iter()
+            .map(|&f| (0..10).map(|i| f * 0.8 + f * 0.04 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+
+        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+        let mut total_rss = 0.0;
+        let mut n_points = 0;
+        for (i, &t) in tenors.iter().enumerate() {
+            for &(strike, vol_obs) in &market_data[i] {
+                let vol_fit = calibrated.black_vol(t, strike).unwrap().0;
+                total_rss += (vol_fit - vol_obs).powi(2);
+                n_points += 1;
+            }
+        }
+        let rms = (total_rss / n_points as f64).sqrt();
+        assert!(rms < 0.005, "varying-forwards round-trip RMS {rms} should be < 0.005");
+    }
+
+    #[test]
+    fn calibrate_rejects_single_tenor() {
+        let data = vec![vec![
+            (90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2),
+        ]];
+        let result = SsviSurface::calibrate(&data, &[1.0], &[100.0]);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn calibrate_rejects_empty_data() {
         let result = SsviSurface::calibrate(&[], &[], &[]);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn calibrate_rejects_length_mismatch() {
+        let data = vec![
+            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+        ];
+        // tenors has 2 but forwards has 1
+        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[100.0]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_negative_forward() {
+        let data = vec![
+            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+        ];
+        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[-100.0, 100.0]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_zero_tenor() {
+        let data = vec![
+            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+            vec![(90.0, 0.2), (95.0, 0.2), (100.0, 0.2), (105.0, 0.2), (110.0, 0.2)],
+        ];
+        let result = SsviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_params_in_valid_range() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+
+        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        assert!(calibrated.rho().abs() < 1.0, "rho out of range");
+        assert!(calibrated.eta() > 0.0, "eta must be positive");
+        assert!(
+            (0.0..=1.0).contains(&calibrated.gamma()),
+            "gamma out of [0,1]"
+        );
+        assert_eq!(calibrated.tenors().len(), 4);
+        assert_eq!(calibrated.forwards().len(), 4);
+        assert_eq!(calibrated.thetas().len(), 4);
+    }
+
+    #[test]
+    fn calibrate_diagnostics_clean() {
+        // Calibrated surface from conservative data should have clean diagnostics.
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+
+        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let diag = calibrated.diagnostics().unwrap();
+        assert!(
+            diag.is_free,
+            "calibrated SSVI from conservative input should be arb-free"
+        );
+    }
+
+    #[test]
+    fn calibrate_thetas_strictly_increasing() {
+        // Verify the extracted thetas are monotonically increasing.
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+
+        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let thetas = calibrated.thetas();
+        for w in thetas.windows(2) {
+            assert!(
+                w[1] > w[0],
+                "thetas must be strictly increasing: {} <= {}",
+                w[0],
+                w[1]
+            );
+        }
+    }
+
+    #[test]
+    fn calibrate_rejects_too_few_points_per_tenor() {
+        // SVI calibration requires 5 points; providing only 3 per tenor should fail.
+        let data = vec![
+            vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
+            vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
+        ];
+        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[100.0, 100.0]);
         assert!(result.is_err());
     }
 
