@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use volsurf::local_vol::{DupireLocalVol, LocalVol};
-use volsurf::smile::spline::SplineSmile;
 use volsurf::smile::SmileSection;
+use volsurf::smile::spline::SplineSmile;
 use volsurf::surface::{PiecewiseSurface, SsviSurface, VolSurface};
 
 fn ssvi_test_surface() -> Arc<dyn VolSurface> {
@@ -72,12 +72,11 @@ fn calendar_violation_returns_error() {
 
     // 1Y smile: lower variance (15% vol → w = 0.15^2 * 1.0 = 0.0225)
     let w_low: Vec<f64> = vec![0.0225; strikes.len()];
-    let smile_1y = Box::new(SplineSmile::new(100.0, 1.0, strikes, w_low).unwrap())
-        as Box<dyn SmileSection>;
+    let smile_1y =
+        Box::new(SplineSmile::new(100.0, 1.0, strikes, w_low).unwrap()) as Box<dyn SmileSection>;
 
-    let surface = Arc::new(
-        PiecewiseSurface::new(vec![0.25, 1.0], vec![smile_3m, smile_1y]).unwrap(),
-    );
+    let surface =
+        Arc::new(PiecewiseSurface::new(vec![0.25, 1.0], vec![smile_3m, smile_1y]).unwrap());
 
     let dupire = DupireLocalVol::new(surface);
 
@@ -125,9 +124,7 @@ fn bump_size_convergence() {
         .with_bump_size(0.01)
         .unwrap();
 
-    let fine = DupireLocalVol::new(surface)
-        .with_bump_size(0.001)
-        .unwrap();
+    let fine = DupireLocalVol::new(surface).with_bump_size(0.001).unwrap();
 
     let points = [
         (0.5, 95.0),

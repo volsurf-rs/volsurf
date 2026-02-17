@@ -83,9 +83,7 @@ impl LocalVol for DupireLocalVol {
         let w = self.surface.black_variance(expiry, strike)?.0;
         if w <= 0.0 {
             return Err(VolSurfError::NumericalError {
-                message: format!(
-                    "non-positive total variance {w} at T={expiry}, K={strike}"
-                ),
+                message: format!("non-positive total variance {w} at T={expiry}, K={strike}"),
             });
         }
 
@@ -102,28 +100,27 @@ impl LocalVol for DupireLocalVol {
         let dw_dt = if expiry > 2.0 * h {
             let smile_up = self.surface.smile_at(expiry + h)?;
             let smile_dn = self.surface.smile_at(expiry - h)?;
-            let w_t_up = self.surface.black_variance(
-                expiry + h,
-                smile_up.forward() * y.exp(),
-            )?.0;
-            let w_t_dn = self.surface.black_variance(
-                expiry - h,
-                smile_dn.forward() * y.exp(),
-            )?.0;
+            let w_t_up = self
+                .surface
+                .black_variance(expiry + h, smile_up.forward() * y.exp())?
+                .0;
+            let w_t_dn = self
+                .surface
+                .black_variance(expiry - h, smile_dn.forward() * y.exp())?
+                .0;
             (w_t_up - w_t_dn) / (2.0 * h)
         } else {
             // Forward difference for short expiry where T - h would be non-positive
             let smile_up = self.surface.smile_at(expiry + h)?;
-            let w_t_up = self.surface.black_variance(
-                expiry + h,
-                smile_up.forward() * y.exp(),
-            )?.0;
+            let w_t_up = self
+                .surface
+                .black_variance(expiry + h, smile_up.forward() * y.exp())?
+                .0;
             (w_t_up - w) / h
         };
 
         // Gatheral (1.10) denominator
-        let denom = 1.0
-            - (y / w) * dw_dy
+        let denom = 1.0 - (y / w) * dw_dy
             + 0.25 * (-0.25 - 1.0 / w + y * y / (w * w)) * dw_dy * dw_dy
             + 0.5 * d2w_dy2;
 
@@ -153,8 +150,8 @@ impl LocalVol for DupireLocalVol {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::smile::arbitrage::ArbitrageReport;
     use crate::smile::SmileSection;
+    use crate::smile::arbitrage::ArbitrageReport;
     use crate::surface::arbitrage::SurfaceDiagnostics;
     use crate::types::Variance;
 
@@ -254,23 +251,43 @@ mod tests {
 
     #[test]
     fn with_bump_size_rejects_zero() {
-        assert!(DupireLocalVol::new(stub_surface()).with_bump_size(0.0).is_err());
+        assert!(
+            DupireLocalVol::new(stub_surface())
+                .with_bump_size(0.0)
+                .is_err()
+        );
     }
 
     #[test]
     fn with_bump_size_rejects_negative() {
-        assert!(DupireLocalVol::new(stub_surface()).with_bump_size(-0.01).is_err());
+        assert!(
+            DupireLocalVol::new(stub_surface())
+                .with_bump_size(-0.01)
+                .is_err()
+        );
     }
 
     #[test]
     fn with_bump_size_rejects_nan() {
-        assert!(DupireLocalVol::new(stub_surface()).with_bump_size(f64::NAN).is_err());
+        assert!(
+            DupireLocalVol::new(stub_surface())
+                .with_bump_size(f64::NAN)
+                .is_err()
+        );
     }
 
     #[test]
     fn with_bump_size_rejects_inf() {
-        assert!(DupireLocalVol::new(stub_surface()).with_bump_size(f64::INFINITY).is_err());
-        assert!(DupireLocalVol::new(stub_surface()).with_bump_size(f64::NEG_INFINITY).is_err());
+        assert!(
+            DupireLocalVol::new(stub_surface())
+                .with_bump_size(f64::INFINITY)
+                .is_err()
+        );
+        assert!(
+            DupireLocalVol::new(stub_surface())
+                .with_bump_size(f64::NEG_INFINITY)
+                .is_err()
+        );
     }
 
     // Flat vol: σ_loc should equal σ everywhere (Gatheral Ch.1 trivial case)
@@ -321,9 +338,7 @@ mod tests {
             as Box<dyn SmileSection>;
         let s2 = Box::new(SviSmile::new(fwd, t2, a2, b, rho, m, sigma).unwrap())
             as Box<dyn SmileSection>;
-        let surface = Arc::new(
-            PiecewiseSurface::new(vec![t1, t2], vec![s1, s2]).unwrap(),
-        );
+        let surface = Arc::new(PiecewiseSurface::new(vec![t1, t2], vec![s1, s2]).unwrap());
 
         let dupire = DupireLocalVol::new(surface);
         let v = dupire.local_vol(1.0, 100.0).unwrap();
@@ -339,15 +354,15 @@ mod tests {
         // Use analytical for the expected value; tolerance covers FD error
         let d2w_dy2 = b / sigma;
 
-        let denom = 1.0
-            + 0.25 * (-0.25 - 1.0 / w_atm) * dw_dy * dw_dy
-            + 0.5 * d2w_dy2;
+        let denom = 1.0 + 0.25 * (-0.25 - 1.0 / w_atm) * dw_dy * dw_dy + 0.5 * d2w_dy2;
         let expected = (dw_dt / denom).sqrt();
 
         assert!(
             (v.0 - expected).abs() < 5e-4,
             "ATM local vol: got {}, expected {} (diff {})",
-            v.0, expected, (v.0 - expected).abs()
+            v.0,
+            expected,
+            (v.0 - expected).abs()
         );
     }
 
@@ -369,9 +384,7 @@ mod tests {
             as Box<dyn SmileSection>;
         let s2 = Box::new(SviSmile::new(fwd, t2, a2, b, rho, m, sigma).unwrap())
             as Box<dyn SmileSection>;
-        let surface = Arc::new(
-            PiecewiseSurface::new(vec![t1, t2], vec![s1, s2]).unwrap(),
-        );
+        let surface = Arc::new(PiecewiseSurface::new(vec![t1, t2], vec![s1, s2]).unwrap());
 
         // Test at OTM: K=110, T=1.0
         let k = 110.0_f64;
@@ -392,8 +405,7 @@ mod tests {
         // dw/dT: same as ATM since both SVI shapes are identical
         let dw_dt = (a2 - a1) / (t2 - t1);
 
-        let denom = 1.0
-            - (y / w) * dw_dy
+        let denom = 1.0 - (y / w) * dw_dy
             + 0.25 * (-0.25 - 1.0 / w + y * y / (w * w)) * dw_dy * dw_dy
             + 0.5 * d2w_dy2;
         let expected = (dw_dt / denom).sqrt();
@@ -403,7 +415,10 @@ mod tests {
         assert!(
             (v.0 - expected).abs() < 2e-3,
             "OTM local vol at K={}: got {}, expected {} (diff {})",
-            k, v.0, expected, (v.0 - expected).abs()
+            k,
+            v.0,
+            expected,
+            (v.0 - expected).abs()
         );
     }
 
