@@ -1,6 +1,6 @@
 //! Black (lognormal) implied volatility via Jäckel's "Let's Be Rational" algorithm.
 //!
-//! Wraps the [`implied_vol`] crate which achieves 3 ULP accuracy.
+//! Wraps the [`implied_vol`] crate for near-machine-precision extraction.
 
 use implied_vol::{DefaultSpecialFn, ImpliedBlackVolatility, PriceBlackScholes};
 
@@ -387,5 +387,49 @@ mod tests {
         // Round-trip: reprice with extracted IV should match original price
         let reprice = black_price(forward, strike, iv.0, expiry, OptionType::Call).unwrap();
         assert_abs_diff_eq!(reprice, price, epsilon = 1e-8);
+    }
+
+    #[test]
+    fn round_trip_extreme_otm_call() {
+        // |x| = ln(10) ≈ 2.3 with high vol to keep price above zero
+        let (f, k, t, sigma) = (100.0, 1000.0, 1.0, 0.80);
+        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        assert!(price > 0.0);
+        let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn round_trip_extreme_itm_call() {
+        // |x| = ln(1000) ≈ 6.9
+        let (f, k, t, sigma) = (100.0, 0.1, 1.0, 0.20);
+        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn compute_near_maximum_price() {
+        // Price close to forward (b_max), paper eq 6.18 warns accuracy degrades
+        let iv = BlackImpliedVol::compute(99.99, 100.0, 100.0, 1.0, OptionType::Call).unwrap();
+        assert!(iv.0 > 5.0, "near-max price should yield very high vol");
+        assert!(iv.0.is_finite());
+    }
+
+    #[test]
+    fn compute_rejects_put_price_above_strike() {
+        let result = BlackImpliedVol::compute(150.0, 100.0, 100.0, 1.0, OptionType::Put);
+        assert!(matches!(result, Err(VolSurfError::NumericalError { .. })));
+    }
+
+    #[test]
+    fn round_trip_very_high_vol() {
+        let (f, k, t, sigma) = (100.0, 100.0, 1.0, 5.0);
+        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-10);
     }
 }
