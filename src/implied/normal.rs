@@ -12,7 +12,7 @@
 //! with `σ_N` in absolute (price) units per √year, `Φ` the standard normal CDF,
 //! and `φ` the standard normal PDF.
 //!
-//! Wraps the [`implied_vol`] crate which achieves 2 ULP accuracy.
+//! Wraps the [`implied_vol`] crate for near-machine-precision extraction.
 
 use implied_vol::{DefaultSpecialFn, ImpliedNormalVolatility, PriceBachelier};
 
@@ -369,6 +369,60 @@ mod tests {
     #[test]
     fn compute_zero_price_atm() {
         let iv = NormalImpliedVol::compute(0.0, 100.0, 100.0, 1.0, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(iv.0, 0.0, epsilon = 1e-10);
+    }
+
+    // Edge cases from Jäckel (2017) paper audit
+
+    #[test]
+    fn round_trip_deep_otm_underflow() {
+        // d = (100-900)/20 = -40, beyond paper's -38.278 double precision limit
+        let (f, k, t, sigma) = (100.0, 900.0, 1.0, 20.0);
+        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        assert!(price < 1e-100, "deep OTM should underflow to near zero");
+        let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(iv.0, 0.0, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn round_trip_small_sigma() {
+        // d = (100-100.5)/0.01 = -50, past paper's -38.278 double precision limit.
+        // Price underflows — verify self-consistent round-trip, not sigma recovery.
+        let (f, k, t, sigma) = (100.0, 100.5, 1.0, 0.01);
+        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn round_trip_large_negative_rates() {
+        let (f, k, t, sigma) = (-5.0, -3.0, 2.0, 2.0);
+        let call = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let put = normal_price(f, k, sigma, t, OptionType::Put).unwrap();
+        assert_abs_diff_eq!(call - put, f - k, epsilon = 1e-10);
+
+        let iv_call = NormalImpliedVol::compute(call, f, k, t, OptionType::Call).unwrap();
+        let iv_put = NormalImpliedVol::compute(put, f, k, t, OptionType::Put).unwrap();
+        assert_abs_diff_eq!(iv_call.0, sigma, epsilon = 1e-10);
+        assert_abs_diff_eq!(iv_put.0, sigma, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn round_trip_very_high_vol() {
+        // Normal model has no upper price bound (unlike Black)
+        let (f, k, t, sigma) = (100.0, 100.0, 1.0, 1000.0);
+        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        assert!(price > 100.0, "very high vol should give very large price");
+        let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-8);
+    }
+
+    #[test]
+    fn compute_price_at_intrinsic_itm() {
+        // Price exactly at intrinsic (zero time value) => Vol(0.0)
+        let iv = NormalImpliedVol::compute(20.0, 100.0, 80.0, 1.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(iv.0, 0.0, epsilon = 1e-10);
     }
 }
