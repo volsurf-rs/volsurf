@@ -27,6 +27,7 @@ use crate::validate::validate_positive;
 
 /// SVI volatility smile with 5 parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "SviSmileRaw", into = "SviSmileRaw")]
 pub struct SviSmile {
     forward: f64,
     expiry: f64,
@@ -40,6 +41,46 @@ pub struct SviSmile {
     m: f64,
     /// Curvature (smile convexity).
     sigma: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SviSmileRaw {
+    forward: f64,
+    expiry: f64,
+    a: f64,
+    b: f64,
+    rho: f64,
+    m: f64,
+    sigma: f64,
+}
+
+impl TryFrom<SviSmileRaw> for SviSmile {
+    type Error = VolSurfError;
+    fn try_from(raw: SviSmileRaw) -> Result<Self, Self::Error> {
+        Self::new(
+            raw.forward,
+            raw.expiry,
+            raw.a,
+            raw.b,
+            raw.rho,
+            raw.m,
+            raw.sigma,
+        )
+    }
+}
+
+impl From<SviSmile> for SviSmileRaw {
+    fn from(s: SviSmile) -> Self {
+        Self {
+            forward: s.forward,
+            expiry: s.expiry,
+            a: s.a,
+            b: s.b,
+            rho: s.rho,
+            m: s.m,
+            sigma: s.sigma,
+        }
+    }
 }
 
 impl SviSmile {
@@ -996,5 +1037,87 @@ mod tests {
             matches!(result, Err(VolSurfError::NumericalError { .. })),
             "density() should return NumericalError for non-positive variance, got {result:?}"
         );
+    }
+
+    #[test]
+    fn serde_round_trip() {
+        let s = make_smile();
+        let json = serde_json::to_string(&s).unwrap();
+        let s2: SviSmile = serde_json::from_str(&json).unwrap();
+        assert_eq!(SmileSection::forward(&s), SmileSection::forward(&s2));
+        assert_eq!(SmileSection::expiry(&s), SmileSection::expiry(&s2));
+        assert_eq!(s.rho(), s2.rho());
+        let json2 = serde_json::to_string(&s2).unwrap();
+        assert_eq!(json, json2);
+    }
+
+    #[test]
+    fn serde_rejects_negative_forward() {
+        let json =
+            r#"{"forward":-100.0,"expiry":1.0,"a":0.04,"b":0.4,"rho":-0.4,"m":0.0,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_expiry() {
+        let json =
+            r#"{"forward":100.0,"expiry":0.0,"a":0.04,"b":0.4,"rho":-0.4,"m":0.0,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_b() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":0.04,"b":-0.1,"rho":-0.4,"m":0.0,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_rho_at_plus_one() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":0.04,"b":0.4,"rho":1.0,"m":0.0,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_rho_at_minus_one() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":0.04,"b":0.4,"rho":-1.0,"m":0.0,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_sigma() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":0.04,"b":0.4,"rho":-0.4,"m":0.0,"sigma":0.0}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_sigma() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":0.04,"b":0.4,"rho":-0.4,"m":0.0,"sigma":-0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_inf_m() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":0.04,"b":0.4,"rho":-0.4,"m":1e999,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_inf_a() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":1e999,"b":0.4,"rho":-0.4,"m":0.0,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_min_variance_violation() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"a":-1.0,"b":0.4,"rho":-0.4,"m":0.0,"sigma":0.1}"#;
+        assert!(serde_json::from_str::<SviSmile>(json).is_err());
     }
 }

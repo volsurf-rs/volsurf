@@ -27,7 +27,7 @@ use crate::validate::validate_positive;
 ///
 /// On interval \[xᵢ, xᵢ₊₁\], the spline is:
 /// `S(x) = a + b·(x - xᵢ) + c·(x - xᵢ)² + d·(x - xᵢ)³`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 struct SplineCoeff {
     a: f64,
     b: f64,
@@ -50,12 +50,39 @@ struct SplineCoeff {
 /// let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "SplineSmileRaw", into = "SplineSmileRaw")]
 pub struct SplineSmile {
     forward: f64,
     expiry: f64,
     strikes: Vec<f64>,
     variances: Vec<f64>,
     coeffs: Vec<SplineCoeff>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SplineSmileRaw {
+    forward: f64,
+    expiry: f64,
+    strikes: Vec<f64>,
+    variances: Vec<f64>,
+}
+
+impl TryFrom<SplineSmileRaw> for SplineSmile {
+    type Error = VolSurfError;
+    fn try_from(raw: SplineSmileRaw) -> Result<Self, Self::Error> {
+        Self::new(raw.forward, raw.expiry, raw.strikes, raw.variances)
+    }
+}
+
+impl From<SplineSmile> for SplineSmileRaw {
+    fn from(s: SplineSmile) -> Self {
+        Self {
+            forward: s.forward,
+            expiry: s.expiry,
+            strikes: s.strikes,
+            variances: s.variances,
+        }
+    }
 }
 
 impl SplineSmile {
@@ -747,5 +774,67 @@ mod tests {
             smile.density(-10.0),
             Err(VolSurfError::InvalidInput { .. })
         ));
+    }
+
+    #[test]
+    fn serde_round_trip() {
+        let smile = make_flat_smile();
+        let json = serde_json::to_string(&smile).unwrap();
+        let smile2: SplineSmile = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            SmileSection::forward(&smile),
+            SmileSection::forward(&smile2)
+        );
+        assert_eq!(SmileSection::expiry(&smile), SmileSection::expiry(&smile2));
+        for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
+            let v1 = smile.vol(k).unwrap();
+            let v2 = smile2.vol(k).unwrap();
+            assert!((v1.0 - v2.0).abs() < 1e-15, "vol mismatch at strike {k}");
+        }
+    }
+
+    #[test]
+    fn serde_excludes_coeffs() {
+        let smile = make_flat_smile();
+        let json = serde_json::to_string(&smile).unwrap();
+        assert!(!json.contains("coeffs"), "coeffs should not appear in JSON");
+    }
+
+    #[test]
+    fn serde_rejects_negative_forward() {
+        let json = r#"{"forward":-100.0,"expiry":1.0,"strikes":[80.0,90.0,100.0],"variances":[0.04,0.04,0.04]}"#;
+        assert!(serde_json::from_str::<SplineSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_expiry() {
+        let json = r#"{"forward":100.0,"expiry":0.0,"strikes":[80.0,90.0,100.0],"variances":[0.04,0.04,0.04]}"#;
+        assert!(serde_json::from_str::<SplineSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_mismatched_lengths() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"strikes":[80.0,90.0,100.0],"variances":[0.04,0.04]}"#;
+        assert!(serde_json::from_str::<SplineSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_too_few_points() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"strikes":[80.0,90.0],"variances":[0.04,0.04]}"#;
+        assert!(serde_json::from_str::<SplineSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_non_increasing_strikes() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"strikes":[100.0,90.0,80.0],"variances":[0.04,0.04,0.04]}"#;
+        assert!(serde_json::from_str::<SplineSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_variance() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"strikes":[80.0,90.0,100.0],"variances":[0.04,-0.01,0.04]}"#;
+        assert!(serde_json::from_str::<SplineSmile>(json).is_err());
     }
 }

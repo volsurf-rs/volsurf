@@ -57,6 +57,7 @@ use crate::validate::validate_positive;
 /// ).unwrap();
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "SsviSurfaceRaw", into = "SsviSurfaceRaw")]
 pub struct SsviSurface {
     /// Global skew parameter ρ ∈ (−1, 1).
     rho: f64,
@@ -72,6 +73,43 @@ pub struct SsviSurface {
     thetas: Vec<f64>,
     /// Precomputed 1 − ρ² for the hot path.
     one_minus_rho_sq: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SsviSurfaceRaw {
+    rho: f64,
+    eta: f64,
+    gamma: f64,
+    tenors: Vec<f64>,
+    forwards: Vec<f64>,
+    thetas: Vec<f64>,
+}
+
+impl TryFrom<SsviSurfaceRaw> for SsviSurface {
+    type Error = VolSurfError;
+    fn try_from(raw: SsviSurfaceRaw) -> Result<Self, Self::Error> {
+        Self::new(
+            raw.rho,
+            raw.eta,
+            raw.gamma,
+            raw.tenors,
+            raw.forwards,
+            raw.thetas,
+        )
+    }
+}
+
+impl From<SsviSurface> for SsviSurfaceRaw {
+    fn from(s: SsviSurface) -> Self {
+        Self {
+            rho: s.rho,
+            eta: s.eta,
+            gamma: s.gamma,
+            tenors: s.tenors,
+            forwards: s.forwards,
+            thetas: s.thetas,
+        }
+    }
 }
 
 impl SsviSurface {
@@ -236,7 +274,7 @@ impl SsviSurface {
     }
 
     /// Evaluate the power-law mixing function φ(θ) = η / θ^γ.
-    #[expect(dead_code)] // used in tests
+    #[cfg(test)]
     pub(crate) fn phi(&self, theta: f64) -> f64 {
         self.eta / theta.powf(self.gamma)
     }
@@ -685,6 +723,7 @@ fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
 /// # References
 /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "SsviSliceRaw", into = "SsviSliceRaw")]
 pub struct SsviSlice {
     /// Forward price at this tenor.
     forward: f64,
@@ -698,6 +737,43 @@ pub struct SsviSlice {
     gamma: f64,
     /// ATM total variance θ = σ²_ATM · T at this tenor.
     theta: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SsviSliceRaw {
+    forward: f64,
+    expiry: f64,
+    rho: f64,
+    eta: f64,
+    gamma: f64,
+    theta: f64,
+}
+
+impl TryFrom<SsviSliceRaw> for SsviSlice {
+    type Error = VolSurfError;
+    fn try_from(raw: SsviSliceRaw) -> Result<Self, Self::Error> {
+        Self::new(
+            raw.forward,
+            raw.expiry,
+            raw.rho,
+            raw.eta,
+            raw.gamma,
+            raw.theta,
+        )
+    }
+}
+
+impl From<SsviSlice> for SsviSliceRaw {
+    fn from(s: SsviSlice) -> Self {
+        Self {
+            forward: s.forward,
+            expiry: s.expiry,
+            rho: s.rho,
+            eta: s.eta,
+            gamma: s.gamma,
+            theta: s.theta,
+        }
+    }
 }
 
 impl SsviSlice {
@@ -1238,6 +1314,127 @@ mod tests {
         assert_eq!(s.tenors(), s2.tenors());
         assert_eq!(s.forwards(), s2.forwards());
         assert_eq!(s.thetas(), s2.thetas());
+    }
+
+    #[test]
+    fn serde_no_one_minus_rho_sq_in_json() {
+        let s = equity_surface();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("one_minus_rho_sq"));
+    }
+
+    #[test]
+    fn serde_rejects_invalid_rho() {
+        let json = r#"{"rho":1.5,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_null_rho() {
+        let json = r#"{"rho":null,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_rho_at_plus_one() {
+        let json = r#"{"rho":1.0,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_rho_at_minus_one() {
+        let json = r#"{"rho":-1.0,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_eta() {
+        let json = r#"{"rho":-0.3,"eta":-0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_gamma_out_of_range() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":1.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_non_monotone_thetas() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[0.5,1.0],"forwards":[100.0,100.0],"thetas":[0.16,0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_mismatched_lengths() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[0.5,1.0],"forwards":[100.0],"thetas":[0.04,0.08]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_empty_tenors() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[],"forwards":[],"thetas":[]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_forward() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[-100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_theta() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.0]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_eta() {
+        let json = r#"{"rho":-0.3,"eta":0.0,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_gamma() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":-0.1,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_non_increasing_tenors() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[1.0,0.5],"forwards":[100.0,100.0],"thetas":[0.04,0.08]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_tenor() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[0.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_inf_tenor() {
+        let json = r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[1e999],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_forward() {
+        let json =
+            r#"{"rho":-0.3,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[0.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<SsviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn serde_error_contains_validation_message() {
+        let json = r#"{"rho":1.5,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        let err = serde_json::from_str::<SsviSurface>(json).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("rho"),
+            "serde error should contain domain message, got: {msg}"
+        );
     }
 
     // ========== Send + Sync ==========
@@ -1992,6 +2189,85 @@ mod tests {
             s.vol(100.0).unwrap().0,
             s2.vol(100.0).unwrap().0,
             epsilon = 1e-14
+        );
+    }
+
+    #[test]
+    fn slice_serde_rejects_invalid_rho() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"rho":1.0,"eta":0.5,"gamma":0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_negative_forward() {
+        let json =
+            r#"{"forward":-100.0,"expiry":1.0,"rho":-0.3,"eta":0.5,"gamma":0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_zero_expiry() {
+        let json =
+            r#"{"forward":100.0,"expiry":0.0,"rho":-0.3,"eta":0.5,"gamma":0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_negative_eta() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"rho":-0.3,"eta":-0.1,"gamma":0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_gamma_out_of_range() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"rho":-0.3,"eta":0.5,"gamma":2.0,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_zero_theta() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"rho":-0.3,"eta":0.5,"gamma":0.5,"theta":0.0}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_inf_forward() {
+        let json =
+            r#"{"forward":1e999,"expiry":1.0,"rho":-0.3,"eta":0.5,"gamma":0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_negative_expiry() {
+        let json =
+            r#"{"forward":100.0,"expiry":-1.0,"rho":-0.3,"eta":0.5,"gamma":0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_negative_gamma() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"rho":-0.3,"eta":0.5,"gamma":-0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_rejects_zero_eta() {
+        let json =
+            r#"{"forward":100.0,"expiry":1.0,"rho":-0.3,"eta":0.0,"gamma":0.5,"theta":0.04}"#;
+        assert!(serde_json::from_str::<SsviSlice>(json).is_err());
+    }
+
+    #[test]
+    fn slice_serde_error_contains_validation_message() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"rho":1.0,"eta":0.5,"gamma":0.5,"theta":0.04}"#;
+        let err = serde_json::from_str::<SsviSlice>(json).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("rho"),
+            "serde error should contain domain message, got: {msg}"
         );
     }
 

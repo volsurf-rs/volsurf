@@ -61,6 +61,7 @@ use crate::validate::{validate_non_negative, validate_positive};
 /// # Ok::<(), volsurf::VolSurfError>(())
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "SabrSmileRaw", into = "SabrSmileRaw")]
 pub struct SabrSmile {
     forward: f64,
     expiry: f64,
@@ -72,6 +73,43 @@ pub struct SabrSmile {
     rho: f64,
     /// Vol-of-vol ν ≥ 0 (ν = 0 reduces to CEV model).
     nu: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SabrSmileRaw {
+    forward: f64,
+    expiry: f64,
+    alpha: f64,
+    beta: f64,
+    rho: f64,
+    nu: f64,
+}
+
+impl TryFrom<SabrSmileRaw> for SabrSmile {
+    type Error = VolSurfError;
+    fn try_from(raw: SabrSmileRaw) -> Result<Self, Self::Error> {
+        Self::new(
+            raw.forward,
+            raw.expiry,
+            raw.alpha,
+            raw.beta,
+            raw.rho,
+            raw.nu,
+        )
+    }
+}
+
+impl From<SabrSmile> for SabrSmileRaw {
+    fn from(s: SabrSmile) -> Self {
+        Self {
+            forward: s.forward,
+            expiry: s.expiry,
+            alpha: s.alpha,
+            beta: s.beta,
+            rho: s.rho,
+            nu: s.nu,
+        }
+    }
 }
 
 impl SabrSmile {
@@ -714,10 +752,72 @@ mod tests {
         let s = make_smile();
         let json = serde_json::to_string(&s).unwrap();
         let s2: SabrSmile = serde_json::from_str(&json).unwrap();
+        assert_eq!(SmileSection::forward(&s), SmileSection::forward(&s2));
+        assert_eq!(SmileSection::expiry(&s), SmileSection::expiry(&s2));
         assert_eq!(s.alpha(), s2.alpha());
         assert_eq!(s.beta(), s2.beta());
         assert_eq!(s.rho(), s2.rho());
         assert_eq!(s.nu(), s2.nu());
+    }
+
+    #[test]
+    fn serde_rejects_negative_forward() {
+        let json = r#"{"forward":-100.0,"expiry":1.0,"alpha":0.2,"beta":0.5,"rho":-0.3,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_expiry() {
+        let json = r#"{"forward":100.0,"expiry":0.0,"alpha":0.2,"beta":0.5,"rho":-0.3,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_alpha() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":-0.1,"beta":0.5,"rho":-0.3,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_zero_alpha() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":0.0,"beta":0.5,"rho":-0.3,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_beta_out_of_range() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":0.2,"beta":1.5,"rho":-0.3,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_beta() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":0.2,"beta":-0.1,"rho":-0.3,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_rho_at_plus_one() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":0.2,"beta":0.5,"rho":1.0,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_rho_at_minus_one() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":0.2,"beta":0.5,"rho":-1.0,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_rho_out_of_range() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":0.2,"beta":0.5,"rho":1.5,"nu":0.4}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
+    }
+
+    #[test]
+    fn serde_rejects_negative_nu() {
+        let json = r#"{"forward":100.0,"expiry":1.0,"alpha":0.2,"beta":0.5,"rho":-0.3,"nu":-0.1}"#;
+        assert!(serde_json::from_str::<SabrSmile>(json).is_err());
     }
 
     // ========================================================================
