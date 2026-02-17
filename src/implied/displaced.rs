@@ -403,4 +403,50 @@ mod tests {
             assert!(p < f);
         }
     }
+
+    // Edge cases from first-principles audit
+
+    #[test]
+    fn round_trip_near_zero_beta() {
+        // β=0.001: general path near β=0 delegation boundary
+        let calc = DisplacedImpliedVol::new(0.001).unwrap();
+        let (f, k, t, sigma) = (100.0, 105.0, 1.0, 0.20);
+        let price = displaced_price(f, k, sigma, t, 0.001, OptionType::Call).unwrap();
+        let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv.0, t, 0.001, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-11);
+    }
+
+    #[test]
+    fn round_trip_near_one_beta() {
+        // β=0.999: general path near β=1 delegation boundary
+        let calc = DisplacedImpliedVol::new(0.999).unwrap();
+        let (f, k, t, sigma) = (100.0, 110.0, 1.0, 0.25);
+        let price = displaced_price(f, k, sigma, t, 0.999, OptionType::Call).unwrap();
+        let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv.0, t, 0.999, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-11);
+    }
+
+    #[test]
+    fn round_trip_deep_otm() {
+        // K_s = 0.5*100 + 0.5*180 = 140, deep OTM for Black
+        let calc = DisplacedImpliedVol::new(0.5).unwrap();
+        let (f, k, t, sigma) = (100.0, 180.0, 1.0, 0.30);
+        let price = displaced_price(f, k, sigma, t, 0.5, OptionType::Call).unwrap();
+        assert!(price > 0.0);
+        let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv.0, t, 0.5, OptionType::Call).unwrap();
+        assert_abs_diff_eq!(price, reprice, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn compute_price_at_intrinsic_itm() {
+        // price = intrinsic = F-K = 20, zero time value → Vol(0.0)
+        let calc = DisplacedImpliedVol::new(0.5).unwrap();
+        let iv = calc
+            .compute(20.0, 100.0, 80.0, 1.0, OptionType::Call)
+            .unwrap();
+        assert_abs_diff_eq!(iv.0, 0.0, epsilon = 1e-10);
+    }
 }
