@@ -11,5 +11,5 @@ pub mod displaced;
 pub mod normal;
 
 pub use black::{BlackImpliedVol, black_price};
-pub use displaced::DisplacedImpliedVol;
-pub use normal::NormalImpliedVol;
+pub use displaced::{DisplacedImpliedVol, displaced_price};
+pub use normal::{NormalImpliedVol, normal_price};
