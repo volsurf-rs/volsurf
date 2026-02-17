@@ -3,8 +3,6 @@
 //! A hybrid model that interpolates between the normal model (β=0) and
 //! the Black model (β=1) via a displacement parameter β ∈ \[0, 1\].
 
-#![allow(dead_code)] // Stub — not yet implemented (v0.2+ scope)
-
 use crate::error::VolSurfError;
 use crate::types::{OptionType, Vol};
 
@@ -14,6 +12,7 @@ use crate::types::{OptionType, Vol};
 /// - β = 0 → pure normal (Bachelier) model
 /// - β = 1 → pure Black (lognormal) model
 /// - 0 < β < 1 → intermediate CEV-like behavior
+#[derive(Debug)]
 pub struct DisplacedImpliedVol {
     /// Displacement parameter β ∈ [0, 1].
     beta: f64,

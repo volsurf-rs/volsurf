@@ -19,6 +19,8 @@
 //! breaks total ordering. We derive `PartialEq` and `PartialOrd` only. Do not
 //! add `Eq` without handling `NaN` explicitly.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 /// Strike price `K` of an option contract.
@@ -79,6 +81,39 @@ pub enum OptionType {
     Call,
     /// Right to sell at strike price.
     Put,
+}
+
+impl fmt::Display for Strike {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Display for Tenor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Display for Vol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Display for Variance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Display for OptionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OptionType::Call => f.write_str("Call"),
+            OptionType::Put => f.write_str("Put"),
+        }
+    }
 }
 
 #[cfg(test)]

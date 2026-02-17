@@ -336,8 +336,7 @@ mod tests {
         Box::new(SplineSmile::new(forward, expiry, strikes, variances).unwrap())
     }
 
-    /// Helper: create a U-shaped smile at a given tenor.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn u_shaped_smile(forward: f64, expiry: f64, atm_vol: f64, skew: f64) -> Box<dyn SmileSection> {
         let strikes = vec![
             forward * 0.7,

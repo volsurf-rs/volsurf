@@ -9,14 +9,13 @@
 //! where d = (F - K) / (σ√T)
 //! ```
 
-#![allow(dead_code)] // Stub — not yet implemented (v0.2+ scope)
-
 use crate::error::VolSurfError;
 use crate::types::{OptionType, Vol};
 
 /// Bachelier (normal) implied volatility calculator.
 ///
 /// Extracts implied volatility under the normal model using root-finding.
+#[derive(Debug)]
 pub struct NormalImpliedVol;
 
 impl NormalImpliedVol {

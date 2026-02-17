@@ -236,7 +236,7 @@ impl SsviSurface {
     }
 
     /// Evaluate the power-law mixing function φ(θ) = η / θ^γ.
-    #[allow(dead_code)] // Used by tests and potentially future callers
+    #[expect(dead_code)] // used in tests
     pub(crate) fn phi(&self, theta: f64) -> f64 {
         self.eta / theta.powf(self.gamma)
     }
@@ -397,15 +397,10 @@ impl SsviSurface {
         #[cfg(feature = "logging")]
         tracing::debug!(n_tenors = tenors.len(), "SSVI calibration started");
 
-        /// Minimum number of tenors for SSVI calibration.
         const MIN_TENORS: usize = 2;
-        /// Grid search resolution for (eta, gamma) initialization.
         const GRID_N: usize = 15;
-        /// Nelder-Mead iteration limit.
         const NM_MAX_ITER: usize = 300;
-        /// Simplex diameter convergence threshold.
         const NM_DIAMETER_TOL: f64 = 1e-8;
-        /// Objective value spread convergence threshold.
         const NM_FVALUE_TOL: f64 = 1e-12;
 
         // Input validation
@@ -659,7 +654,6 @@ impl VolSurface for SsviSurface {
     }
 }
 
-/// Generate a log-spaced strike grid from `0.5·F` to `2.0·F`.
 fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
     let ln_lo = (0.5_f64).ln();
     let ln_hi = (2.0_f64).ln();
@@ -769,12 +763,10 @@ impl SsviSlice {
         self.theta
     }
 
-    /// Power-law mixing function φ = η / θ^γ for this slice.
     fn phi(&self) -> f64 {
         self.eta / self.theta.powf(self.gamma)
     }
 
-    /// SSVI total variance w(k) at log-moneyness k for this slice.
     fn total_variance(&self, k: f64) -> f64 {
         let phi = self.phi();
         let phi_k = phi * k;
@@ -783,12 +775,7 @@ impl SsviSlice {
             * (1.0 + self.rho * phi_k + ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt())
     }
 
-    /// First derivative dw/dk for the g-function.
-    ///
-    /// ```text
-    /// w'(k) = (θ/2) · [ρ·φ + φ·(φ·k + ρ) / R]
-    /// ```
-    /// where `R = √((φ·k + ρ)² + (1 − ρ²))`.
+    // w'(k) = (θ/2) · [ρ·φ + φ·(φ·k + ρ) / R], R = √((φ·k + ρ)² + (1 − ρ²))
     fn w_prime(&self, k: f64) -> f64 {
         let phi = self.phi();
         let phi_k = phi * k;
@@ -797,12 +784,7 @@ impl SsviSlice {
         (self.theta / 2.0) * (self.rho * phi + phi * (phi_k + self.rho) / r)
     }
 
-    /// Second derivative d²w/dk² for the g-function.
-    ///
-    /// ```text
-    /// w''(k) = (θ/2) · φ² · (1 − ρ²) / R³
-    /// ```
-    /// where `R = √((φ·k + ρ)² + (1 − ρ²))`.
+    // w''(k) = (θ/2) · φ² · (1 − ρ²) / R³
     fn w_double_prime(&self, k: f64) -> f64 {
         let phi = self.phi();
         let phi_k = phi * k;
@@ -811,14 +793,8 @@ impl SsviSlice {
         (self.theta / 2.0) * phi * phi * one_minus_rho_sq / (r * r * r)
     }
 
-    /// Gatheral g-function for butterfly arbitrage detection.
-    ///
-    /// ```text
-    /// g(k) = (1 − k·w'/(2w))² − (w')²/4 · (1/w + 1/4) + w''/2
-    /// ```
-    ///
-    /// g(k) ≥ 0 for all k is the necessary and sufficient condition for
-    /// no butterfly arbitrage (Gatheral & Jacquier 2014, §4).
+    // g(k) = (1 − k·w'/(2w))² − (w')²/4·(1/w + 1/4) + w''/2
+    // g(k) ≥ 0 ⟺ no butterfly arbitrage (Gatheral & Jacquier 2014, §4)
     fn g_function(&self, k: f64) -> f64 {
         let w = self.total_variance(k);
         if w <= 0.0 {

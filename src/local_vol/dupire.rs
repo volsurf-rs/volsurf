@@ -12,8 +12,6 @@
 //! - Dupire, B. "Pricing with a Smile" (1994)
 //! - Gatheral, J. "The Volatility Surface: A Practitioner's Guide" (2006), Ch. 2
 
-#![allow(dead_code)] // Stub — not yet implemented (v0.3 scope)
-
 use std::fmt;
 use std::sync::Arc;
 

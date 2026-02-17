@@ -145,15 +145,7 @@ impl SabrSmile {
         self.nu
     }
 
-    /// Hagan (2002) implied Black volatility approximation, Eq. (2.17a).
-    ///
-    /// Computes the SABR implied vol at a given strike using the closed-form
-    /// approximation from "Managing Smile Risk". Uses the general formula
-    /// uniformly, with a Taylor expansion of z/x(z) for small z (including
-    /// the ATM limit K → F and the CEV limit ν → 0).
-    ///
-    /// # References
-    /// Hagan, P. et al., "Managing Smile Risk", Wilmott Magazine, Jan 2002, Eq. (2.17a).
+    // Hagan (2002) Eq. (2.17a) — unified formula with Taylor z/x(z) for small z.
     fn hagan_implied_vol(&self, strike: f64) -> f64 {
         let f = self.forward;
         let k = strike;
@@ -245,17 +237,11 @@ impl SabrSmile {
             "SABR calibration started"
         );
 
-        /// Minimum market quotes for SABR calibration.
         const MIN_POINTS: usize = 4;
-        /// Grid search resolution for (x, y) initialization.
         const GRID_N: usize = 15;
-        /// Nelder-Mead iteration limit.
         const NM_MAX_ITER: usize = 300;
-        /// Simplex diameter convergence threshold.
         const NM_DIAMETER_TOL: f64 = 1e-8;
-        /// Objective value spread convergence threshold.
         const NM_FVALUE_TOL: f64 = 1e-12;
-        /// Maximum Newton iterations for alpha solver.
         const ALPHA_MAX_ITER: usize = 50;
 
         // Input validation
@@ -428,15 +414,10 @@ impl SabrSmile {
     }
 }
 
-/// Interpolate ATM implied vol from market data.
-///
-/// Finds the two market strikes bracketing the forward and linearly
-/// interpolates. If the forward is outside the strike range, uses
-/// the nearest market point.
 fn interpolate_atm_vol(forward: f64, market_vols: &[(f64, f64)]) -> f64 {
     // Sort by strike distance to forward
     let mut sorted: Vec<(f64, f64)> = market_vols.to_vec();
-    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     // Find bracketing strikes
     let right_idx = sorted.partition_point(|&(k, _)| k < forward);

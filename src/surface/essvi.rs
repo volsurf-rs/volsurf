@@ -6,8 +6,6 @@
 //! # References
 //! - Hendriks, S. & Martini, C. "The Extended SSVI Volatility Surface" (2019)
 
-#![allow(dead_code)] // Stub — not yet implemented (v0.3 scope)
-
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};

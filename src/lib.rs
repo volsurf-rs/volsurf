@@ -23,8 +23,13 @@ pub mod surface;
 pub mod types;
 mod validate;
 
+#[doc(inline)]
 pub use error::{Result, VolSurfError};
+#[doc(inline)]
 pub use local_vol::LocalVol;
+#[doc(inline)]
 pub use smile::SmileSection;
+#[doc(inline)]
 pub use surface::VolSurface;
+#[doc(inline)]
 pub use types::{OptionType, Strike, Tenor, Variance, Vol};

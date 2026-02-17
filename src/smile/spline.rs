@@ -165,10 +165,7 @@ impl SplineSmile {
     }
 }
 
-/// Solve the natural cubic spline tridiagonal system and return
-/// per-interval coefficients.
-///
-/// Uses the Thomas algorithm: O(n) forward elimination + back substitution.
+// Thomas algorithm: O(n) tridiagonal solve for natural cubic spline coefficients.
 fn build_spline_coefficients(x: &[f64], y: &[f64], n: usize) -> Vec<SplineCoeff> {
     // Interval widths
     let h: Vec<f64> = x.windows(2).map(|w| w[1] - w[0]).collect();

@@ -11,7 +11,6 @@ pub(crate) struct NelderMeadConfig {
 }
 
 /// Result of a 2D Nelder-Mead optimization.
-#[allow(dead_code)]
 pub(crate) struct NelderMeadResult {
     /// Optimal x coordinate.
     pub x: f64,
@@ -45,11 +44,7 @@ where
 
     for _ in 0..config.max_iter {
         let mut idx = [0usize, 1, 2];
-        idx.sort_by(|&a, &b| {
-            f_vals[a]
-                .partial_cmp(&f_vals[b])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        idx.sort_by(|&a, &b| f_vals[a].total_cmp(&f_vals[b]));
         simplex = [simplex[idx[0]], simplex[idx[1]], simplex[idx[2]]];
         f_vals = [f_vals[idx[0]], f_vals[idx[1]], f_vals[idx[2]]];
 

@@ -84,6 +84,7 @@ pub enum SmileModel {
 /// assert!(vol.0 > 0.0);
 /// # Ok::<(), volsurf::VolSurfError>(())
 /// ```
+#[derive(Debug)]
 pub struct SurfaceBuilder {
     spot: Option<f64>,
     rate: Option<f64>,
@@ -91,7 +92,7 @@ pub struct SurfaceBuilder {
     tenor_data: Vec<TenorData>,
 }
 
-/// Market data for a single tenor.
+#[derive(Debug)]
 struct TenorData {
     expiry: f64,
     strikes: Vec<f64>,
@@ -240,8 +241,7 @@ impl SurfaceBuilder {
                         .zip(tenor.vols.iter())
                         .map(|(&k, &v)| (k, v * v * tenor.expiry))
                         .collect();
-                    pairs
-                        .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
                     let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
                     let spline = SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
                     Box::new(spline)
@@ -262,8 +262,7 @@ impl SurfaceBuilder {
         }
 
         // Sort by tenor
-        tenor_smile_pairs
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        tenor_smile_pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
 
         // Assemble PiecewiseSurface
         let (tenors, smiles): (Vec<f64>, Vec<Box<dyn SmileSection>>) =

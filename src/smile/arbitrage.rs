@@ -74,11 +74,9 @@ impl ArbitrageReport {
     /// assert!((worst.magnitude - 0.005).abs() < 1e-12);
     /// ```
     pub fn worst_violation(&self) -> Option<&ButterflyViolation> {
-        self.butterfly_violations.iter().max_by(|a, b| {
-            a.magnitude
-                .partial_cmp(&b.magnitude)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        self.butterfly_violations
+            .iter()
+            .max_by(|a, b| a.magnitude.total_cmp(&b.magnitude))
     }
 }
 

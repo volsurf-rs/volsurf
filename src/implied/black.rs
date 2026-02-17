@@ -15,6 +15,7 @@ use crate::validate::{validate_non_negative, validate_positive};
 ///
 /// # References
 /// - Jäckel, P. "Let's Be Rational" (2013)
+#[derive(Debug)]
 pub struct BlackImpliedVol;
 
 impl BlackImpliedVol {
