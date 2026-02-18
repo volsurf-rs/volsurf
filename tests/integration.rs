@@ -1097,3 +1097,201 @@ fn types_are_send_and_sync() {
     assert_send_sync::<PiecewiseSurface>();
     assert_send_sync::<SsviSurface>();
 }
+
+// Test 16: Dividend yield — multi-tenor surface with continuous dividend yield
+//
+// Build a 3-tenor surface with q=2%, verify each tenor's forward reflects
+// F = S · exp((r − q) · T) rather than F = S · exp(r · T).
+#[test]
+fn surface_with_dividend_yield() -> Result<(), Box<dyn std::error::Error>> {
+    let spot = 100.0;
+    let rate = 0.05;
+    let q = 0.02;
+    let strikes = standard_strikes();
+
+    let tenors = [0.25, 0.5, 1.0];
+    let svi_configs: [(f64, f64, f64, f64, f64); 3] = [
+        (0.005, 0.05, -0.3, 0.0, 0.25),
+        (0.01, 0.04, -0.25, 0.0, 0.35),
+        (0.02, 0.04, -0.2, 0.0, 0.4),
+    ];
+
+    let mut builder = SurfaceBuilder::new()
+        .spot(spot)
+        .rate(rate)
+        .dividend_yield(q);
+
+    for (&t, &(a, b, rho, m, sigma)) in tenors.iter().zip(svi_configs.iter()) {
+        let fwd = spot * ((rate - q) * t).exp();
+        let data = svi_market_data(
+            &SviParams {
+                forward: fwd,
+                expiry: t,
+                a,
+                b,
+                rho,
+                m,
+                sigma,
+            },
+            &strikes,
+        );
+        let (ks, vs): (Vec<f64>, Vec<f64>) = data.into_iter().unzip();
+        builder = builder.add_tenor(t, &ks, &vs);
+    }
+
+    let surface = builder.build()?;
+
+    for &t in &tenors {
+        let smile = surface.smile_at(t)?;
+        let expected_fwd = spot * ((rate - q) * t).exp();
+        assert_abs_diff_eq!(smile.forward(), expected_fwd, epsilon = 0.5);
+    }
+
+    // Verify q > 0 gives lower forwards than q = 0
+    let smile_1y = surface.smile_at(1.0)?;
+    let fwd_no_q = spot * (rate * 1.0_f64).exp();
+    assert!(smile_1y.forward() < fwd_no_q);
+
+    Ok(())
+}
+
+// Test 17: Mixed add_tenor / add_tenor_with_forward — per-tenor forward override
+//
+// Two tenors: 3M uses computed forward (via spot/rate/q), 1Y uses an explicit
+// forward (simulating a futures option). Verify each smile carries the right
+// forward and cross-tenor queries produce sensible vols.
+#[test]
+fn mixed_tenor_and_tenor_with_forward() -> Result<(), Box<dyn std::error::Error>> {
+    let spot = 100.0;
+    let rate = 0.05;
+    let q = 0.02;
+    let strikes = standard_strikes();
+
+    // 3M: computed forward = spot * exp((r-q)*0.25) ≈ 100.75
+    let fwd_3m = spot * ((rate - q) * 0.25_f64).exp();
+    let data_3m = svi_market_data(
+        &SviParams {
+            forward: fwd_3m,
+            expiry: 0.25,
+            a: 0.005,
+            b: 0.05,
+            rho: -0.3,
+            m: 0.0,
+            sigma: 0.25,
+        },
+        &strikes,
+    );
+
+    // 1Y: explicit forward = 110.0 (e.g. futures price)
+    let explicit_fwd = 110.0;
+    let data_1y = svi_market_data(
+        &SviParams {
+            forward: explicit_fwd,
+            expiry: 1.0,
+            a: 0.02,
+            b: 0.04,
+            rho: -0.2,
+            m: 0.0,
+            sigma: 0.4,
+        },
+        &strikes,
+    );
+
+    let (ks_3m, vs_3m): (Vec<f64>, Vec<f64>) = data_3m.into_iter().unzip();
+    let (ks_1y, vs_1y): (Vec<f64>, Vec<f64>) = data_1y.into_iter().unzip();
+
+    let surface = SurfaceBuilder::new()
+        .spot(spot)
+        .rate(rate)
+        .dividend_yield(q)
+        .add_tenor(0.25, &ks_3m, &vs_3m)
+        .add_tenor_with_forward(1.0, &ks_1y, &vs_1y, explicit_fwd)
+        .build()?;
+
+    // 3M should use computed forward
+    let smile_3m = surface.smile_at(0.25)?;
+    assert_abs_diff_eq!(smile_3m.forward(), fwd_3m, epsilon = 0.5);
+
+    // 1Y should use explicit forward, ignoring spot/rate/q
+    let smile_1y = surface.smile_at(1.0)?;
+    assert_abs_diff_eq!(smile_1y.forward(), explicit_fwd, epsilon = 0.5);
+
+    // Cross-tenor query at 6M (interpolation between 3M and 1Y)
+    let vol_6m = surface.black_vol(0.5, 100.0)?;
+    assert!(vol_6m.0 > 0.05 && vol_6m.0 < 0.50);
+
+    Ok(())
+}
+
+// Test 18: Dividend yield q = r gives forward ≈ spot
+#[test]
+fn dividend_yield_equals_rate() -> Result<(), Box<dyn std::error::Error>> {
+    let spot = 100.0;
+    let rate = 0.05;
+    let q = 0.05;
+    let strikes = standard_strikes();
+
+    // Forward ≈ spot when q = r
+    let data = svi_market_data(
+        &SviParams {
+            forward: spot,
+            expiry: 1.0,
+            a: 0.02,
+            b: 0.04,
+            rho: -0.2,
+            m: 0.0,
+            sigma: 0.4,
+        },
+        &strikes,
+    );
+    let (ks, vs): (Vec<f64>, Vec<f64>) = data.into_iter().unzip();
+
+    let surface = SurfaceBuilder::new()
+        .spot(spot)
+        .rate(rate)
+        .dividend_yield(q)
+        .add_tenor(1.0, &ks, &vs)
+        .build()?;
+
+    let smile = surface.smile_at(1.0)?;
+    assert_abs_diff_eq!(smile.forward(), spot, epsilon = 0.5);
+
+    Ok(())
+}
+
+// Test 19: q > r gives forward < spot (high-dividend equity)
+#[test]
+fn dividend_yield_exceeds_rate() -> Result<(), Box<dyn std::error::Error>> {
+    let spot = 100.0;
+    let rate = 0.02;
+    let q = 0.06;
+    let strikes = standard_strikes();
+
+    let fwd = spot * ((rate - q) * 1.0_f64).exp(); // ≈ 96.08
+    let data = svi_market_data(
+        &SviParams {
+            forward: fwd,
+            expiry: 1.0,
+            a: 0.02,
+            b: 0.04,
+            rho: -0.2,
+            m: 0.0,
+            sigma: 0.4,
+        },
+        &strikes,
+    );
+    let (ks, vs): (Vec<f64>, Vec<f64>) = data.into_iter().unzip();
+
+    let surface = SurfaceBuilder::new()
+        .spot(spot)
+        .rate(rate)
+        .dividend_yield(q)
+        .add_tenor(1.0, &ks, &vs)
+        .build()?;
+
+    let smile = surface.smile_at(1.0)?;
+    assert!(smile.forward() < spot);
+    assert_abs_diff_eq!(smile.forward(), fwd, epsilon = 0.5);
+
+    Ok(())
+}
