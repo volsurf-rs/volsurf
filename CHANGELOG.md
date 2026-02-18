@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-02-17
+
+### Added
+
+- `NormalImpliedVol` — Bachelier implied vol extraction via Jäckel (2017) rational approximation with `normal_price()` standalone pricing function
+- `DisplacedImpliedVol` — displaced diffusion model with beta-blended Black/Normal pricing and IV extraction; delegates to pure Black (β=1) or Normal (β=0) at boundaries
+- `DupireLocalVol` — local volatility extraction from any `VolSurface` via Gatheral (2006) Eq. 1.10 using finite differences on total implied variance, with forward-adjusted time derivatives at constant log-moneyness
+- GitHub Actions CI workflow (test, clippy, fmt, doc)
+- Apache-2.0 LICENSE file
+- README with badges, quick-start guide, benchmarks, and architecture overview
+- crates.io publish metadata (keywords, categories, repository, homepage)
+
+### Fixed
+
+- Serde deserialization now validates all smile/surface types via `#[serde(try_from)]` — `SsviSurface`, `SsviSlice`, `SabrSmile`, `SviSmile`, `SplineSmile`
+- Black IV accuracy claim corrected from "3 ULP" to "near-machine-precision" in module docs
+- Normal IV accuracy claim corrected from "2 ULP" to "near-machine-precision" in module docs
+- 14 edge case tests added from implied vol paper audits (5 black, 5 normal, 4 displaced)
+
 ## [0.2.0] "Market Ready" - 2026-02-16
 
 ### Added
@@ -47,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/volsurf-rs/volsurf/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/volsurf-rs/volsurf/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/volsurf-rs/volsurf/releases/tag/v0.1.0
