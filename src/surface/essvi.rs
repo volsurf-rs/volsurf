@@ -62,7 +62,14 @@ struct EssviSliceRaw {
 impl TryFrom<EssviSliceRaw> for EssviSlice {
     type Error = VolSurfError;
     fn try_from(raw: EssviSliceRaw) -> Result<Self, Self::Error> {
-        Self::new(raw.forward, raw.expiry, raw.rho, raw.eta, raw.gamma, raw.theta)
+        Self::new(
+            raw.forward,
+            raw.expiry,
+            raw.rho,
+            raw.eta,
+            raw.gamma,
+            raw.theta,
+        )
     }
 }
 
@@ -409,7 +416,10 @@ mod tests {
         let json = r#"{"forward":100,"expiry":1,"rho":1.0,"eta":0.5,"gamma":0.5,"theta":0.04}"#;
         let err = serde_json::from_str::<EssviSlice>(json).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("rho"), "should contain domain message, got: {msg}");
+        assert!(
+            msg.contains("rho"),
+            "should contain domain message, got: {msg}"
+        );
     }
 
     #[test]
