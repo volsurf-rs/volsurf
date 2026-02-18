@@ -17,7 +17,7 @@ pub mod ssvi;
 
 pub use arbitrage::{CalendarViolation, SurfaceDiagnostics};
 pub use builder::{SmileModel, SurfaceBuilder};
-pub use essvi::EssviSurface;
+pub use essvi::{EssviSlice, EssviSurface};
 pub use piecewise::PiecewiseSurface;
 pub use ssvi::{SsviSlice, SsviSurface};
 

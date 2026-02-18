@@ -839,6 +839,21 @@ impl SsviSlice {
         self.theta
     }
 
+    /// Skew parameter ρ.
+    pub fn rho(&self) -> f64 {
+        self.rho
+    }
+
+    /// Smile amplitude η.
+    pub fn eta(&self) -> f64 {
+        self.eta
+    }
+
+    /// Term structure decay γ.
+    pub fn gamma(&self) -> f64 {
+        self.gamma
+    }
+
     fn phi(&self) -> f64 {
         self.eta / self.theta.powf(self.gamma)
     }
