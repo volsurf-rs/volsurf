@@ -32,7 +32,6 @@ pub(crate) fn interpolate_theta_forward(
     let left = right - 1;
     let alpha = (expiry - tenors[left]) / (tenors[right] - tenors[left]);
     let theta = (1.0 - alpha) * thetas[left] + alpha * thetas[right];
-    let forward =
-        (forwards[left].ln() * (1.0 - alpha) + forwards[right].ln() * alpha).exp();
+    let forward = (forwards[left].ln() * (1.0 - alpha) + forwards[right].ln() * alpha).exp();
     (theta, forward)
 }

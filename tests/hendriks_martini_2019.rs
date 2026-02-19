@@ -8,8 +8,8 @@
 //!   ρ(θ) = −0.76 − 0.11·(θ/θ_max)^{0.51}  →  ρ₀=−0.76, ρₘ=−0.87, a=0.51
 
 use approx::assert_abs_diff_eq;
-use volsurf::surface::{EssviSlice, EssviSurface, SsviSlice, SsviSurface, VolSurface};
 use volsurf::SmileSection;
+use volsurf::surface::{EssviSlice, EssviSurface, SsviSlice, SsviSurface, VolSurface};
 
 const ETA: f64 = 0.98;
 const GAMMA: f64 = 0.42;
@@ -19,7 +19,9 @@ const A_PARAM: f64 = 0.51;
 
 // DJX maturities from Figure 3
 fn djx_tenors() -> Vec<f64> {
-    vec![0.0192, 0.0575, 0.1342, 0.2110, 0.3836, 0.6329, 0.8822, 1.3808, 1.8795, 2.8959]
+    vec![
+        0.0192, 0.0575, 0.1342, 0.2110, 0.3836, 0.6329, 0.8822, 1.3808, 1.8795, 2.8959,
+    ]
 }
 
 // θ = σ²·T estimated from Figure 3 ATM vols (~16-22%)
@@ -205,30 +207,24 @@ fn eq_5_7_boundary_acceptance_and_rejection() {
     let fwds = djx_forwards();
 
     // Exactly at a_max: should succeed
-    assert!(EssviSurface::new(
-        RHO_0,
-        RHO_M,
-        a_max,
-        ETA,
-        GAMMA,
-        tenors.clone(),
-        fwds.clone(),
-        thetas.clone(),
-    )
-    .is_ok());
+    assert!(
+        EssviSurface::new(
+            RHO_0,
+            RHO_M,
+            a_max,
+            ETA,
+            GAMMA,
+            tenors.clone(),
+            fwds.clone(),
+            thetas.clone(),
+        )
+        .is_ok()
+    );
 
     // Above a_max: should fail
-    assert!(EssviSurface::new(
-        RHO_0,
-        RHO_M,
-        a_max + 0.01,
-        ETA,
-        GAMMA,
-        tenors,
-        fwds,
-        thetas,
-    )
-    .is_err());
+    assert!(
+        EssviSurface::new(RHO_0, RHO_M, a_max + 0.01, ETA, GAMMA, tenors, fwds, thetas,).is_err()
+    );
 }
 
 // ── Theorem 4.1: calendar no-arb structural check ──────────────
@@ -269,10 +265,7 @@ fn thm_4_1_full_diagnostics_paper_params() {
         "paper params should have no calendar violations, found {}",
         diag.calendar_violations.len()
     );
-    assert!(
-        diag.is_free,
-        "paper params should be fully arb-free"
-    );
+    assert!(diag.is_free, "paper params should be fully arb-free");
 }
 
 // ── Proposition 3.5: two-slice discrete no-arb ──────────────────
@@ -304,7 +297,10 @@ fn prop_3_5_necessary_conditions() {
     assert!(theta_phi >= bound, "θφ={theta_phi} < max bound={bound}");
 
     // Condition 3 (sufficient): φ ≤ 1
-    assert!(phi_ratio <= 1.0, "for power-law φ with γ∈[0,1], φ₂/φ₁ ≤ 1 when θ₂ ≥ θ₁");
+    assert!(
+        phi_ratio <= 1.0,
+        "for power-law φ with γ∈[0,1], φ₂/φ₁ ≤ 1 when θ₂ ≥ θ₁"
+    );
 }
 
 #[test]
