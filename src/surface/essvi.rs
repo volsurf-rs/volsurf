@@ -423,17 +423,223 @@ impl EssviSurface {
         })
     }
 
-    /// Calibrate an eSSVI surface from market data.
+    /// Calibrate an eSSVI surface from per-tenor market implied vols.
+    ///
+    /// Uses a two-stage approach:
+    /// 1. Per-tenor SVI calibration to extract ATM total variances (θ) and skews (ρ)
+    /// 2. Global optimization of (η, γ) via grid search + Nelder-Mead
+    ///
+    /// The per-tenor SVI skews are averaged into a single ρ used as both ρ₀ and ρₘ,
+    /// producing an SSVI-equivalent surface. Call with pre-fitted ρ(θ) parameters
+    /// via [`EssviSurface::new()`] for full eSSVI with maturity-dependent correlation.
+    ///
+    /// # Arguments
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
+    /// * `tenors` — Expiry times in years, all positive and finite
+    /// * `forwards` — Forward prices at each tenor, all positive and finite
     ///
     /// # Errors
-    /// Returns [`VolSurfError::NumericalError`] — not yet implemented.
+    /// Returns [`VolSurfError::InvalidInput`] for invalid inputs (< 2 tenors,
+    /// length mismatches, non-positive values). Returns [`VolSurfError::CalibrationError`]
+    /// if per-tenor SVI calibration or global optimization fails.
+    ///
+    /// # Example
+    /// ```
+    /// use volsurf::surface::EssviSurface;
+    ///
+    /// let data_3m: Vec<(f64, f64)> = (0..10)
+    ///     .map(|i| (80.0 + 4.0 * i as f64, 0.20 + 0.01 * (i as f64 - 5.0).abs()))
+    ///     .collect();
+    /// let data_1y: Vec<(f64, f64)> = (0..10)
+    ///     .map(|i| (80.0 + 4.0 * i as f64, 0.18 + 0.008 * (i as f64 - 5.0).abs()))
+    ///     .collect();
+    ///
+    /// let surface = EssviSurface::calibrate(
+    ///     &[data_3m, data_1y],
+    ///     &[0.25, 1.0],
+    ///     &[100.0, 100.0],
+    /// )?;
+    /// # Ok::<(), volsurf::VolSurfError>(())
+    /// ```
     pub fn calibrate(
-        _market_data: &[Vec<(f64, f64)>],
-        _tenors: &[f64],
-        _forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
     ) -> error::Result<Self> {
-        Err(VolSurfError::NumericalError {
-            message: "not yet implemented".to_string(),
+        #[cfg(feature = "logging")]
+        tracing::debug!(n_tenors = tenors.len(), "eSSVI calibration started");
+
+        const MIN_TENORS: usize = 2;
+        const GRID_N: usize = 15;
+        const NM_MAX_ITER: usize = 300;
+        const NM_DIAMETER_TOL: f64 = 1e-8;
+        const NM_FVALUE_TOL: f64 = 1e-12;
+
+        if tenors.len() < MIN_TENORS {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "at least {MIN_TENORS} tenors required for eSSVI calibration, got {}",
+                    tenors.len()
+                ),
+            });
+        }
+        if tenors.len() != forwards.len() || tenors.len() != market_data.len() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "tenors, forwards, and market_data must have the same length: {}, {}, {}",
+                    tenors.len(),
+                    forwards.len(),
+                    market_data.len()
+                ),
+            });
+        }
+        for (i, &t) in tenors.iter().enumerate() {
+            if !t.is_finite() || t <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("tenors[{i}] must be positive and finite, got {t}"),
+                });
+            }
+        }
+        for (i, &f) in forwards.iter().enumerate() {
+            if !f.is_finite() || f <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("forwards[{i}] must be positive and finite, got {f}"),
+                });
+            }
+        }
+
+        // Stage 1: per-tenor SVI calibration → thetas + rho estimates
+        let n_tenors = tenors.len();
+        let mut thetas = Vec::with_capacity(n_tenors);
+        let mut rho_sum = 0.0;
+
+        for (i, market_vols) in market_data.iter().enumerate() {
+            let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
+                .map_err(|e| VolSurfError::CalibrationError {
+                    message: format!(
+                        "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
+                        tenors[i]
+                    ),
+                    model: "eSSVI",
+                    rms_error: None,
+                })?;
+            let theta = svi.variance(forwards[i])?.0;
+            thetas.push(theta);
+            rho_sum += svi.rho();
+        }
+
+        let rho_avg = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
+        let one_minus_rho_sq = 1.0 - rho_avg * rho_avg;
+
+        // Observation triples: (theta, log_moneyness, total_variance)
+        let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
+        for (i, market_vols) in market_data.iter().enumerate() {
+            for &(strike, vol) in market_vols {
+                let k = (strike / forwards[i]).ln();
+                let w_obs = vol * vol * tenors[i];
+                all_points.push((thetas[i], k, w_obs));
+            }
+        }
+
+        // Stage 3: optimize (eta, gamma) via grid + Nelder-Mead
+        let objective = |eta: f64, gamma: f64| -> f64 {
+            if eta <= 0.0 || !eta.is_finite() || !gamma.is_finite() || !(0.0..=1.0).contains(&gamma)
+            {
+                return f64::MAX;
+            }
+            let mut rss = 0.0;
+            for &(theta, k, w_obs) in &all_points {
+                let theta_c = theta.max(1e-10);
+                let phi = eta / theta_c.powf(gamma);
+                let phi_k = phi * k;
+                let w_pred = (theta / 2.0)
+                    * (1.0
+                        + rho_avg * phi_k
+                        + ((phi_k + rho_avg).powi(2) + one_minus_rho_sq).sqrt());
+                if !w_pred.is_finite() {
+                    return f64::MAX;
+                }
+                rss += (w_pred - w_obs).powi(2);
+            }
+            rss
+        };
+
+        let eta_lo = 0.01_f64;
+        let eta_hi = 3.0_f64;
+        let gamma_lo = 0.0_f64;
+        let gamma_hi = 1.0_f64;
+
+        let mut best_eta = 0.5;
+        let mut best_gamma = 0.5;
+        let mut best_rss = f64::MAX;
+
+        for ie in 0..GRID_N {
+            let eta = eta_lo + (eta_hi - eta_lo) * (ie as f64) / ((GRID_N - 1) as f64);
+            for ig in 0..GRID_N {
+                let gamma = gamma_lo + (gamma_hi - gamma_lo) * (ig as f64) / ((GRID_N - 1) as f64);
+                let rss = objective(eta, gamma);
+                if rss < best_rss {
+                    best_rss = rss;
+                    best_eta = eta;
+                    best_gamma = gamma;
+                }
+            }
+        }
+
+        if best_rss >= f64::MAX {
+            return Err(VolSurfError::CalibrationError {
+                message: "grid search found no valid starting point".into(),
+                model: "eSSVI",
+                rms_error: None,
+            });
+        }
+
+        let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
+        let step_gamma = (gamma_hi - gamma_lo) / (GRID_N as f64) * 0.5;
+
+        let nm_config = crate::optim::NelderMeadConfig {
+            max_iter: NM_MAX_ITER,
+            diameter_tol: NM_DIAMETER_TOL,
+            fvalue_tol: NM_FVALUE_TOL,
+        };
+        let nm_result = crate::optim::nelder_mead_2d(
+            objective, best_eta, best_gamma, step_eta, step_gamma, &nm_config,
+        );
+
+        let opt_eta = nm_result.x.max(1e-6);
+        let opt_gamma = nm_result.y.clamp(0.0, 1.0);
+
+        let n_points = all_points.len();
+        let rms = if n_points > 0 {
+            (nm_result.fval / n_points as f64).sqrt()
+        } else {
+            0.0
+        };
+
+        #[cfg(feature = "logging")]
+        tracing::debug!(
+            rho_0 = rho_avg,
+            rho_m = rho_avg,
+            eta = opt_eta,
+            gamma = opt_gamma,
+            rms,
+            "eSSVI calibration complete"
+        );
+
+        Self::new(
+            rho_avg,
+            rho_avg,
+            0.0,
+            opt_eta,
+            opt_gamma,
+            tenors.to_vec(),
+            forwards.to_vec(),
+            thetas,
+        )
+        .map_err(|e| VolSurfError::CalibrationError {
+            message: format!("calibrated eSSVI params invalid: {e}"),
+            model: "eSSVI",
+            rms_error: Some(rms),
         })
     }
 
