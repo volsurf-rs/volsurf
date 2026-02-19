@@ -5,7 +5,7 @@
 //! formula is identical to SSVI — the difference is purely in how ρ is chosen.
 //!
 //! [`EssviSlice`] is a single-tenor slice implementing [`SmileSection`].
-//! [`EssviSurface`] is the multi-tenor surface (stub, implemented in issue #3).
+//! [`EssviSurface`] is the multi-tenor surface implementing [`VolSurface`].
 //!
 //! # References
 //! - Hendriks, S. & Martini, C. "The Extended SSVI Volatility Surface" (2019)
@@ -21,6 +21,22 @@ use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::surface::ssvi::{CALENDAR_CHECK_GRID_SIZE, SsviSlice, strike_grid};
 use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
+
+/// A structural calendar no-arb violation (Thm 4.1, Eq 4.10).
+///
+/// Returned by [`EssviSurface::calendar_check_structural()`] when the
+/// continuous-time condition `(δ + ρ·γ)² ≤ γ²` fails at a stored tenor.
+#[derive(Debug, Clone)]
+pub struct StructuralViolation {
+    /// Tenor (in years) where the violation was detected.
+    pub tenor: f64,
+    /// ATM total variance θ at that tenor.
+    pub theta: f64,
+    /// Left-hand side |δ + ρ·γ| (should be ≤ `condition_rhs`).
+    pub condition_lhs: f64,
+    /// Right-hand side γ (= 1 − γ_param).
+    pub condition_rhs: f64,
+}
 
 /// A single-tenor slice through an eSSVI surface.
 ///
@@ -486,45 +502,29 @@ impl EssviSurface {
 
     /// Interpolate `(θ, F)` at an arbitrary expiry.
     pub(crate) fn theta_and_forward_at(&self, expiry: f64) -> (f64, f64) {
-        let n = self.tenors.len();
-
-        for (i, &t) in self.tenors.iter().enumerate() {
-            if (expiry - t).abs() < 1e-10 {
-                return (self.thetas[i], self.forwards[i]);
-            }
-        }
-
-        if expiry < self.tenors[0] {
-            let theta = self.thetas[0] * expiry / self.tenors[0];
-            return (theta, self.forwards[0]);
-        }
-
-        if expiry > self.tenors[n - 1] {
-            let theta = self.thetas[n - 1] * expiry / self.tenors[n - 1];
-            return (theta, self.forwards[n - 1]);
-        }
-
-        let right = self.tenors.partition_point(|&t| t < expiry);
-        let left = right - 1;
-        let alpha = (expiry - self.tenors[left]) / (self.tenors[right] - self.tenors[left]);
-        let theta = (1.0 - alpha) * self.thetas[left] + alpha * self.thetas[right];
-        let forward = (1.0 - alpha) * self.forwards[left] + alpha * self.forwards[right];
-        (theta, forward)
+        super::interp::interpolate_theta_forward(&self.tenors, &self.thetas, &self.forwards, expiry)
     }
 
-    /// Structural calendar no-arb check (Hendriks-Martini 2019, Thm 4.1).
+    /// Structural calendar no-arb check (Hendriks-Martini 2019, Thm 4.1, Eq 4.10).
     ///
-    /// For power-law φ = η/θ^γ, the condition reduces to:
+    /// For power-law φ = η/θ^γ with γ ∈ \[0, 1\], the theorem's γ_thm = 1 − γ
+    /// also lies in \[0, 1\], so only the first branch applies:
     ///
     /// ```text
-    /// |δ(θ) + ρ(θ)·γ_thm| ≤ γ_thm
+    /// (δ + ρ·γ_thm)² ≤ γ_thm²
     /// ```
     ///
-    /// where γ_thm = 1 − γ and δ(θ) = a·(ρₘ − ρ₀)·(θ/θ_max)^a.
+    /// The second branch (2γ_thm − 1) is automatically satisfied when γ_thm ≤ 1,
+    /// because γ_thm² ≤ γ_thm and the algebraic conditions in the appendix
+    /// (A.10, A.15) follow. See the paper's Section 4.3 for the full argument.
+    ///
+    /// δ(θ) = a·(ρₘ − ρ₀)·(θ/θ_max)^a is the scaled derivative θ·ρ'(θ).
     ///
     /// Returns violations at each stored tenor where the condition fails.
     /// An empty vector means the surface is structurally calendar-arb-free.
-    pub fn calendar_check_structural(&self) -> Vec<CalendarViolation> {
+    /// For surfaces passing the Eq. 5.7 constraint at construction, this
+    /// always returns empty.
+    pub fn calendar_check_structural(&self) -> Vec<StructuralViolation> {
         let gamma_thm = 1.0 - self.gamma;
         let mut violations = Vec::new();
 
@@ -535,12 +535,11 @@ impl EssviSurface {
             let lhs = (delta + rho * gamma_thm).abs();
 
             if lhs > gamma_thm + 1e-10 {
-                violations.push(CalendarViolation {
-                    strike: 0.0,
-                    tenor_short: self.tenors[i],
-                    tenor_long: self.tenors[i],
-                    variance_short: lhs,
-                    variance_long: gamma_thm,
+                violations.push(StructuralViolation {
+                    tenor: self.tenors[i],
+                    theta,
+                    condition_lhs: lhs,
+                    condition_rhs: gamma_thm,
                 });
             }
         }
@@ -613,9 +612,6 @@ impl VolSurface for EssviSurface {
                 }
             }
         }
-
-        // Structural calendar check (Thm 4.1)
-        calendar_violations.extend(self.calendar_check_structural());
 
         let is_free =
             smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();

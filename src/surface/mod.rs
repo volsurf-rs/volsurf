@@ -12,12 +12,13 @@
 pub mod arbitrage;
 pub mod builder;
 pub mod essvi;
+pub(crate) mod interp;
 pub mod piecewise;
 pub mod ssvi;
 
 pub use arbitrage::{CalendarViolation, SurfaceDiagnostics};
 pub use builder::{SmileModel, SurfaceBuilder};
-pub use essvi::{EssviSlice, EssviSurface};
+pub use essvi::{EssviSlice, EssviSurface, StructuralViolation};
 pub use piecewise::PiecewiseSurface;
 pub use ssvi::{SsviSlice, SsviSurface};
 
