@@ -275,6 +275,17 @@ impl From<EssviSurface> for EssviSurfaceRaw {
     }
 }
 
+// Hendriks-Martini Eq. 5.7: upper bound on `a` for calendar no-arb.
+// Caller must check rho_diff != 0 before calling.
+fn a_max_eq57(gamma: f64, rho_diff: f64, rho_m: f64) -> f64 {
+    let gamma_thm = 1.0 - gamma;
+    if rho_diff > 0.0 {
+        gamma_thm * (1.0 - rho_m) / rho_diff
+    } else {
+        gamma_thm * (1.0 + rho_m) / (-rho_diff)
+    }
+}
+
 impl EssviSurface {
     /// Create an eSSVI surface from parameters and per-tenor data.
     ///
@@ -393,16 +404,9 @@ impl EssviSurface {
 
         let theta_max = *thetas.last().unwrap();
 
-        // Hendriks-Martini Eq. 5.7: upper bound on `a` for calendar no-arb.
-        // gamma_thm = 1 - gamma for the power-law phi.
         let rho_diff = rho_m - rho_0;
         if rho_diff.abs() > 1e-14 {
-            let gamma_thm = 1.0 - gamma;
-            let a_max = if rho_diff > 0.0 {
-                gamma_thm * (1.0 - rho_m) / rho_diff
-            } else {
-                gamma_thm * (1.0 + rho_m) / (-rho_diff)
-            };
+            let a_max = a_max_eq57(gamma, rho_diff, rho_m);
             if a > a_max + 1e-12 {
                 return Err(VolSurfError::InvalidInput {
                     message: format!("a={a} exceeds calendar no-arb bound {a_max:.6} (Eq. 5.7)"),
@@ -618,7 +622,8 @@ impl EssviSurface {
         );
 
         // Observation triples: (theta, log_moneyness, total_variance)
-        let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
+        let mut all_points: Vec<(f64, f64, f64)> =
+            Vec::with_capacity(market_data.iter().map(|v| v.len()).sum());
         for (i, market_vols) in market_data.iter().enumerate() {
             for &(strike, vol) in market_vols {
                 let k = (strike / forwards[i]).ln();
@@ -636,12 +641,7 @@ impl EssviSurface {
                 return f64::MAX;
             }
             let a_eff = if rho_diff.abs() > 1e-14 {
-                let gamma_thm = 1.0 - gamma;
-                let a_mx = if rho_diff > 0.0 {
-                    gamma_thm * (1.0 - opt_rho_m) / rho_diff
-                } else {
-                    gamma_thm * (1.0 + opt_rho_m) / (-rho_diff)
-                };
+                let a_mx = a_max_eq57(gamma, rho_diff, opt_rho_m);
                 if a_mx < 0.0 {
                     return f64::MAX;
                 }
@@ -660,9 +660,7 @@ impl EssviSurface {
                 let phi_k = phi * k;
                 let one_minus_rho_sq = 1.0 - rho * rho;
                 let w_pred = (theta / 2.0)
-                    * (1.0
-                        + rho * phi_k
-                        + ((phi_k + rho).powi(2) + one_minus_rho_sq).sqrt());
+                    * (1.0 + rho * phi_k + ((phi_k + rho).powi(2) + one_minus_rho_sq).sqrt());
                 if !w_pred.is_finite() {
                     return f64::MAX;
                 }
@@ -711,14 +709,8 @@ impl EssviSurface {
         let opt_eta = nm_result.x.max(1e-6);
         let opt_gamma = nm_result.y.clamp(0.0, 1.0);
 
-        // Final a: enforce Eq. 5.7 with the optimized gamma
         let final_a = if rho_diff.abs() > 1e-14 {
-            let gamma_thm = 1.0 - opt_gamma;
-            let a_mx = if rho_diff > 0.0 {
-                gamma_thm * (1.0 - opt_rho_m) / rho_diff
-            } else {
-                gamma_thm * (1.0 + opt_rho_m) / (-rho_diff)
-            };
+            let a_mx = a_max_eq57(opt_gamma, rho_diff, opt_rho_m);
             opt_a_fit.min(a_mx.max(0.0))
         } else {
             opt_a_fit
@@ -1936,5 +1928,312 @@ mod tests {
     fn surface_as_trait_object() {
         let s = equity_surface();
         let _boxed: Box<dyn VolSurface> = Box::new(s);
+    }
+
+    fn synthetic_essvi_data(
+        surface: &EssviSurface,
+        tenors: &[f64],
+        strikes_per_tenor: &[Vec<f64>],
+    ) -> Vec<Vec<(f64, f64)>> {
+        tenors
+            .iter()
+            .zip(strikes_per_tenor)
+            .map(|(&t, strikes)| {
+                strikes
+                    .iter()
+                    .map(|&k| (k, surface.black_vol(t, k).unwrap().0))
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn rms_vol_error(
+        calibrated: &EssviSurface,
+        tenors: &[f64],
+        market_data: &[Vec<(f64, f64)>],
+    ) -> f64 {
+        let mut total_rss = 0.0;
+        let mut n_points = 0;
+        for (i, &t) in tenors.iter().enumerate() {
+            for &(strike, vol_obs) in &market_data[i] {
+                let vol_fit = calibrated.black_vol(t, strike).unwrap().0;
+                total_rss += (vol_fit - vol_obs).powi(2);
+                n_points += 1;
+            }
+        }
+        (total_rss / n_points as f64).sqrt()
+    }
+
+    #[test]
+    fn calibrate_round_trip_equity() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let rms = rms_vol_error(&calibrated, &tenors, &market_data);
+        assert!(rms < 0.005, "round-trip RMS {rms} should be < 0.005");
+    }
+
+    #[test]
+    fn calibrate_round_trip_2_tenors() {
+        let original = two_tenor_surface();
+        let tenors = vec![0.5, 1.0];
+        let forwards = vec![100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..10).map(|i| 75.0 + 5.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let rms = rms_vol_error(&calibrated, &tenors, &market_data);
+        assert!(
+            rms < 0.005,
+            "2-tenor round-trip RMS {rms} should be < 0.005"
+        );
+    }
+
+    #[test]
+    fn calibrate_round_trip_varying_forwards() {
+        let original = EssviSurface::new(
+            -0.4,
+            -0.2,
+            0.5,
+            0.5,
+            0.5,
+            vec![0.25, 0.5, 1.0],
+            vec![100.0, 102.0, 105.0],
+            vec![0.04, 0.08, 0.16],
+        )
+        .unwrap();
+        let tenors = vec![0.25, 0.5, 1.0];
+        let forwards = vec![100.0, 102.0, 105.0];
+        let strikes: Vec<Vec<f64>> = forwards
+            .iter()
+            .map(|&f| (0..10).map(|i| f * 0.8 + f * 0.04 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let rms = rms_vol_error(&calibrated, &tenors, &market_data);
+        assert!(
+            rms < 0.005,
+            "varying-forwards round-trip RMS {rms} should be < 0.005"
+        );
+    }
+
+    #[test]
+    fn calibrate_params_in_valid_range() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let c = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        assert!(c.rho_0().abs() < 1.0, "rho_0 out of range: {}", c.rho_0());
+        assert!(c.rho_m().abs() < 1.0, "rho_m out of range: {}", c.rho_m());
+        assert!(c.a() >= 0.0, "a must be non-negative: {}", c.a());
+        assert!(c.eta() > 0.0, "eta must be positive: {}", c.eta());
+        assert!(
+            (0.0..=1.0).contains(&c.gamma()),
+            "gamma out of [0,1]: {}",
+            c.gamma()
+        );
+        assert_eq!(c.tenors().len(), 4);
+        assert_eq!(c.forwards().len(), 4);
+        assert_eq!(c.thetas().len(), 4);
+    }
+
+    #[test]
+    fn calibrate_thetas_strictly_increasing() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        for w in calibrated.thetas().windows(2) {
+            assert!(
+                w[1] > w[0],
+                "thetas must be strictly increasing: {} <= {}",
+                w[0],
+                w[1]
+            );
+        }
+    }
+
+    #[test]
+    fn calibrate_diagnostics_clean() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let diag = calibrated.diagnostics().unwrap();
+        assert!(
+            diag.is_free,
+            "calibrated eSSVI from conservative input should be arb-free"
+        );
+    }
+
+    #[test]
+    fn calibrate_calendar_structural_clean() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let violations = calibrated.calendar_check_structural();
+        assert!(
+            violations.is_empty(),
+            "calibrated surface should pass structural check, got {} violations",
+            violations.len()
+        );
+    }
+
+    #[test]
+    fn calibrate_serde_round_trip() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let json = serde_json::to_string(&calibrated).unwrap();
+        let deserialized: EssviSurface = serde_json::from_str(&json).unwrap();
+
+        assert_abs_diff_eq!(calibrated.rho_0(), deserialized.rho_0(), epsilon = 1e-14);
+        assert_abs_diff_eq!(calibrated.rho_m(), deserialized.rho_m(), epsilon = 1e-14);
+        assert_abs_diff_eq!(calibrated.a(), deserialized.a(), epsilon = 1e-14);
+        assert_abs_diff_eq!(calibrated.eta(), deserialized.eta(), epsilon = 1e-14);
+        assert_abs_diff_eq!(calibrated.gamma(), deserialized.gamma(), epsilon = 1e-14);
+        assert_eq!(calibrated.tenors(), deserialized.tenors());
+        assert_eq!(calibrated.thetas(), deserialized.thetas());
+        let v1 = calibrated.black_vol(1.0, 90.0).unwrap().0;
+        let v2 = deserialized.black_vol(1.0, 90.0).unwrap().0;
+        assert_abs_diff_eq!(v1, v2, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn calibrate_rejects_single_tenor() {
+        let data = vec![vec![
+            (90.0, 0.2),
+            (95.0, 0.2),
+            (100.0, 0.2),
+            (105.0, 0.2),
+            (110.0, 0.2),
+        ]];
+        let result = EssviSurface::calibrate(&data, &[1.0], &[100.0]);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn calibrate_rejects_empty_data() {
+        let result = EssviSurface::calibrate(&[], &[], &[]);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn calibrate_rejects_length_mismatch() {
+        let data = vec![
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+        ];
+        let result = EssviSurface::calibrate(&data, &[0.5, 1.0], &[100.0]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_negative_forward() {
+        let data = vec![
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+        ];
+        let result = EssviSurface::calibrate(&data, &[0.5, 1.0], &[-100.0, 100.0]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_zero_tenor() {
+        let data = vec![
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+            vec![
+                (90.0, 0.2),
+                (95.0, 0.2),
+                (100.0, 0.2),
+                (105.0, 0.2),
+                (110.0, 0.2),
+            ],
+        ];
+        let result = EssviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_too_few_points() {
+        let data = vec![
+            vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
+            vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
+        ];
+        let result = EssviSurface::calibrate(&data, &[0.5, 1.0], &[100.0, 100.0]);
+        assert!(result.is_err());
     }
 }
