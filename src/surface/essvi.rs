@@ -847,4 +847,544 @@ mod tests {
         let vol = s.vol(100.0).unwrap();
         assert_abs_diff_eq!(vol.0, (0.50 / 5.0_f64).sqrt(), epsilon = 1e-10);
     }
+
+    // ── EssviSurface tests ──────────────────────────────────────────
+
+    fn equity_surface() -> EssviSurface {
+        // a_max = (1-0.5)*(1-(-0.2))/((-0.2)-(-0.4)) = 0.5*1.2/0.2 = 3.0
+        EssviSurface::new(
+            -0.4, -0.2, 0.5, 0.5, 0.5,
+            vec![0.25, 0.5, 1.0, 2.0],
+            vec![100.0, 100.0, 100.0, 100.0],
+            vec![0.04, 0.08, 0.16, 0.32],
+        )
+        .unwrap()
+    }
+
+    fn two_tenor_surface() -> EssviSurface {
+        EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.4, 0.6,
+            vec![0.5, 1.0],
+            vec![100.0, 100.0],
+            vec![0.08, 0.16],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn surface_new_valid() {
+        let s = equity_surface();
+        assert_eq!(s.rho_0(), -0.4);
+        assert_eq!(s.rho_m(), -0.2);
+        assert_eq!(s.a(), 0.5);
+        assert_eq!(s.eta(), 0.5);
+        assert_eq!(s.gamma(), 0.5);
+        assert_eq!(s.tenors(), &[0.25, 0.5, 1.0, 2.0]);
+        assert_eq!(s.forwards(), &[100.0, 100.0, 100.0, 100.0]);
+        assert_eq!(s.thetas(), &[0.04, 0.08, 0.16, 0.32]);
+        assert_eq!(s.theta_max(), 0.32);
+    }
+
+    #[test]
+    fn surface_new_single_tenor() {
+        let s = EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![1.0],
+            vec![100.0],
+            vec![0.04],
+        )
+        .unwrap();
+        assert_eq!(s.tenors().len(), 1);
+        assert_eq!(s.theta_max(), 0.04);
+    }
+
+    #[test]
+    fn surface_new_rejects_rho_0_at_boundary() {
+        assert!(EssviSurface::new(
+            1.0, -0.2, 0.5, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -1.0, -0.2, 0.5, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_rho_m_at_boundary() {
+        assert!(EssviSurface::new(
+            -0.3, 1.0, 0.5, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -0.3, -1.0, 0.5, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_negative_a() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, -0.1, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_accepts_a_zero() {
+        // a=0 means constant rho
+        let s = EssviSurface::new(
+            -0.3, -0.1, 0.0, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04, 0.08],
+        ).unwrap();
+        assert_eq!(s.a(), 0.0);
+    }
+
+    #[test]
+    fn surface_new_rejects_bad_eta() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.0, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, -1.0, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_gamma_out_of_range() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, -0.1,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 1.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_gamma_boundaries_accepted() {
+        assert!(EssviSurface::new(
+            -0.3, -0.3, 0.0, 0.5, 0.0,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_ok());
+        // gamma=1 forces constant rho (rho_0 == rho_m)
+        assert!(EssviSurface::new(
+            -0.3, -0.3, 0.0, 0.5, 1.0,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_ok());
+    }
+
+    #[test]
+    fn surface_new_rejects_empty_tenors() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![], vec![], vec![],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_length_mismatch() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0], vec![0.04, 0.08],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_non_increasing_tenors() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![1.0, 0.5], vec![100.0, 100.0], vec![0.04, 0.08],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_non_increasing_thetas() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.16, 0.08],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_nan_in_vectors() {
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![f64::NAN], vec![100.0], vec![0.04],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![1.0], vec![f64::INFINITY], vec![0.04],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -0.3, -0.1, 0.3, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![f64::NEG_INFINITY],
+        ).is_err());
+    }
+
+    #[test]
+    fn surface_new_rejects_a_exceeding_eq57() {
+        // rho_0=-0.4, rho_m=-0.2, gamma=0.5 => a_max = 0.5*1.2/0.2 = 3.0
+        assert!(EssviSurface::new(
+            -0.4, -0.2, 3.5, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04, 0.08],
+        ).is_err());
+        // exactly at boundary should pass
+        assert!(EssviSurface::new(
+            -0.4, -0.2, 3.0, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04, 0.08],
+        ).is_ok());
+    }
+
+    #[test]
+    fn surface_new_eq57_reverse_rho() {
+        // rho_0 > rho_m: a_max = (1-gamma)*(1+rho_m)/(rho_0-rho_m)
+        // rho_0=-0.1, rho_m=-0.4, gamma=0.5 => 0.5*0.6/0.3 = 1.0
+        assert!(EssviSurface::new(
+            -0.1, -0.4, 1.5, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_err());
+        assert!(EssviSurface::new(
+            -0.1, -0.4, 1.0, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_ok());
+    }
+
+    #[test]
+    fn surface_new_equal_rho_any_a() {
+        // rho_0 == rho_m means rho_diff=0, no constraint on a
+        assert!(EssviSurface::new(
+            -0.3, -0.3, 100.0, 0.5, 0.5,
+            vec![1.0], vec![100.0], vec![0.04],
+        ).is_ok());
+    }
+
+    #[test]
+    fn rho_at_zero_theta() {
+        let s = equity_surface();
+        // theta=0 => (0/theta_max)^a = 0 => rho(0) = rho_0
+        let r = s.rho(0.0);
+        assert_abs_diff_eq!(r, -0.4, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn rho_at_theta_max() {
+        let s = equity_surface();
+        // theta=theta_max => (1)^a = 1 => rho = rho_0 + (rho_m - rho_0) = rho_m
+        let r = s.rho(s.theta_max());
+        assert_abs_diff_eq!(r, -0.2, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn rho_at_half_theta_max() {
+        let s = equity_surface();
+        // theta=0.16, theta_max=0.32 => t=0.5, a=0.5 => t^a = sqrt(0.5)
+        let expected = -0.4 + (-0.2 - (-0.4)) * (0.5_f64).sqrt();
+        let r = s.rho(0.16);
+        assert_abs_diff_eq!(r, expected, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn rho_monotone_when_rho_m_greater() {
+        let s = equity_surface(); // rho_0=-0.4, rho_m=-0.2
+        let r1 = s.rho(0.04);
+        let r2 = s.rho(0.16);
+        let r3 = s.rho(0.32);
+        assert!(r1 < r2, "rho should increase: {r1} < {r2}");
+        assert!(r2 < r3, "rho should increase: {r2} < {r3}");
+    }
+
+    #[test]
+    fn rho_decreasing_when_rho_m_less() {
+        // rho_0=-0.1, rho_m=-0.4 => decreasing
+        let s = EssviSurface::new(
+            -0.1, -0.4, 0.5, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04, 0.08],
+        ).unwrap();
+        assert!(s.rho(0.04) > s.rho(0.08));
+    }
+
+    #[test]
+    fn rho_constant_when_a_zero() {
+        let s = EssviSurface::new(
+            -0.3, -0.1, 0.0, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04, 0.08],
+        ).unwrap();
+        // a=0 => t^0 = 1 for all t>0, so rho = rho_0 + (rho_m - rho_0)*1 = rho_m
+        // BUT at theta=0, t=0, 0^0 = 1 by f64 convention
+        assert_abs_diff_eq!(s.rho(0.04), s.rho(0.08), epsilon = 1e-14);
+    }
+
+    #[test]
+    fn rho_linear_when_a_one() {
+        let s = EssviSurface::new(
+            -0.4, -0.2, 1.0, 0.5, 0.5,
+            vec![0.5, 1.0], vec![100.0, 100.0], vec![0.04, 0.08],
+        ).unwrap();
+        // rho(theta) = rho_0 + (rho_m-rho_0)*(theta/theta_max)
+        let expected = -0.4 + 0.2 * (0.04 / 0.08);
+        assert_abs_diff_eq!(s.rho(0.04), expected, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn rho_clamped_to_valid_range() {
+        // Even with extreme extrapolation, rho stays in (-0.999, 0.999)
+        let s = equity_surface();
+        let r = s.rho(100.0); // way beyond theta_max
+        assert!(r > -0.999 && r < 0.999);
+        let r0 = s.rho(0.0);
+        assert!(r0 > -0.999 && r0 < 0.999);
+    }
+
+    #[test]
+    fn surface_atm_variance_at_stored_tenor() {
+        let s = equity_surface();
+        for (i, &t) in s.tenors().iter().enumerate() {
+            let var = s.black_variance(t, s.forwards()[i]).unwrap();
+            assert_abs_diff_eq!(var.0, s.thetas()[i], epsilon = 1e-12);
+        }
+    }
+
+    #[test]
+    fn surface_atm_vol_at_stored_tenor() {
+        let s = equity_surface();
+        for (i, &t) in s.tenors().iter().enumerate() {
+            let vol = s.black_vol(t, s.forwards()[i]).unwrap();
+            let expected = (s.thetas()[i] / t).sqrt();
+            assert_abs_diff_eq!(vol.0, expected, epsilon = 1e-10);
+        }
+    }
+
+    #[test]
+    fn surface_vol_variance_consistency() {
+        let s = equity_surface();
+        for &t in &[0.25, 0.5, 1.0, 2.0] {
+            for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
+                let vol = s.black_vol(t, k).unwrap();
+                let var = s.black_variance(t, k).unwrap();
+                assert_abs_diff_eq!(var.0, vol.0 * vol.0 * t, epsilon = 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn surface_variance_positive() {
+        let s = equity_surface();
+        for &t in &[0.25, 0.5, 1.0, 2.0] {
+            for &k in &[60.0, 80.0, 100.0, 120.0, 150.0] {
+                let var = s.black_variance(t, k).unwrap();
+                assert!(var.0 > 0.0, "variance should be positive at T={t}, K={k}");
+            }
+        }
+    }
+
+    #[test]
+    fn surface_skew_matches_rho_sign() {
+        let s = equity_surface(); // rho < 0 everywhere
+        for &t in s.tenors() {
+            let vol_put = s.black_vol(t, 80.0).unwrap().0;
+            let vol_call = s.black_vol(t, 120.0).unwrap().0;
+            assert!(vol_put > vol_call, "negative rho should produce put skew at T={t}");
+        }
+    }
+
+    #[test]
+    fn surface_interpolation_between_tenors() {
+        let s = equity_surface();
+        // T=0.75 is between tenor[1]=0.5 and tenor[2]=1.0
+        let vol = s.black_vol(0.75, 100.0).unwrap();
+        assert!(vol.0 > 0.0 && vol.0 < 1.0);
+        // variance should interpolate monotonically between neighbors
+        let var = s.black_variance(0.75, 100.0).unwrap().0;
+        let var_lo = s.black_variance(0.5, 100.0).unwrap().0;
+        let var_hi = s.black_variance(1.0, 100.0).unwrap().0;
+        assert!(var > var_lo && var < var_hi, "variance should interpolate monotonically");
+    }
+
+    #[test]
+    fn surface_extrapolation_before_first_tenor() {
+        let s = equity_surface();
+        // T=0.1 < tenor[0]=0.25: flat vol extrapolation => theta = theta_0 * T/T_0
+        let var = s.black_variance(0.1, 100.0).unwrap();
+        let expected_theta = 0.04 * 0.1 / 0.25;
+        assert_abs_diff_eq!(var.0, expected_theta, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn surface_extrapolation_after_last_tenor() {
+        let s = equity_surface();
+        // T=3.0 > tenor[3]=2.0: flat vol extrapolation => theta = theta_n * T/T_n
+        let var = s.black_variance(3.0, 100.0).unwrap();
+        let expected_theta = 0.32 * 3.0 / 2.0;
+        assert_abs_diff_eq!(var.0, expected_theta, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn surface_rejects_non_positive_expiry() {
+        let s = equity_surface();
+        assert!(s.black_vol(0.0, 100.0).is_err());
+        assert!(s.black_vol(-1.0, 100.0).is_err());
+        assert!(s.black_variance(0.0, 100.0).is_err());
+    }
+
+    #[test]
+    fn surface_rejects_non_positive_strike() {
+        let s = equity_surface();
+        assert!(s.black_vol(1.0, 0.0).is_err());
+        assert!(s.black_vol(1.0, -100.0).is_err());
+        assert!(s.black_variance(1.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn surface_smile_at_returns_essvi_slice() {
+        let s = equity_surface();
+        let smile = s.smile_at(1.0).unwrap();
+        assert_eq!(smile.forward(), 100.0);
+        assert_abs_diff_eq!(smile.expiry(), 1.0, epsilon = 1e-10);
+        // vol at ATM should match surface query
+        let smile_vol = smile.vol(100.0).unwrap().0;
+        let surface_vol = s.black_vol(1.0, 100.0).unwrap().0;
+        assert_abs_diff_eq!(smile_vol, surface_vol, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn surface_smile_at_interpolated_tenor() {
+        let s = equity_surface();
+        let smile = s.smile_at(0.75).unwrap();
+        assert!(smile.expiry() > 0.0);
+        // vol at ATM should match the direct surface query
+        let smile_vol = smile.vol(smile.forward()).unwrap().0;
+        let surface_vol = s.black_vol(0.75, smile.forward()).unwrap().0;
+        assert_abs_diff_eq!(smile_vol, surface_vol, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn surface_smile_at_rejects_non_positive() {
+        let s = equity_surface();
+        assert!(s.smile_at(0.0).is_err());
+        assert!(s.smile_at(-1.0).is_err());
+    }
+
+    #[test]
+    fn surface_diagnostics_clean() {
+        let s = equity_surface();
+        let diag = s.diagnostics().unwrap();
+        assert_eq!(diag.smile_reports.len(), 4);
+        assert!(diag.is_free, "conservative params should be arb-free");
+        assert!(diag.calendar_violations.is_empty());
+    }
+
+    #[test]
+    fn surface_diagnostics_two_tenor() {
+        let s = two_tenor_surface();
+        let diag = s.diagnostics().unwrap();
+        assert_eq!(diag.smile_reports.len(), 2);
+        assert!(diag.is_free);
+    }
+
+    #[test]
+    fn surface_calendar_structural_clean() {
+        let s = equity_surface();
+        let violations = s.calendar_check_structural();
+        assert!(violations.is_empty(), "valid params should pass structural check");
+    }
+
+    #[test]
+    fn surface_rho_differs_per_tenor_in_smile() {
+        let s = equity_surface();
+        let smile_short = s.smile_at(0.25).unwrap();
+        let smile_long = s.smile_at(2.0).unwrap();
+        // OTM put vol should differ due to different rho at each tenor
+        let vol_short = smile_short.vol(80.0).unwrap().0;
+        let vol_long = smile_long.vol(80.0).unwrap().0;
+        // They shouldn't be identical (different rho at each theta)
+        assert!(
+            (vol_short - vol_long).abs() > 1e-6,
+            "different rho(theta) should produce different skew"
+        );
+    }
+
+    #[test]
+    fn surface_serde_round_trip() {
+        let s = equity_surface();
+        let json = serde_json::to_string(&s).unwrap();
+        let s2: EssviSurface = serde_json::from_str(&json).unwrap();
+        assert_eq!(s.rho_0(), s2.rho_0());
+        assert_eq!(s.rho_m(), s2.rho_m());
+        assert_eq!(s.a(), s2.a());
+        assert_eq!(s.eta(), s2.eta());
+        assert_eq!(s.gamma(), s2.gamma());
+        assert_eq!(s.tenors(), s2.tenors());
+        assert_eq!(s.forwards(), s2.forwards());
+        assert_eq!(s.thetas(), s2.thetas());
+        assert_eq!(s.theta_max(), s2.theta_max());
+        // vol query should be identical
+        let v1 = s.black_vol(1.0, 90.0).unwrap().0;
+        let v2 = s2.black_vol(1.0, 90.0).unwrap().0;
+        assert_eq!(v1.to_bits(), v2.to_bits());
+    }
+
+    #[test]
+    fn surface_serde_no_theta_max_in_json() {
+        let s = equity_surface();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("theta_max"), "derived field should not be serialized");
+    }
+
+    #[test]
+    fn surface_serde_rejects_invalid_rho_0() {
+        let json = r#"{"rho_0":1.0,"rho_m":-0.2,"a":0.5,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<EssviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn surface_serde_rejects_invalid_rho_m() {
+        let json = r#"{"rho_0":-0.3,"rho_m":-1.0,"a":0.5,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<EssviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn surface_serde_rejects_negative_eta() {
+        let json = r#"{"rho_0":-0.3,"rho_m":-0.1,"a":0.3,"eta":-0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        assert!(serde_json::from_str::<EssviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn surface_serde_rejects_non_increasing_thetas() {
+        let json = r#"{"rho_0":-0.3,"rho_m":-0.1,"a":0.3,"eta":0.5,"gamma":0.5,"tenors":[0.5,1.0],"forwards":[100.0,100.0],"thetas":[0.16,0.08]}"#;
+        assert!(serde_json::from_str::<EssviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn surface_serde_rejects_length_mismatch() {
+        let json = r#"{"rho_0":-0.3,"rho_m":-0.1,"a":0.3,"eta":0.5,"gamma":0.5,"tenors":[0.5,1.0],"forwards":[100.0],"thetas":[0.04,0.08]}"#;
+        assert!(serde_json::from_str::<EssviSurface>(json).is_err());
+    }
+
+    #[test]
+    fn surface_serde_error_contains_field_name() {
+        let json = r#"{"rho_0":1.5,"rho_m":-0.2,"a":0.5,"eta":0.5,"gamma":0.5,"tenors":[1.0],"forwards":[100.0],"thetas":[0.04]}"#;
+        let err = serde_json::from_str::<EssviSurface>(json).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("rho_0"), "should mention rho_0, got: {msg}");
+    }
+
+    #[test]
+    fn surface_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<EssviSurface>();
+    }
+
+    #[test]
+    fn surface_as_trait_object() {
+        let s = equity_surface();
+        let _boxed: Box<dyn VolSurface> = Box::new(s);
+    }
 }
