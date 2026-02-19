@@ -614,7 +614,7 @@ impl SsviSurface {
 }
 
 /// Number of strikes for calendar arbitrage checks.
-const CALENDAR_CHECK_GRID_SIZE: usize = 41;
+pub(crate) const CALENDAR_CHECK_GRID_SIZE: usize = 41;
 
 impl VolSurface for SsviSurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
@@ -692,7 +692,7 @@ impl VolSurface for SsviSurface {
     }
 }
 
-fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
+pub(crate) fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
     let ln_lo = (0.5_f64).ln();
     let ln_hi = (2.0_f64).ln();
     let step = (ln_hi - ln_lo) / (n - 1) as f64;
