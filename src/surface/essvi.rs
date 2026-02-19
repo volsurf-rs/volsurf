@@ -425,13 +425,13 @@ impl EssviSurface {
 
     /// Calibrate an eSSVI surface from per-tenor market implied vols.
     ///
-    /// Uses a two-stage approach:
+    /// Uses a three-stage approach:
     /// 1. Per-tenor SVI calibration to extract ATM total variances (θ) and skews (ρ)
-    /// 2. Global optimization of (η, γ) via grid search + Nelder-Mead
+    /// 2. Fit the ρ(θ) parametric curve to per-tenor skews (Hendriks-Martini Eq. 5.6)
+    /// 3. Global optimization of (η, γ) via grid search + Nelder-Mead
     ///
-    /// The per-tenor SVI skews are averaged into a single ρ used as both ρ₀ and ρₘ,
-    /// producing an SSVI-equivalent surface. Call with pre-fitted ρ(θ) parameters
-    /// via [`EssviSurface::new()`] for full eSSVI with maturity-dependent correlation.
+    /// The Eq. 5.7 calendar no-arbitrage constraint on the shape exponent `a` is
+    /// enforced dynamically as γ varies during Stage 3 optimization.
     ///
     /// # Arguments
     /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
@@ -474,6 +474,8 @@ impl EssviSurface {
         const NM_MAX_ITER: usize = 300;
         const NM_DIAMETER_TOL: f64 = 1e-8;
         const NM_FVALUE_TOL: f64 = 1e-12;
+        const A_SCAN_STEPS: usize = 20;
+        const A_SCAN_MAX: f64 = 3.0;
 
         if tenors.len() < MIN_TENORS {
             return Err(VolSurfError::InvalidInput {
@@ -508,10 +510,10 @@ impl EssviSurface {
             }
         }
 
-        // Stage 1: per-tenor SVI calibration → thetas + rho estimates
+        // Stage 1: per-tenor SVI calibration → thetas + per-tenor rho estimates
         let n_tenors = tenors.len();
         let mut thetas = Vec::with_capacity(n_tenors);
-        let mut rho_sum = 0.0;
+        let mut rhos = Vec::with_capacity(n_tenors);
 
         for (i, market_vols) in market_data.iter().enumerate() {
             let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
@@ -525,11 +527,95 @@ impl EssviSurface {
                 })?;
             let theta = svi.variance(forwards[i])?.0;
             thetas.push(theta);
-            rho_sum += svi.rho();
+            rhos.push(svi.rho());
         }
 
-        let rho_avg = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
-        let one_minus_rho_sq = 1.0 - rho_avg * rho_avg;
+        let theta_max = *thetas.last().unwrap();
+        let xs: Vec<f64> = thetas.iter().map(|&t| t / theta_max).collect();
+
+        // Stage 2: fit rho(theta) = rho_0 + (rho_m - rho_0) * (theta/theta_max)^a
+        // For given (rho_0, rho_m), scan `a` values to minimize RSS vs per-tenor rhos.
+        let fit_a = |r0: f64, rm: f64| -> (f64, f64) {
+            let d = rm - r0;
+            if d.abs() < 1e-14 {
+                let rss: f64 = rhos.iter().map(|&r| (r0 - r).powi(2)).sum();
+                return (0.0, rss);
+            }
+            let mut best_a = 0.5;
+            let mut best_rss = f64::MAX;
+            for ia in 0..=A_SCAN_STEPS {
+                let a = A_SCAN_MAX * (ia as f64) / (A_SCAN_STEPS as f64);
+                let rss: f64 = rhos
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &rho_obs)| {
+                        let rho_pred = r0 + d * xs[i].powf(a);
+                        (rho_pred - rho_obs).powi(2)
+                    })
+                    .sum();
+                if rss < best_rss {
+                    best_rss = rss;
+                    best_a = a;
+                }
+            }
+            (best_a, best_rss)
+        };
+
+        // Adaptive grid range centered on observed rhos
+        let rho_min = rhos.iter().cloned().fold(f64::INFINITY, f64::min);
+        let rho_max = rhos.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let rho_lo = (rho_min - 0.15).max(-0.99);
+        let rho_hi = (rho_max + 0.15).min(0.99);
+
+        let mut best_r0 = rho_min.clamp(-0.999, 0.999);
+        let mut best_rm = rho_max.clamp(-0.999, 0.999);
+        let mut best_rho_rss = f64::MAX;
+
+        for ir0 in 0..GRID_N {
+            let r0 = rho_lo + (rho_hi - rho_lo) * (ir0 as f64) / ((GRID_N - 1) as f64);
+            for irm in 0..GRID_N {
+                let rm = rho_lo + (rho_hi - rho_lo) * (irm as f64) / ((GRID_N - 1) as f64);
+                let (_, rss) = fit_a(r0, rm);
+                if rss < best_rho_rss {
+                    best_rho_rss = rss;
+                    best_r0 = r0;
+                    best_rm = rm;
+                }
+            }
+        }
+
+        // Refine (rho_0, rho_m) with Nelder-Mead
+        let rho_step = (rho_hi - rho_lo) / (GRID_N as f64) * 0.5;
+        let nm_config = crate::optim::NelderMeadConfig {
+            max_iter: NM_MAX_ITER,
+            diameter_tol: NM_DIAMETER_TOL,
+            fvalue_tol: NM_FVALUE_TOL,
+        };
+        let nm_rho = crate::optim::nelder_mead_2d(
+            |r0, rm| {
+                if r0.abs() >= 0.999 || rm.abs() >= 0.999 || !r0.is_finite() || !rm.is_finite() {
+                    return f64::MAX;
+                }
+                fit_a(r0, rm).1
+            },
+            best_r0,
+            best_rm,
+            rho_step,
+            rho_step,
+            &nm_config,
+        );
+
+        let opt_rho_0 = nm_rho.x.clamp(-0.999, 0.999);
+        let opt_rho_m = nm_rho.y.clamp(-0.999, 0.999);
+        let (opt_a_fit, _) = fit_a(opt_rho_0, opt_rho_m);
+
+        #[cfg(feature = "logging")]
+        tracing::debug!(
+            rho_0 = opt_rho_0,
+            rho_m = opt_rho_m,
+            a = opt_a_fit,
+            "eSSVI Stage 2 rho(theta) fit complete"
+        );
 
         // Observation triples: (theta, log_moneyness, total_variance)
         let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
@@ -541,21 +627,42 @@ impl EssviSurface {
             }
         }
 
-        // Stage 3: optimize (eta, gamma) via grid + Nelder-Mead
+        // Stage 3: optimize (eta, gamma) with fitted rho(theta).
+        // Eq. 5.7 enforced dynamically: a_eff = min(a_fitted, a_max(gamma)).
+        let rho_diff = opt_rho_m - opt_rho_0;
         let objective = |eta: f64, gamma: f64| -> f64 {
             if eta <= 0.0 || !eta.is_finite() || !gamma.is_finite() || !(0.0..=1.0).contains(&gamma)
             {
                 return f64::MAX;
             }
+            let a_eff = if rho_diff.abs() > 1e-14 {
+                let gamma_thm = 1.0 - gamma;
+                let a_mx = if rho_diff > 0.0 {
+                    gamma_thm * (1.0 - opt_rho_m) / rho_diff
+                } else {
+                    gamma_thm * (1.0 + opt_rho_m) / (-rho_diff)
+                };
+                if a_mx < 0.0 {
+                    return f64::MAX;
+                }
+                opt_a_fit.min(a_mx)
+            } else {
+                opt_a_fit
+            };
+
             let mut rss = 0.0;
             for &(theta, k, w_obs) in &all_points {
                 let theta_c = theta.max(1e-10);
+                let t_ratio = (theta_c / theta_max).clamp(0.0, 1.0);
+                let rho = (opt_rho_0 + (opt_rho_m - opt_rho_0) * t_ratio.powf(a_eff))
+                    .clamp(-0.999, 0.999);
                 let phi = eta / theta_c.powf(gamma);
                 let phi_k = phi * k;
+                let one_minus_rho_sq = 1.0 - rho * rho;
                 let w_pred = (theta / 2.0)
                     * (1.0
-                        + rho_avg * phi_k
-                        + ((phi_k + rho_avg).powi(2) + one_minus_rho_sq).sqrt());
+                        + rho * phi_k
+                        + ((phi_k + rho).powi(2) + one_minus_rho_sq).sqrt());
                 if !w_pred.is_finite() {
                     return f64::MAX;
                 }
@@ -597,17 +704,25 @@ impl EssviSurface {
         let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
         let step_gamma = (gamma_hi - gamma_lo) / (GRID_N as f64) * 0.5;
 
-        let nm_config = crate::optim::NelderMeadConfig {
-            max_iter: NM_MAX_ITER,
-            diameter_tol: NM_DIAMETER_TOL,
-            fvalue_tol: NM_FVALUE_TOL,
-        };
         let nm_result = crate::optim::nelder_mead_2d(
             objective, best_eta, best_gamma, step_eta, step_gamma, &nm_config,
         );
 
         let opt_eta = nm_result.x.max(1e-6);
         let opt_gamma = nm_result.y.clamp(0.0, 1.0);
+
+        // Final a: enforce Eq. 5.7 with the optimized gamma
+        let final_a = if rho_diff.abs() > 1e-14 {
+            let gamma_thm = 1.0 - opt_gamma;
+            let a_mx = if rho_diff > 0.0 {
+                gamma_thm * (1.0 - opt_rho_m) / rho_diff
+            } else {
+                gamma_thm * (1.0 + opt_rho_m) / (-rho_diff)
+            };
+            opt_a_fit.min(a_mx.max(0.0))
+        } else {
+            opt_a_fit
+        };
 
         let n_points = all_points.len();
         let rms = if n_points > 0 {
@@ -618,8 +733,9 @@ impl EssviSurface {
 
         #[cfg(feature = "logging")]
         tracing::debug!(
-            rho_0 = rho_avg,
-            rho_m = rho_avg,
+            rho_0 = opt_rho_0,
+            rho_m = opt_rho_m,
+            a = final_a,
             eta = opt_eta,
             gamma = opt_gamma,
             rms,
@@ -627,9 +743,9 @@ impl EssviSurface {
         );
 
         Self::new(
-            rho_avg,
-            rho_avg,
-            0.0,
+            opt_rho_0,
+            opt_rho_m,
+            final_a,
             opt_eta,
             opt_gamma,
             tenors.to_vec(),
