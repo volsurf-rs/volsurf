@@ -17,9 +17,10 @@ use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::ArbitrageReport;
 use crate::surface::VolSurface;
-use crate::surface::arbitrage::SurfaceDiagnostics;
-use crate::surface::ssvi::SsviSlice;
+use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
+use crate::surface::ssvi::{CALENDAR_CHECK_GRID_SIZE, SsviSlice, strike_grid};
 use crate::types::{Variance, Vol};
+use crate::validate::validate_positive;
 
 /// A single-tenor slice through an eSSVI surface.
 ///
@@ -169,17 +170,207 @@ impl SmileSection for EssviSlice {
     }
 }
 
-/// Extended SSVI surface with calendar-spread no-arbitrage guarantees.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Extended SSVI surface with maturity-dependent correlation ρ(θ).
+///
+/// eSSVI extends Gatheral-Jacquier's SSVI by replacing the global correlation
+/// parameter ρ with a parametric family ρ(θ) that transitions smoothly from
+/// an initial skew ρ₀ (short maturities) to a long-term skew ρₘ.
+///
+/// # Parametric family (Hendriks-Martini 2019, Eq. 3.1)
+///
+/// ```text
+/// ρ(θ) = ρ₀ + (ρₘ − ρ₀) · (θ / θ_max)^a
+/// ```
+///
+/// # Construction
+///
+/// ```
+/// use volsurf::surface::EssviSurface;
+///
+/// let surface = EssviSurface::new(
+///     -0.4,                              // rho_0: short-term skew
+///     -0.2,                              // rho_m: long-term skew
+///     0.5,                               // a: shape parameter
+///     0.5,                               // eta: smile amplitude
+///     0.5,                               // gamma: term decay
+///     vec![0.25, 0.5, 1.0],             // tenors (years)
+///     vec![100.0, 100.0, 100.0],        // forward prices
+///     vec![0.04, 0.08, 0.16],           // ATM total variances (theta)
+/// ).unwrap();
+/// ```
+///
+/// # References
+/// - Hendriks, S. & Martini, C. "The Extended SSVI Volatility Surface" (2019)
+/// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
+#[derive(Debug, Clone)]
 pub struct EssviSurface {
-    _placeholder: (),
+    rho_0: f64,
+    rho_m: f64,
+    a: f64,
+    eta: f64,
+    gamma: f64,
+    tenors: Vec<f64>,
+    forwards: Vec<f64>,
+    thetas: Vec<f64>,
+    theta_max: f64,
 }
 
 impl EssviSurface {
+    /// Create an eSSVI surface from parameters and per-tenor data.
+    ///
+    /// # Arguments
+    /// * `rho_0` — Initial correlation at θ ≈ 0, must be in (−1, 1)
+    /// * `rho_m` — Mature correlation at θ = θ_max, must be in (−1, 1)
+    /// * `a` — Shape exponent for ρ(θ) power law, must be non-negative
+    /// * `eta` — Smile amplitude, must be positive
+    /// * `gamma` — Term structure decay, must be in \[0, 1\]
+    /// * `tenors` — Expiries in years, strictly increasing, all positive
+    /// * `forwards` — Forward prices at each tenor, all positive
+    /// * `thetas` — ATM total variances θ_i, strictly increasing, all positive
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] if any parameter is invalid,
+    /// including violation of the Hendriks-Martini Eq. 5.7 constraint on `a`.
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
+        rho_0: f64,
+        rho_m: f64,
+        a: f64,
+        eta: f64,
+        gamma: f64,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+        thetas: Vec<f64>,
+    ) -> error::Result<Self> {
+        if rho_0.abs() >= 1.0 || rho_0.is_nan() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("|rho_0| must be less than 1, got {rho_0}"),
+            });
+        }
+        if rho_m.abs() >= 1.0 || rho_m.is_nan() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("|rho_m| must be less than 1, got {rho_m}"),
+            });
+        }
+        if !a.is_finite() || a < 0.0 {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("a must be non-negative and finite, got {a}"),
+            });
+        }
+        validate_positive(eta, "eta")?;
+        if !gamma.is_finite() || !(0.0..=1.0).contains(&gamma) {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("gamma must be in [0, 1], got {gamma}"),
+            });
+        }
+
+        if tenors.is_empty() {
+            return Err(VolSurfError::InvalidInput {
+                message: "at least one tenor is required".into(),
+            });
+        }
+        if tenors.len() != forwards.len() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "tenors and forwards must have the same length, got {} and {}",
+                    tenors.len(),
+                    forwards.len()
+                ),
+            });
+        }
+        if tenors.len() != thetas.len() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "tenors and thetas must have the same length, got {} and {}",
+                    tenors.len(),
+                    thetas.len()
+                ),
+            });
+        }
+
+        for (i, &t) in tenors.iter().enumerate() {
+            if !t.is_finite() || t <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("tenors must be positive and finite, got tenors[{i}]={t}"),
+                });
+            }
+        }
+        for (i, &f) in forwards.iter().enumerate() {
+            if !f.is_finite() || f <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!(
+                        "forwards must be positive and finite, got forwards[{i}]={f}"
+                    ),
+                });
+            }
+        }
+        for (i, &th) in thetas.iter().enumerate() {
+            if !th.is_finite() || th <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("thetas must be positive and finite, got thetas[{i}]={th}"),
+                });
+            }
+        }
+
+        for w in tenors.windows(2) {
+            if w[1] <= w[0] {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!(
+                        "tenors must be strictly increasing, but {} >= {}",
+                        w[0], w[1]
+                    ),
+                });
+            }
+        }
+        for w in thetas.windows(2) {
+            if w[1] <= w[0] {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!(
+                        "thetas must be strictly increasing, but {} >= {}",
+                        w[0], w[1]
+                    ),
+                });
+            }
+        }
+
+        let theta_max = *thetas.last().unwrap();
+
+        // Hendriks-Martini Eq. 5.7: upper bound on `a` for calendar no-arb.
+        // gamma_thm = 1 - gamma for the power-law phi.
+        let rho_diff = rho_m - rho_0;
+        if rho_diff.abs() > 1e-14 {
+            let gamma_thm = 1.0 - gamma;
+            let a_max = if rho_diff > 0.0 {
+                gamma_thm * (1.0 - rho_m) / rho_diff
+            } else {
+                gamma_thm * (1.0 + rho_m) / (-rho_diff)
+            };
+            if a > a_max + 1e-12 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!(
+                        "a={a} exceeds calendar no-arb bound {a_max:.6} (Eq. 5.7)"
+                    ),
+                });
+            }
+        }
+
+        Ok(Self {
+            rho_0,
+            rho_m,
+            a,
+            eta,
+            gamma,
+            tenors,
+            forwards,
+            thetas,
+            theta_max,
+        })
+    }
+
     /// Calibrate an eSSVI surface from market data.
     ///
     /// # Errors
-    /// Returns [`VolSurfError::CalibrationError`] if calibration fails.
+    /// Returns [`VolSurfError::NumericalError`] — not yet implemented.
     pub fn calibrate(
         _market_data: &[Vec<(f64, f64)>],
         _tenors: &[f64],
@@ -189,33 +380,168 @@ impl EssviSurface {
             message: "not yet implemented".to_string(),
         })
     }
+
+    /// Maturity-dependent correlation ρ(θ) (Hendriks-Martini 2019, Eq. 3.1).
+    ///
+    /// ```text
+    /// ρ(θ) = ρ₀ + (ρₘ − ρ₀) · (θ / θ_max)^a
+    /// ```
+    ///
+    /// Result is clamped to (−0.999, 0.999).
+    pub fn rho(&self, theta: f64) -> f64 {
+        let t = (theta / self.theta_max).clamp(0.0, 1.0);
+        let r = self.rho_0 + (self.rho_m - self.rho_0) * t.powf(self.a);
+        r.clamp(-0.999, 0.999)
+    }
+
+    pub fn rho_0(&self) -> f64 {
+        self.rho_0
+    }
+
+    pub fn rho_m(&self) -> f64 {
+        self.rho_m
+    }
+
+    pub fn a(&self) -> f64 {
+        self.a
+    }
+
+    pub fn eta(&self) -> f64 {
+        self.eta
+    }
+
+    pub fn gamma(&self) -> f64 {
+        self.gamma
+    }
+
+    pub fn tenors(&self) -> &[f64] {
+        &self.tenors
+    }
+
+    pub fn forwards(&self) -> &[f64] {
+        &self.forwards
+    }
+
+    pub fn thetas(&self) -> &[f64] {
+        &self.thetas
+    }
+
+    pub fn theta_max(&self) -> f64 {
+        self.theta_max
+    }
+
+    /// Evaluate eSSVI total variance at `(θ, k)` with maturity-dependent ρ.
+    pub(crate) fn total_variance_at(&self, theta: f64, k: f64) -> f64 {
+        let rho = self.rho(theta);
+        let phi = self.eta / theta.powf(self.gamma);
+        let phi_k = phi * k;
+        let one_minus_rho_sq = 1.0 - rho * rho;
+        (theta / 2.0)
+            * (1.0 + rho * phi_k + ((phi_k + rho).powi(2) + one_minus_rho_sq).sqrt())
+    }
+
+    /// Interpolate `(θ, F)` at an arbitrary expiry.
+    pub(crate) fn theta_and_forward_at(&self, expiry: f64) -> (f64, f64) {
+        let n = self.tenors.len();
+
+        for (i, &t) in self.tenors.iter().enumerate() {
+            if (expiry - t).abs() < 1e-10 {
+                return (self.thetas[i], self.forwards[i]);
+            }
+        }
+
+        if expiry < self.tenors[0] {
+            let theta = self.thetas[0] * expiry / self.tenors[0];
+            return (theta, self.forwards[0]);
+        }
+
+        if expiry > self.tenors[n - 1] {
+            let theta = self.thetas[n - 1] * expiry / self.tenors[n - 1];
+            return (theta, self.forwards[n - 1]);
+        }
+
+        let right = self.tenors.partition_point(|&t| t < expiry);
+        let left = right - 1;
+        let alpha = (expiry - self.tenors[left]) / (self.tenors[right] - self.tenors[left]);
+        let theta = (1.0 - alpha) * self.thetas[left] + alpha * self.thetas[right];
+        let forward = (1.0 - alpha) * self.forwards[left] + alpha * self.forwards[right];
+        (theta, forward)
+    }
 }
 
 impl VolSurface for EssviSurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
-        let _ = (expiry, strike);
-        Err(VolSurfError::NumericalError {
-            message: "not yet implemented".to_string(),
-        })
+        validate_positive(expiry, "expiry")?;
+        let var = self.black_variance(expiry, strike)?;
+        Ok(Vol((var.0 / expiry).sqrt()))
     }
 
     fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
-        let _ = (expiry, strike);
-        Err(VolSurfError::NumericalError {
-            message: "not yet implemented".to_string(),
-        })
+        validate_positive(expiry, "expiry")?;
+        validate_positive(strike, "strike")?;
+        let (theta, forward) = self.theta_and_forward_at(expiry);
+        let k = (strike / forward).ln();
+        let w = self.total_variance_at(theta, k);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("eSSVI total variance is negative: w({k}) = {w}"),
+            });
+        }
+        Ok(Variance(w))
     }
 
     fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
-        let _ = expiry;
-        Err(VolSurfError::NumericalError {
-            message: "not yet implemented".to_string(),
-        })
+        validate_positive(expiry, "expiry")?;
+        let (theta, forward) = self.theta_and_forward_at(expiry);
+        let rho = self.rho(theta);
+        let slice = EssviSlice::new(forward, expiry, rho, self.eta, self.gamma, theta)?;
+        Ok(Box::new(slice))
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        Err(VolSurfError::NumericalError {
-            message: "not yet implemented".to_string(),
+        let mut smile_reports = Vec::with_capacity(self.tenors.len());
+        for (i, &tenor) in self.tenors.iter().enumerate() {
+            let rho = self.rho(self.thetas[i]);
+            let slice = EssviSlice::new(
+                self.forwards[i],
+                tenor,
+                rho,
+                self.eta,
+                self.gamma,
+                self.thetas[i],
+            )?;
+            smile_reports.push(slice.is_arbitrage_free()?);
+        }
+
+        let mut calendar_violations = Vec::new();
+        for i in 0..self.tenors.len().saturating_sub(1) {
+            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
+            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
+
+            for &strike in &grid {
+                let k_short = (strike / self.forwards[i]).ln();
+                let k_long = (strike / self.forwards[i + 1]).ln();
+                let w_short = self.total_variance_at(self.thetas[i], k_short);
+                let w_long = self.total_variance_at(self.thetas[i + 1], k_long);
+                if w_long < w_short - 1e-10 {
+                    calendar_violations.push(CalendarViolation {
+                        strike,
+                        tenor_short: self.tenors[i],
+                        tenor_long: self.tenors[i + 1],
+                        variance_short: w_short,
+                        variance_long: w_long,
+                    });
+                }
+            }
+        }
+
+        let is_free =
+            smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+
+        Ok(SurfaceDiagnostics {
+            smile_reports,
+            calendar_violations,
+            is_free,
         })
     }
 }
