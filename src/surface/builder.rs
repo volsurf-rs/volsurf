@@ -857,7 +857,7 @@ mod tests {
 
     #[test]
     fn build_with_dividend_yield() {
-        use crate::smile::SmileSection;
+
         let surface = SurfaceBuilder::new()
             .spot(100.0)
             .rate(0.05)
@@ -873,7 +873,7 @@ mod tests {
 
     #[test]
     fn dividend_yield_zero_matches_no_dividend_yield() {
-        use crate::smile::SmileSection;
+
         let surface_no_q = SurfaceBuilder::new()
             .spot(100.0)
             .rate(0.05)
@@ -917,7 +917,7 @@ mod tests {
 
     #[test]
     fn add_tenor_with_forward_bypasses_forward_price() {
-        use crate::smile::SmileSection;
+
         let explicit_fwd = 50.0;
         let surface = SurfaceBuilder::new()
             .spot(100.0)
