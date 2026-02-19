@@ -511,6 +511,41 @@ impl EssviSurface {
         let forward = (1.0 - alpha) * self.forwards[left] + alpha * self.forwards[right];
         (theta, forward)
     }
+
+    /// Structural calendar no-arb check (Hendriks-Martini 2019, Thm 4.1).
+    ///
+    /// For power-law φ = η/θ^γ, the condition reduces to:
+    ///
+    /// ```text
+    /// |δ(θ) + ρ(θ)·γ_thm| ≤ γ_thm
+    /// ```
+    ///
+    /// where γ_thm = 1 − γ and δ(θ) = a·(ρₘ − ρ₀)·(θ/θ_max)^a.
+    ///
+    /// Returns violations at each stored tenor where the condition fails.
+    /// An empty vector means the surface is structurally calendar-arb-free.
+    pub fn calendar_check_structural(&self) -> Vec<CalendarViolation> {
+        let gamma_thm = 1.0 - self.gamma;
+        let mut violations = Vec::new();
+
+        for (i, &theta) in self.thetas.iter().enumerate() {
+            let rho = self.rho(theta);
+            let t = (theta / self.theta_max).clamp(0.0, 1.0);
+            let delta = self.a * (self.rho_m - self.rho_0) * t.powf(self.a);
+            let lhs = (delta + rho * gamma_thm).abs();
+
+            if lhs > gamma_thm + 1e-10 {
+                violations.push(CalendarViolation {
+                    strike: 0.0,
+                    tenor_short: self.tenors[i],
+                    tenor_long: self.tenors[i],
+                    variance_short: lhs,
+                    variance_long: gamma_thm,
+                });
+            }
+        }
+        violations
+    }
 }
 
 impl VolSurface for EssviSurface {
@@ -578,6 +613,9 @@ impl VolSurface for EssviSurface {
                 }
             }
         }
+
+        // Structural calendar check (Thm 4.1)
+        calendar_violations.extend(self.calendar_check_structural());
 
         let is_free =
             smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
