@@ -202,7 +202,8 @@ impl SmileSection for EssviSlice {
 /// # References
 /// - Hendriks, S. & Martini, C. "The Extended SSVI Volatility Surface" (2019)
 /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "EssviSurfaceRaw", into = "EssviSurfaceRaw")]
 pub struct EssviSurface {
     rho_0: f64,
     rho_m: f64,
@@ -213,6 +214,49 @@ pub struct EssviSurface {
     forwards: Vec<f64>,
     thetas: Vec<f64>,
     theta_max: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EssviSurfaceRaw {
+    rho_0: f64,
+    rho_m: f64,
+    a: f64,
+    eta: f64,
+    gamma: f64,
+    tenors: Vec<f64>,
+    forwards: Vec<f64>,
+    thetas: Vec<f64>,
+}
+
+impl TryFrom<EssviSurfaceRaw> for EssviSurface {
+    type Error = VolSurfError;
+    fn try_from(raw: EssviSurfaceRaw) -> Result<Self, Self::Error> {
+        Self::new(
+            raw.rho_0,
+            raw.rho_m,
+            raw.a,
+            raw.eta,
+            raw.gamma,
+            raw.tenors,
+            raw.forwards,
+            raw.thetas,
+        )
+    }
+}
+
+impl From<EssviSurface> for EssviSurfaceRaw {
+    fn from(s: EssviSurface) -> Self {
+        Self {
+            rho_0: s.rho_0,
+            rho_m: s.rho_m,
+            a: s.a,
+            eta: s.eta,
+            gamma: s.gamma,
+            tenors: s.tenors,
+            forwards: s.forwards,
+            thetas: s.thetas,
+        }
+    }
 }
 
 impl EssviSurface {
