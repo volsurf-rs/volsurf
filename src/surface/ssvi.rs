@@ -357,34 +357,7 @@ impl SsviSurface {
     /// - **Before first tenor**: flat vol extrapolation `θ(T) = θ₀ · T/T₀`.
     /// - **After last tenor**: flat vol extrapolation `θ(T) = θₙ · T/Tₙ`.
     pub(crate) fn theta_and_forward_at(&self, expiry: f64) -> (f64, f64) {
-        let n = self.tenors.len();
-
-        // Check exact match
-        for (i, &t) in self.tenors.iter().enumerate() {
-            if (expiry - t).abs() < 1e-10 {
-                return (self.thetas[i], self.forwards[i]);
-            }
-        }
-
-        if expiry < self.tenors[0] {
-            // Flat vol extrapolation before first tenor
-            let theta = self.thetas[0] * expiry / self.tenors[0];
-            return (theta, self.forwards[0]);
-        }
-
-        if expiry > self.tenors[n - 1] {
-            // Flat vol extrapolation after last tenor
-            let theta = self.thetas[n - 1] * expiry / self.tenors[n - 1];
-            return (theta, self.forwards[n - 1]);
-        }
-
-        // Between tenors: linear interpolation
-        let right = self.tenors.partition_point(|&t| t < expiry);
-        let left = right - 1;
-        let alpha = (expiry - self.tenors[left]) / (self.tenors[right] - self.tenors[left]);
-        let theta = (1.0 - alpha) * self.thetas[left] + alpha * self.thetas[right];
-        let forward = (1.0 - alpha) * self.forwards[left] + alpha * self.forwards[right];
-        (theta, forward)
+        super::interp::interpolate_theta_forward(&self.tenors, &self.thetas, &self.forwards, expiry)
     }
 
     /// Calibrate an SSVI surface from multi-tenor market data.
@@ -614,7 +587,7 @@ impl SsviSurface {
 }
 
 /// Number of strikes for calendar arbitrage checks.
-const CALENDAR_CHECK_GRID_SIZE: usize = 41;
+pub(crate) const CALENDAR_CHECK_GRID_SIZE: usize = 41;
 
 impl VolSurface for SsviSurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
@@ -692,7 +665,7 @@ impl VolSurface for SsviSurface {
     }
 }
 
-fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
+pub(crate) fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
     let ln_lo = (0.5_f64).ln();
     let ln_hi = (2.0_f64).ln();
     let step = (ln_hi - ln_lo) / (n - 1) as f64;
@@ -1277,8 +1250,9 @@ mod tests {
         let (theta, fwd) = s.theta_and_forward_at(0.75);
         // alpha = (0.75 - 0.5) / (1.0 - 0.5) = 0.5
         // theta = 0.5 * 0.08 + 0.5 * 0.16 = 0.12
+        // Log-linear with equal forwards: exp(ln(100)) ≈ 100 (within FP roundtrip)
         assert_abs_diff_eq!(theta, 0.12, epsilon = 1e-14);
-        assert_abs_diff_eq!(fwd, 100.0, epsilon = 1e-14);
+        assert_abs_diff_eq!(fwd, 100.0, epsilon = 1e-12);
     }
 
     #[test]
@@ -1311,9 +1285,26 @@ mod tests {
         )
         .unwrap();
         // At T=0.75: alpha = (0.75 - 0.5) / (1.0 - 0.5) = 0.5
+        // Log-linear: F = exp(0.5*ln(100) + 0.5*ln(105)) = sqrt(100*105)
         let (theta, fwd) = s.theta_and_forward_at(0.75);
         assert_abs_diff_eq!(theta, 0.12, epsilon = 1e-14);
-        assert_abs_diff_eq!(fwd, 102.5, epsilon = 1e-14);
+        assert_abs_diff_eq!(fwd, (100.0_f64 * 105.0).sqrt(), epsilon = 1e-10);
+    }
+
+    #[test]
+    fn theta_forward_log_linear_geometric_mean() {
+        let s = SsviSurface::new(
+            -0.3,
+            0.5,
+            0.5,
+            vec![1.0, 2.0],
+            vec![100.0, 400.0],
+            vec![0.04, 0.08],
+        )
+        .unwrap();
+        // Midpoint: alpha = 0.5, log-linear → F = sqrt(100*400) = 200 (not 250)
+        let (_, fwd) = s.theta_and_forward_at(1.5);
+        assert_abs_diff_eq!(fwd, 200.0, epsilon = 1e-10);
     }
 
     // ========== Serde round-trip ==========
