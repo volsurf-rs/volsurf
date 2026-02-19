@@ -30,9 +30,9 @@ pub fn moneyness(strike: f64, forward: f64) -> f64 {
     strike / forward
 }
 
-/// Compute forward price from spot: F = S · exp(r · T).
-pub fn forward_price(spot: f64, rate: f64, expiry: f64) -> f64 {
-    spot * (rate * expiry).exp()
+/// Compute forward price from spot: F = S · exp((r − q) · T).
+pub fn forward_price(spot: f64, rate: f64, dividend_yield: f64, expiry: f64) -> f64 {
+    spot * ((rate - dividend_yield) * expiry).exp()
 }
 
 #[cfg(test)]
@@ -42,8 +42,8 @@ mod tests {
 
     #[test]
     fn forward_price_known_value() {
-        // spot=100, rate=0.05, expiry=1.0 → F = 100 * e^0.05 ≈ 105.127
-        let f = forward_price(100.0, 0.05, 1.0);
+        // spot=100, rate=0.05, q=0, expiry=1.0 → F = 100 * e^0.05 ≈ 105.127
+        let f = forward_price(100.0, 0.05, 0.0, 1.0);
         let expected = 100.0 * (0.05_f64).exp();
         assert_abs_diff_eq!(f, expected, epsilon = 1e-10);
         assert_abs_diff_eq!(f, 105.127109637602, epsilon = 1e-10);
@@ -51,15 +51,15 @@ mod tests {
 
     #[test]
     fn forward_price_zero_rate() {
-        // Zero rate → forward equals spot
-        let f = forward_price(100.0, 0.0, 1.0);
+        // Zero rate, zero yield → forward equals spot
+        let f = forward_price(100.0, 0.0, 0.0, 1.0);
         assert_abs_diff_eq!(f, 100.0, epsilon = 1e-10);
     }
 
     #[test]
     fn forward_price_negative_rate() {
         // Negative rate → forward < spot (inverted curve)
-        let f = forward_price(100.0, -0.02, 1.0);
+        let f = forward_price(100.0, -0.02, 0.0, 1.0);
         let expected = 100.0 * (-0.02_f64).exp();
         assert_abs_diff_eq!(f, expected, epsilon = 1e-10);
         assert!(f < 100.0, "negative rate should produce forward < spot");
@@ -68,15 +68,15 @@ mod tests {
     #[test]
     fn forward_price_zero_expiry() {
         // Zero expiry → forward equals spot regardless of rate
-        let f = forward_price(100.0, 0.05, 0.0);
+        let f = forward_price(100.0, 0.05, 0.0, 0.0);
         assert_abs_diff_eq!(f, 100.0, epsilon = 1e-10);
     }
 
     #[test]
     fn forward_price_scales_with_expiry() {
         // Doubling expiry should compound the rate effect
-        let f1 = forward_price(100.0, 0.05, 1.0);
-        let f2 = forward_price(100.0, 0.05, 2.0);
+        let f1 = forward_price(100.0, 0.05, 0.0, 1.0);
+        let f2 = forward_price(100.0, 0.05, 0.0, 2.0);
         let expected_ratio = (0.05_f64).exp();
         assert_abs_diff_eq!(f2 / f1, expected_ratio, epsilon = 1e-10);
     }
@@ -222,9 +222,44 @@ mod tests {
 
     #[test]
     fn forward_price_nan_inputs() {
-        assert!(forward_price(f64::NAN, 0.05, 1.0).is_nan());
-        assert!(forward_price(100.0, f64::NAN, 1.0).is_nan());
-        assert!(forward_price(100.0, 0.05, f64::NAN).is_nan());
+        assert!(forward_price(f64::NAN, 0.05, 0.0, 1.0).is_nan());
+        assert!(forward_price(100.0, f64::NAN, 0.0, 1.0).is_nan());
+        assert!(forward_price(100.0, 0.05, f64::NAN, 1.0).is_nan());
+        assert!(forward_price(100.0, 0.05, 0.0, f64::NAN).is_nan());
+    }
+
+    #[test]
+    fn forward_price_positive_dividend_yield() {
+        // r=0.05, q=0.02 → F = 100 * exp(0.03) ≈ 103.045
+        let f = forward_price(100.0, 0.05, 0.02, 1.0);
+        let expected = 100.0 * (0.03_f64).exp();
+        assert_abs_diff_eq!(f, expected, epsilon = 1e-10);
+        assert!(f < forward_price(100.0, 0.05, 0.0, 1.0));
+    }
+
+    #[test]
+    fn forward_price_yield_equals_rate() {
+        // r = q → cost of carry is zero → F = S
+        let f = forward_price(100.0, 0.05, 0.05, 1.0);
+        assert_abs_diff_eq!(f, 100.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn forward_price_yield_exceeds_rate() {
+        // q > r → forward < spot (high-dividend stock)
+        let f = forward_price(100.0, 0.03, 0.05, 1.0);
+        let expected = 100.0 * (-0.02_f64).exp();
+        assert_abs_diff_eq!(f, expected, epsilon = 1e-10);
+        assert!(f < 100.0);
+    }
+
+    #[test]
+    fn forward_price_negative_dividend_yield() {
+        // Negative q (e.g. convenience yield on commodity) → higher forward
+        let f = forward_price(100.0, 0.05, -0.02, 1.0);
+        let expected = 100.0 * (0.07_f64).exp();
+        assert_abs_diff_eq!(f, expected, epsilon = 1e-10);
+        assert!(f > forward_price(100.0, 0.05, 0.0, 1.0));
     }
 
     // Gap #5: StickyKind enum

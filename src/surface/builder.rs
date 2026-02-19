@@ -88,6 +88,7 @@ pub enum SmileModel {
 pub struct SurfaceBuilder {
     spot: Option<f64>,
     rate: Option<f64>,
+    dividend_yield: Option<f64>,
     model: SmileModel,
     tenor_data: Vec<TenorData>,
 }
@@ -97,6 +98,7 @@ struct TenorData {
     expiry: f64,
     strikes: Vec<f64>,
     vols: Vec<f64>,
+    forward: Option<f64>,
 }
 
 impl SurfaceBuilder {
@@ -105,6 +107,7 @@ impl SurfaceBuilder {
         Self {
             spot: None,
             rate: None,
+            dividend_yield: None,
             model: SmileModel::default(),
             tenor_data: Vec::new(),
         }
@@ -130,6 +133,14 @@ impl SurfaceBuilder {
         self
     }
 
+    /// Set the continuous dividend yield q for forward calculation.
+    ///
+    /// Forward price becomes F = S · exp((r − q) · T). Default is 0.
+    pub fn dividend_yield(mut self, q: f64) -> Self {
+        self.dividend_yield = Some(q);
+        self
+    }
+
     /// Add market data for a tenor.
     ///
     /// `strikes` and `vols` must have the same length.
@@ -138,6 +149,28 @@ impl SurfaceBuilder {
             expiry,
             strikes: strikes.to_vec(),
             vols: vols.to_vec(),
+            forward: None,
+        });
+        self
+    }
+
+    /// Add market data for a tenor with an explicit forward price.
+    ///
+    /// Bypasses the built-in F = S · exp((r − q) · T) calculation for this
+    /// tenor. Use for futures options where the forward is the futures price,
+    /// or when you have a better forward estimate (e.g. from put-call parity).
+    pub fn add_tenor_with_forward(
+        mut self,
+        expiry: f64,
+        strikes: &[f64],
+        vols: &[f64],
+        forward: f64,
+    ) -> Self {
+        self.tenor_data.push(TenorData {
+            expiry,
+            strikes: strikes.to_vec(),
+            vols: vols.to_vec(),
+            forward: Some(forward),
         });
         self
     }
@@ -167,8 +200,11 @@ impl SurfaceBuilder {
             message: "risk-free rate is required".into(),
         })?;
 
+        let q = self.dividend_yield.unwrap_or(0.0);
+
         validate_positive(spot, "spot")?;
         validate_finite(rate, "rate")?;
+        validate_finite(q, "dividend_yield")?;
         if self.tenor_data.is_empty() {
             return Err(VolSurfError::InvalidInput {
                 message: "at least one tenor is required".into(),
@@ -220,7 +256,12 @@ impl SurfaceBuilder {
                 });
             }
 
-            let forward = conventions::forward_price(spot, rate, tenor.expiry);
+            if let Some(fwd) = tenor.forward {
+                validate_positive(fwd, "per-tenor forward")?;
+            }
+            let forward = tenor
+                .forward
+                .unwrap_or_else(|| conventions::forward_price(spot, rate, q, tenor.expiry));
 
             let smile: Box<dyn SmileSection> = match self.model {
                 SmileModel::Svi => {
@@ -812,5 +853,125 @@ mod tests {
             result.is_ok(),
             "beta=1 (lognormal SABR) should build successfully"
         );
+    }
+
+    #[test]
+    fn build_with_dividend_yield() {
+        use crate::smile::SmileSection;
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .dividend_yield(0.02)
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+
+        let smile = surface.smile_at(1.0).unwrap();
+        let expected_fwd = 100.0 * (0.03_f64).exp();
+        assert_abs_diff_eq!(smile.forward(), expected_fwd, epsilon = 0.5);
+    }
+
+    #[test]
+    fn dividend_yield_zero_matches_no_dividend_yield() {
+        use crate::smile::SmileSection;
+        let surface_no_q = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+        let surface_q0 = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .dividend_yield(0.0)
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+
+        let fwd_no_q = surface_no_q.smile_at(1.0).unwrap().forward();
+        let fwd_q0 = surface_q0.smile_at(1.0).unwrap().forward();
+        assert_abs_diff_eq!(fwd_no_q, fwd_q0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn nan_dividend_yield_returns_invalid_input() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .dividend_yield(f64::NAN)
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn inf_dividend_yield_returns_invalid_input() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .dividend_yield(f64::INFINITY)
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn add_tenor_with_forward_bypasses_forward_price() {
+        use crate::smile::SmileSection;
+        let explicit_fwd = 50.0;
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor_with_forward(1.0, &sample_strikes(), &sample_vols(), explicit_fwd)
+            .build()
+            .unwrap();
+
+        let smile = surface.smile_at(1.0).unwrap();
+        // Should use the explicit 50.0, not 100*exp(0.05) ≈ 105.13
+        assert_abs_diff_eq!(smile.forward(), explicit_fwd, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn add_tenor_with_forward_zero_returns_invalid_input() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor_with_forward(1.0, &sample_strikes(), &sample_vols(), 0.0)
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn add_tenor_with_forward_negative_returns_invalid_input() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor_with_forward(1.0, &sample_strikes(), &sample_vols(), -50.0)
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn add_tenor_with_forward_nan_returns_invalid_input() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor_with_forward(1.0, &sample_strikes(), &sample_vols(), f64::NAN)
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn mixed_add_tenor_and_add_tenor_with_forward() {
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .add_tenor_with_forward(1.0, &sample_strikes(), &sample_vols(), 105.0)
+            .build()
+            .unwrap();
+
+        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        assert!(vol.0 > 0.0 && vol.0 < 1.0);
     }
 }
