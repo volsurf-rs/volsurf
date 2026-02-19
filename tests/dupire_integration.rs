@@ -103,9 +103,8 @@ fn deep_otm_no_panic() {
     let dupire = DupireLocalVol::new(surface);
 
     for &k in &[50.0, 200.0] {
-        match dupire.local_vol(0.5, k) {
-            Ok(v) => assert!(v.0.is_finite(), "non-finite at K={k}: {}", v.0),
-            Err(_) => {} // graceful error is fine for deep OTM
+        if let Ok(v) = dupire.local_vol(0.5, k) {
+            assert!(v.0.is_finite(), "non-finite at K={k}: {}", v.0);
         }
     }
 }
