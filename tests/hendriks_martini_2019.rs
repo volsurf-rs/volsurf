@@ -426,3 +426,68 @@ fn paper_surface_atm_variance_matches_thetas() {
         );
     }
 }
+
+#[test]
+fn calibrate_round_trip_paper_params() {
+    let original = paper_surface();
+    let tenors = djx_tenors();
+    let forwards = djx_forwards();
+    let strikes: Vec<Vec<f64>> = forwards
+        .iter()
+        .map(|&f| (0..15).map(|i| f * 0.7 + f * 0.04 * i as f64).collect())
+        .collect();
+    let market_data: Vec<Vec<(f64, f64)>> = tenors
+        .iter()
+        .zip(strikes.iter())
+        .map(|(&t, ks)| {
+            ks.iter()
+                .map(|&k| (k, original.black_vol(t, k).unwrap().0))
+                .collect()
+        })
+        .collect();
+
+    let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+    let mut total_rss = 0.0;
+    let mut n = 0;
+    for (i, &t) in tenors.iter().enumerate() {
+        for &(strike, vol_obs) in &market_data[i] {
+            let vol_fit = calibrated.black_vol(t, strike).unwrap().0;
+            total_rss += (vol_fit - vol_obs).powi(2);
+            n += 1;
+        }
+    }
+    let rms = (total_rss / n as f64).sqrt();
+    assert!(
+        rms < 0.005,
+        "paper params round-trip RMS {rms} should be < 0.005"
+    );
+}
+
+#[test]
+fn calibrate_paper_structural_check() {
+    let original = paper_surface();
+    let tenors = djx_tenors();
+    let forwards = djx_forwards();
+    let strikes: Vec<Vec<f64>> = forwards
+        .iter()
+        .map(|&f| (0..15).map(|i| f * 0.7 + f * 0.04 * i as f64).collect())
+        .collect();
+    let market_data: Vec<Vec<(f64, f64)>> = tenors
+        .iter()
+        .zip(strikes.iter())
+        .map(|(&t, ks)| {
+            ks.iter()
+                .map(|&k| (k, original.black_vol(t, k).unwrap().0))
+                .collect()
+        })
+        .collect();
+
+    let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+    let violations = calibrated.calendar_check_structural();
+    assert!(
+        violations.is_empty(),
+        "calibrated DJX surface should pass structural check, got {} violations",
+        violations.len()
+    );
+}
