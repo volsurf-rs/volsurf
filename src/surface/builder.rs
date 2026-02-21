@@ -24,6 +24,9 @@ use crate::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use crate::surface::piecewise::PiecewiseSurface;
 use crate::validate::{validate_finite, validate_positive};
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 /// Smile model to use when calibrating each tenor.
 ///
 /// Different models have different trade-offs:
@@ -211,10 +214,6 @@ impl SurfaceBuilder {
             });
         }
 
-        // Per-tenor validation, forward calculation, and calibration
-        let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> =
-            Vec::with_capacity(self.tenor_data.len());
-
         let min_strikes = match self.model {
             SmileModel::Svi => 5,
             SmileModel::CubicSpline => 3,
@@ -229,78 +228,97 @@ impl SurfaceBuilder {
             });
         }
 
-        for tenor in &self.tenor_data {
-            if tenor.expiry <= 0.0 || !tenor.expiry.is_finite() {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("expiry must be positive and finite, got {}", tenor.expiry),
-                });
-            }
-            if tenor.strikes.len() != tenor.vols.len() {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "strikes ({}) and vols ({}) must have the same length for tenor {}",
-                        tenor.strikes.len(),
-                        tenor.vols.len(),
-                        tenor.expiry
-                    ),
-                });
-            }
-            if tenor.strikes.len() < min_strikes {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "at least {min_strikes} strikes required per tenor (model: {:?}), got {} for tenor {}",
-                        self.model,
-                        tenor.strikes.len(),
-                        tenor.expiry
-                    ),
-                });
-            }
+        let model = self.model;
+        let calibrate_tenor =
+            |tenor: &TenorData| -> crate::error::Result<(f64, Box<dyn SmileSection>)> {
+                if tenor.expiry <= 0.0 || !tenor.expiry.is_finite() {
+                    return Err(VolSurfError::InvalidInput {
+                        message: format!(
+                            "expiry must be positive and finite, got {}",
+                            tenor.expiry
+                        ),
+                    });
+                }
+                if tenor.strikes.len() != tenor.vols.len() {
+                    return Err(VolSurfError::InvalidInput {
+                        message: format!(
+                            "strikes ({}) and vols ({}) must have the same length for tenor {}",
+                            tenor.strikes.len(),
+                            tenor.vols.len(),
+                            tenor.expiry
+                        ),
+                    });
+                }
+                if tenor.strikes.len() < min_strikes {
+                    return Err(VolSurfError::InvalidInput {
+                        message: format!(
+                            "at least {min_strikes} strikes required per tenor (model: {model:?}), got {} for tenor {}",
+                            tenor.strikes.len(),
+                            tenor.expiry
+                        ),
+                    });
+                }
 
-            if let Some(fwd) = tenor.forward {
-                validate_positive(fwd, "per-tenor forward")?;
-            }
-            let forward = tenor
-                .forward
-                .unwrap_or_else(|| conventions::forward_price(spot, rate, q, tenor.expiry));
+                if let Some(fwd) = tenor.forward {
+                    validate_positive(fwd, "per-tenor forward")?;
+                }
+                let forward = tenor
+                    .forward
+                    .unwrap_or_else(|| conventions::forward_price(spot, rate, q, tenor.expiry));
 
-            let smile: Box<dyn SmileSection> = match self.model {
-                SmileModel::Svi => {
-                    let market_vols: Vec<(f64, f64)> = tenor
-                        .strikes
-                        .iter()
-                        .zip(tenor.vols.iter())
-                        .map(|(&k, &v)| (k, v))
-                        .collect();
-                    let svi = SviSmile::calibrate(forward, tenor.expiry, &market_vols)?;
-                    Box::new(svi)
-                }
-                SmileModel::CubicSpline => {
-                    // Sort strikes and convert vols to total variances
-                    let mut pairs: Vec<(f64, f64)> = tenor
-                        .strikes
-                        .iter()
-                        .zip(tenor.vols.iter())
-                        .map(|(&k, &v)| (k, v * v * tenor.expiry))
-                        .collect();
-                    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
-                    let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
-                    let spline = SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
-                    Box::new(spline)
-                }
-                SmileModel::Sabr { beta } => {
-                    let market_vols: Vec<(f64, f64)> = tenor
-                        .strikes
-                        .iter()
-                        .zip(tenor.vols.iter())
-                        .map(|(&k, &v)| (k, v))
-                        .collect();
-                    let sabr = SabrSmile::calibrate(forward, tenor.expiry, beta, &market_vols)?;
-                    Box::new(sabr)
-                }
+                let smile: Box<dyn SmileSection> = match model {
+                    SmileModel::Svi => {
+                        let market_vols: Vec<(f64, f64)> = tenor
+                            .strikes
+                            .iter()
+                            .zip(tenor.vols.iter())
+                            .map(|(&k, &v)| (k, v))
+                            .collect();
+                        let svi = SviSmile::calibrate(forward, tenor.expiry, &market_vols)?;
+                        Box::new(svi)
+                    }
+                    SmileModel::CubicSpline => {
+                        let mut pairs: Vec<(f64, f64)> = tenor
+                            .strikes
+                            .iter()
+                            .zip(tenor.vols.iter())
+                            .map(|(&k, &v)| (k, v * v * tenor.expiry))
+                            .collect();
+                        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+                        let (strikes, variances): (Vec<f64>, Vec<f64>) =
+                            pairs.into_iter().unzip();
+                        let spline =
+                            SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
+                        Box::new(spline)
+                    }
+                    SmileModel::Sabr { beta } => {
+                        let market_vols: Vec<(f64, f64)> = tenor
+                            .strikes
+                            .iter()
+                            .zip(tenor.vols.iter())
+                            .map(|(&k, &v)| (k, v))
+                            .collect();
+                        let sabr =
+                            SabrSmile::calibrate(forward, tenor.expiry, beta, &market_vols)?;
+                        Box::new(sabr)
+                    }
+                };
+
+                Ok((tenor.expiry, smile))
             };
 
-            tenor_smile_pairs.push((tenor.expiry, smile));
-        }
+        #[cfg(feature = "parallel")]
+        let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> = self
+            .tenor_data
+            .par_iter()
+            .map(calibrate_tenor)
+            .collect::<crate::error::Result<Vec<_>>>()?;
+        #[cfg(not(feature = "parallel"))]
+        let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> = self
+            .tenor_data
+            .iter()
+            .map(calibrate_tenor)
+            .collect::<crate::error::Result<Vec<_>>>()?;
 
         // Sort by tenor
         tenor_smile_pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
