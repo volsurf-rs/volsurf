@@ -285,10 +285,8 @@ impl SurfaceBuilder {
                             .map(|(&k, &v)| (k, v * v * tenor.expiry))
                             .collect();
                         pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
-                        let (strikes, variances): (Vec<f64>, Vec<f64>) =
-                            pairs.into_iter().unzip();
-                        let spline =
-                            SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
+                        let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
+                        let spline = SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
                         Box::new(spline)
                     }
                     SmileModel::Sabr { beta } => {
@@ -298,8 +296,7 @@ impl SurfaceBuilder {
                             .zip(tenor.vols.iter())
                             .map(|(&k, &v)| (k, v))
                             .collect();
-                        let sabr =
-                            SabrSmile::calibrate(forward, tenor.expiry, beta, &market_vols)?;
+                        let sabr = SabrSmile::calibrate(forward, tenor.expiry, beta, &market_vols)?;
                         Box::new(sabr)
                     }
                 };
@@ -987,6 +984,72 @@ mod tests {
             .unwrap();
 
         let vol = surface.black_vol(0.5, 100.0).unwrap();
+        assert!(vol.0 > 0.0 && vol.0 < 1.0);
+    }
+
+    #[test]
+    fn build_ten_tenor_surface() {
+        let strikes = sample_strikes();
+        let vols = sample_vols();
+        let mut builder = SurfaceBuilder::new().spot(100.0).rate(0.05);
+        for i in 1..=10 {
+            builder = builder.add_tenor(i as f64 * 0.25, &strikes, &vols);
+        }
+        let surface = builder.build().unwrap();
+
+        for i in 1..=10 {
+            let t = i as f64 * 0.25;
+            let vol = surface.black_vol(t, 100.0).unwrap();
+            assert!(vol.0 > 0.0 && vol.0 < 1.0, "bad vol {vol:?} at T={t}");
+        }
+        let interp = surface.black_vol(1.375, 100.0).unwrap();
+        assert!(interp.0 > 0.0 && interp.0 < 1.0);
+    }
+
+    #[test]
+    fn bad_tenor_among_good_tenors_returns_error() {
+        let strikes = sample_strikes();
+        let vols = sample_vols();
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor(0.25, &strikes, &vols)
+            .add_tenor(0.5, &strikes, &vols)
+            .add_tenor(-1.0, &strikes, &vols) // bad
+            .add_tenor(1.0, &strikes, &vols)
+            .build();
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn ten_tenor_cubic_spline_surface() {
+        let strikes = sample_strikes();
+        let vols = sample_vols();
+        let mut builder = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline);
+        for i in 1..=10 {
+            builder = builder.add_tenor(i as f64 * 0.25, &strikes, &vols);
+        }
+        let surface = builder.build().unwrap();
+        let vol = surface.black_vol(1.0, 100.0).unwrap();
+        assert!(vol.0 > 0.0 && vol.0 < 1.0);
+    }
+
+    #[test]
+    fn ten_tenor_sabr_surface() {
+        let strikes = sample_strikes();
+        let vols = sample_vols();
+        let mut builder = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: 0.5 });
+        for i in 1..=10 {
+            builder = builder.add_tenor(i as f64 * 0.25, &strikes, &vols);
+        }
+        let surface = builder.build().unwrap();
+        let vol = surface.black_vol(1.0, 100.0).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
     }
 }
