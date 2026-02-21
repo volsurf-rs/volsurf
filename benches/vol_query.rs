@@ -168,7 +168,11 @@ fn local_vol_benchmarks(c: &mut Criterion) {
 
     // Single-point Dupire query — interpolated tenor, slightly OTM
     group.bench_function("dupire_single_query", |b| {
-        b.iter(|| dupire.local_vol(black_box(0.375), black_box(105.0)).unwrap());
+        b.iter(|| {
+            dupire
+                .local_vol(black_box(0.375), black_box(105.0))
+                .unwrap()
+        });
     });
 
     // 20x30 grid — 600 local vol queries across the surface
@@ -189,7 +193,11 @@ fn local_vol_benchmarks(c: &mut Criterion) {
         .with_bump_size(0.001)
         .expect("bump_size 0.001 should be valid");
     group.bench_function("dupire_fine_bump", |b| {
-        b.iter(|| dupire_fine.local_vol(black_box(0.375), black_box(105.0)).unwrap());
+        b.iter(|| {
+            dupire_fine
+                .local_vol(black_box(0.375), black_box(105.0))
+                .unwrap()
+        });
     });
 
     group.finish();
