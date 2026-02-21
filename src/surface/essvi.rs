@@ -534,6 +534,24 @@ impl EssviSurface {
             rhos.push(svi.rho());
         }
 
+        for (i, w) in thetas.windows(2).enumerate() {
+            if w[1] <= w[0] {
+                return Err(VolSurfError::CalibrationError {
+                    message: format!(
+                        "per-tenor SVI calibration produced non-monotone ATM variances: \
+                         theta[{i}]={:.6} >= theta[{}]={:.6} (tenors {}, {})",
+                        w[0],
+                        i + 1,
+                        w[1],
+                        tenors[i],
+                        tenors[i + 1]
+                    ),
+                    model: "eSSVI",
+                    rms_error: None,
+                });
+            }
+        }
+
         let theta_max = *thetas.last().unwrap();
         let xs: Vec<f64> = thetas.iter().map(|&t| t / theta_max).collect();
 
@@ -2225,6 +2243,31 @@ mod tests {
         ];
         let result = EssviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_non_monotone_thetas() {
+        // Earnings-like scenario: short tenor has inflated vol → theta[0] > theta[1].
+        // ATM vol 50% at T=0.25 gives theta ~= 0.0625, but ATM vol 20% at T=0.5 gives theta ~= 0.02.
+        let make_smile = |fwd: f64, atm_vol: f64| -> Vec<(f64, f64)> {
+            let strikes: Vec<f64> = (0..10).map(|i| fwd * (0.85 + 0.03 * i as f64)).collect();
+            strikes
+                .iter()
+                .map(|&k| {
+                    let m = ((k / fwd).ln()).abs();
+                    (k, atm_vol + 0.3 * m)
+                })
+                .collect()
+        };
+        let data = vec![make_smile(100.0, 0.50), make_smile(100.0, 0.20)];
+        let result = EssviSurface::calibrate(&data, &[0.25, 0.50], &[100.0, 100.0]);
+        let err = result.unwrap_err();
+        assert!(matches!(err, VolSurfError::CalibrationError { .. }));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("non-monotone"),
+            "error should mention non-monotone: {msg}"
+        );
     }
 
     #[test]
