@@ -1,6 +1,8 @@
 use std::hint::black_box;
+use std::sync::Arc;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use volsurf::local_vol::{DupireLocalVol, LocalVol};
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use volsurf::surface::{PiecewiseSurface, SsviSurface, SurfaceBuilder, VolSurface};
 
@@ -159,5 +161,44 @@ fn surface_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, smile_benchmarks, surface_benchmarks);
+fn local_vol_benchmarks(c: &mut Criterion) {
+    let mut group = c.benchmark_group("local_vol");
+
+    let dupire = DupireLocalVol::new(Arc::new(make_ssvi_surface()));
+
+    // Single-point Dupire query — interpolated tenor, slightly OTM
+    group.bench_function("dupire_single_query", |b| {
+        b.iter(|| dupire.local_vol(black_box(0.375), black_box(105.0)).unwrap());
+    });
+
+    // 20x30 grid — 600 local vol queries across the surface
+    let expiries: Vec<f64> = (1..=20).map(|i| 0.1 + 0.1 * i as f64).collect();
+    let strikes: Vec<f64> = (0..30).map(|j| 82.0 + 1.3 * j as f64).collect();
+    group.bench_function("dupire_grid_20x30", |b| {
+        b.iter(|| {
+            for &t in black_box(&expiries) {
+                for &k in black_box(&strikes) {
+                    let _ = dupire.local_vol(t, k).unwrap();
+                }
+            }
+        });
+    });
+
+    // Fine bump_size (0.001 vs default 0.01) — more FD evaluations
+    let dupire_fine = DupireLocalVol::new(Arc::new(make_ssvi_surface()))
+        .with_bump_size(0.001)
+        .expect("bump_size 0.001 should be valid");
+    group.bench_function("dupire_fine_bump", |b| {
+        b.iter(|| dupire_fine.local_vol(black_box(0.375), black_box(105.0)).unwrap());
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    smile_benchmarks,
+    surface_benchmarks,
+    local_vol_benchmarks
+);
 criterion_main!(benches);
