@@ -108,6 +108,11 @@ class TestSabrSmile:
         var = smile.variance(90.0)
         assert abs(var - v * v * 1.0) < 1e-14
 
+    def test_density_atm_positive(self):
+        smile = SabrSmile(100.0, 1.0, 0.2, 0.5, -0.3, 0.3)
+        d = smile.density(100.0)
+        assert d > 0 and math.isfinite(d)
+
     def test_arb_free_conservative(self):
         smile = SabrSmile(100.0, 1.0, 0.2, 0.5, -0.3, 0.3)
         report = smile.is_arbitrage_free()
@@ -193,6 +198,15 @@ class TestSplineSmile:
             variances,
         )
         assert abs(smile.variance(200.0) - 0.065) < 1e-12
+
+    def test_density_atm_positive(self):
+        smile = SplineSmile(
+            100.0, 1.0,
+            [80.0, 90.0, 100.0, 110.0, 120.0],
+            [0.065, 0.045, 0.04, 0.045, 0.065],
+        )
+        d = smile.density(100.0)
+        assert d > 0 and math.isfinite(d)
 
     def test_arb_free_convex(self):
         smile = SplineSmile(

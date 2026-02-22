@@ -1,26 +1,13 @@
 import math
 
 import pytest
+from conftest import ESSVI_EQUITY, SSVI_EQUITY
 from volsurf import (
     DupireLocalVol,
     EssviSurface,
     SmileModel,
     SsviSurface,
     SurfaceBuilder,
-)
-
-SSVI_EQUITY = dict(
-    rho=-0.3, eta=0.5, gamma=0.5,
-    tenors=[0.25, 0.5, 1.0, 2.0],
-    forwards=[100.0, 100.0, 100.0, 100.0],
-    thetas=[0.04, 0.08, 0.16, 0.32],
-)
-
-ESSVI_EQUITY = dict(
-    rho_0=-0.4, rho_m=-0.2, a=0.5, eta=0.5, gamma=0.5,
-    tenors=[0.25, 0.5, 1.0, 2.0],
-    forwards=[100.0, 100.0, 100.0, 100.0],
-    thetas=[0.04, 0.08, 0.16, 0.32],
 )
 
 STRIKES = [80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0]
@@ -85,6 +72,12 @@ class TestSurfaceBuilder:
         assert smile.forward > 0
         assert smile.expiry > 0
 
+    def test_smile_at_density_positive(self):
+        surf = build_sabr_surface()
+        smile = surf.smile_at(0.25)
+        d = smile.density(100.0)
+        assert d > 0 and math.isfinite(d)
+
     def test_query_between_tenors(self):
         surf = build_sabr_surface()
         v = surf.black_vol(0.5, 100.0)
@@ -136,6 +129,71 @@ class TestSurfaceBuilder:
         b.add_tenor(0.25, STRIKES, VOLS)
         surf = b.build()
         assert surf.black_vol(0.25, 100.0) > 0
+
+    def test_build_twice_raises(self):
+        b = SurfaceBuilder()
+        b.model(SmileModel.sabr(0.5))
+        b.spot(100.0)
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.build()
+
+    def test_use_after_build_raises(self):
+        b = SurfaceBuilder()
+        b.model(SmileModel.sabr(0.5))
+        b.spot(100.0)
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.spot(200.0)
+
+    def test_consumed_model(self):
+        b = SurfaceBuilder()
+        b.spot(100.0)
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.model(SmileModel.svi())
+
+    def test_consumed_rate(self):
+        b = SurfaceBuilder()
+        b.spot(100.0)
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.rate(0.03)
+
+    def test_consumed_dividend_yield(self):
+        b = SurfaceBuilder()
+        b.spot(100.0)
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.dividend_yield(0.02)
+
+    def test_consumed_add_tenor(self):
+        b = SurfaceBuilder()
+        b.spot(100.0)
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.add_tenor(0.5, STRIKES, VOLS)
+
+    def test_consumed_add_tenor_with_forward(self):
+        b = SurfaceBuilder()
+        b.spot(100.0)
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.add_tenor_with_forward(0.5, STRIKES, VOLS, 101.0)
 
 
 class TestSsviSurface:
@@ -193,6 +251,10 @@ class TestSsviSurface:
         with pytest.raises(ValueError):
             SsviSurface(-0.3, 0.5, 0.5, [], [], [])
 
+    def test_rejects_mismatched_vec_lengths(self):
+        with pytest.raises(ValueError):
+            SsviSurface(-0.3, 0.5, 0.5, [0.25, 0.5], [100.0], [0.04])
+
 
 class TestEssviSurface:
     def test_construct(self):
@@ -214,6 +276,29 @@ class TestEssviSurface:
     def test_rejects_rho_0_at_boundary(self):
         with pytest.raises(ValueError):
             EssviSurface(1.0, -0.2, 0.5, 0.5, 0.5, [0.25], [100.0], [0.04])
+
+    def test_rejects_rho_m_at_boundary(self):
+        with pytest.raises(ValueError):
+            EssviSurface(-0.4, 1.0, 0.5, 0.5, 0.5, [0.25], [100.0], [0.04])
+
+    def test_rejects_zero_eta(self):
+        with pytest.raises(ValueError):
+            EssviSurface(-0.4, -0.2, 0.5, 0.0, 0.5, [0.25], [100.0], [0.04])
+
+    def test_rejects_gamma_out_of_range(self):
+        with pytest.raises(ValueError):
+            EssviSurface(-0.4, -0.2, 0.5, 0.5, 1.5, [0.25], [100.0], [0.04])
+
+    def test_rejects_empty_tenors(self):
+        with pytest.raises(ValueError):
+            EssviSurface(-0.4, -0.2, 0.5, 0.5, 0.5, [], [], [])
+
+    def test_rejects_non_increasing_tenors(self):
+        with pytest.raises(ValueError):
+            EssviSurface(
+                -0.4, -0.2, 0.5, 0.5, 0.5,
+                [1.0, 0.5], [100.0, 100.0], [0.16, 0.08],
+            )
 
 
 class TestDupireLocalVol:
