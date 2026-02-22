@@ -26,7 +26,7 @@ use crate::validate::validate_positive;
 ///
 /// Returned by [`EssviSurface::calendar_check_structural()`] when the
 /// continuous-time condition `(δ + ρ·γ)² ≤ γ²` fails at a stored tenor.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructuralViolation {
     /// Tenor (in years) where the violation was detected.
     pub tenor: f64,
@@ -2342,5 +2342,21 @@ mod tests {
             cal.calendar_check_structural().is_empty(),
             "calendar structural violations after a-clipping"
         );
+    }
+
+    #[test]
+    fn structural_violation_serde_round_trip() {
+        let v = StructuralViolation {
+            tenor: 1.0,
+            theta: 0.04,
+            condition_lhs: 0.5,
+            condition_rhs: 0.3,
+        };
+        let json = serde_json::to_string(&v).unwrap();
+        let roundtrip: StructuralViolation = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.tenor, v.tenor);
+        assert_eq!(roundtrip.theta, v.theta);
+        assert_eq!(roundtrip.condition_lhs, v.condition_lhs);
+        assert_eq!(roundtrip.condition_rhs, v.condition_rhs);
     }
 }

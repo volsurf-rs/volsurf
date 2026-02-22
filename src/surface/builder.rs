@@ -18,6 +18,8 @@
 //! assert!(vol.0 > 0.0);
 //! ```
 
+use serde::{Deserialize, Serialize};
+
 use crate::conventions;
 use crate::error::VolSurfError;
 use crate::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
@@ -43,7 +45,7 @@ use rayon::prelude::*;
 /// let spline = SmileModel::CubicSpline; // 3+ strikes
 /// let sabr = SmileModel::Sabr { beta: 0.5 }; // 4+ strikes, equity backbone
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum SmileModel {
     /// SVI parametric model (Gatheral 2004). Requires ≥ 5 strikes per tenor.
     #[default]
@@ -1052,5 +1054,26 @@ mod tests {
         let surface = builder.build().unwrap();
         let vol = surface.black_vol(1.0, 100.0).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
+    }
+
+    #[test]
+    fn smile_model_serde_round_trip() {
+        for model in [
+            SmileModel::Svi,
+            SmileModel::CubicSpline,
+            SmileModel::Sabr { beta: 0.5 },
+        ] {
+            let json = serde_json::to_string(&model).unwrap();
+            let roundtrip: SmileModel = serde_json::from_str(&json).unwrap();
+            assert_eq!(model, roundtrip);
+        }
+    }
+
+    #[test]
+    fn smile_model_sabr_json_shape() {
+        let model = SmileModel::Sabr { beta: 0.5 };
+        let json = serde_json::to_string(&model).unwrap();
+        assert!(json.contains("Sabr"));
+        assert!(json.contains("beta"));
     }
 }
