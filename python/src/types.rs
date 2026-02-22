@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 use volsurf::conventions::StickyKind;
@@ -133,6 +134,22 @@ impl PySmile {
     fn is_arbitrage_free(&self) -> PyResult<PyArbitrageReport> {
         Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
     }
+
+    #[pyo3(signature = (strikes))]
+    fn vol_array<'py>(
+        &self,
+        py: Python<'py>,
+        strikes: PyReadonlyArray1<'py, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let stk: Vec<f64> = strikes.as_array().to_vec();
+        let inner = &self.inner;
+        let data = py.detach(|| {
+            stk.iter()
+                .map(|&k| inner.vol(k).map(|v| v.0))
+                .collect::<Result<Vec<f64>, _>>()
+        });
+        Ok(data.map_err(to_py_err)?.into_pyarray(py))
+    }
 }
 
 // ── PySurface ──
@@ -164,6 +181,31 @@ impl PySurface {
 
     fn diagnostics(&self) -> PyResult<PySurfaceDiagnostics> {
         Ok(self.inner.diagnostics().map_err(to_py_err)?.into())
+    }
+
+    #[pyo3(signature = (expiries, strikes))]
+    fn vol_grid<'py>(
+        &self,
+        py: Python<'py>,
+        expiries: PyReadonlyArray1<'py, f64>,
+        strikes: PyReadonlyArray1<'py, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let exp: Vec<f64> = expiries.as_array().to_vec();
+        let stk: Vec<f64> = strikes.as_array().to_vec();
+        let (nexp, nstk) = (exp.len(), stk.len());
+        let inner = &self.inner;
+        let data = py.detach(|| {
+            let mut out = Vec::with_capacity(nexp * nstk);
+            for &t in &exp {
+                for &k in &stk {
+                    out.push(inner.black_vol(t, k)?.0);
+                }
+            }
+            Ok::<_, volsurf::VolSurfError>(out)
+        });
+        let arr = numpy::ndarray::Array2::from_shape_vec([nexp, nstk], data.map_err(to_py_err)?)
+            .expect("shape matches capacity");
+        Ok(arr.into_pyarray(py))
     }
 }
 

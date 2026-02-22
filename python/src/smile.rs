@@ -1,3 +1,4 @@
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
@@ -64,6 +65,22 @@ impl PySviSmile {
             .map(|inner| Self { inner })
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
+
+    #[pyo3(signature = (strikes))]
+    fn vol_array<'py>(
+        &self,
+        py: Python<'py>,
+        strikes: PyReadonlyArray1<'py, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let stk: Vec<f64> = strikes.as_array().to_vec();
+        let inner = &self.inner;
+        let data = py.detach(|| {
+            stk.iter()
+                .map(|&k| inner.vol(k).map(|v| v.0))
+                .collect::<Result<Vec<f64>, _>>()
+        });
+        Ok(data.map_err(to_py_err)?.into_pyarray(py))
+    }
 }
 
 #[pyclass(frozen, name = "SabrSmile")]
@@ -117,6 +134,22 @@ impl PySabrSmile {
             .map(|inner| Self { inner })
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
+
+    #[pyo3(signature = (strikes))]
+    fn vol_array<'py>(
+        &self,
+        py: Python<'py>,
+        strikes: PyReadonlyArray1<'py, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let stk: Vec<f64> = strikes.as_array().to_vec();
+        let inner = &self.inner;
+        let data = py.detach(|| {
+            stk.iter()
+                .map(|&k| inner.vol(k).map(|v| v.0))
+                .collect::<Result<Vec<f64>, _>>()
+        });
+        Ok(data.map_err(to_py_err)?.into_pyarray(py))
+    }
 }
 
 #[pyclass(frozen, name = "SplineSmile")]
@@ -169,5 +202,21 @@ impl PySplineSmile {
         serde_json::from_str(s)
             .map(|inner| Self { inner })
             .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    #[pyo3(signature = (strikes))]
+    fn vol_array<'py>(
+        &self,
+        py: Python<'py>,
+        strikes: PyReadonlyArray1<'py, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let stk: Vec<f64> = strikes.as_array().to_vec();
+        let inner = &self.inner;
+        let data = py.detach(|| {
+            stk.iter()
+                .map(|&k| inner.vol(k).map(|v| v.0))
+                .collect::<Result<Vec<f64>, _>>()
+        });
+        Ok(data.map_err(to_py_err)?.into_pyarray(py))
     }
 }
