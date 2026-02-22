@@ -830,6 +830,28 @@ mod tests {
         assert!(report.is_free);
     }
 
+    #[test]
+    fn g_function_at_atm_known_value() {
+        let smile = make_smile();
+        let g0 = smile.g_function(0.0);
+        // a=0.04, b=0.4, rho=-0.4, m=0, sigma=0.1
+        // w(0)=0.08, w'(0)=-0.16, w''(0)=4.0, term1=1.0
+        // g = 1 - 0.0256/4*(12.5+0.25) + 2.0 = 2.9184
+        assert_abs_diff_eq!(g0, 2.9184, epsilon = 1e-10);
+    }
+
+    fn vol_rms(a: &SviSmile, b: &SviSmile, strikes: &[f64]) -> f64 {
+        (strikes
+            .iter()
+            .map(|&k| {
+                let diff = a.vol(k).unwrap().0 - b.vol(k).unwrap().0;
+                diff * diff
+            })
+            .sum::<f64>()
+            / strikes.len() as f64)
+            .sqrt()
+    }
+
     /// Generate synthetic market data from known SVI params.
     fn synthetic_market_data(smile: &SviSmile, strikes: &[f64]) -> Vec<(f64, f64)> {
         strikes
@@ -845,38 +867,17 @@ mod tests {
         let data = synthetic_market_data(&original, &strikes);
 
         let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
-
-        // Check round-trip RMS
-        let rms = (data
-            .iter()
-            .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
-                (fitted - sigma).powi(2)
-            })
-            .sum::<f64>()
-            / data.len() as f64)
-            .sqrt();
+        let rms = vol_rms(&original, &calibrated, &strikes);
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
 
     #[test]
     fn calibrate_round_trip_skewed() {
-        // More aggressive skew
         let original = SviSmile::new(100.0, 0.5, 0.02, 0.6, -0.6, 0.05, 0.15).unwrap();
         let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
-        let data = synthetic_market_data(&original, &strikes);
-
-        let calibrated = SviSmile::calibrate(100.0, 0.5, &data).unwrap();
-
-        let rms = (data
-            .iter()
-            .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
-                (fitted - sigma).powi(2)
-            })
-            .sum::<f64>()
-            / data.len() as f64)
-            .sqrt();
+        let calibrated =
+            SviSmile::calibrate(100.0, 0.5, &synthetic_market_data(&original, &strikes)).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
 
@@ -884,19 +885,22 @@ mod tests {
     fn calibrate_round_trip_symmetric() {
         let original = SviSmile::new(100.0, 1.0, 0.04, 0.3, 0.0, 0.0, 0.2).unwrap();
         let strikes: Vec<f64> = (0..20).map(|i| 60.0 + 4.0 * i as f64).collect();
-        let data = synthetic_market_data(&original, &strikes);
+        let calibrated =
+            SviSmile::calibrate(100.0, 1.0, &synthetic_market_data(&original, &strikes)).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
+    }
 
-        let calibrated = SviSmile::calibrate(100.0, 1.0, &data).unwrap();
-
-        let rms = (data
-            .iter()
-            .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
-                (fitted - sigma).powi(2)
-            })
-            .sum::<f64>()
-            / data.len() as f64)
-            .sqrt();
+    #[test]
+    fn calibrate_round_trip_non_uniform_strikes() {
+        let original = make_smile();
+        let strikes = vec![
+            60.0, 70.0, 80.0, 85.0, 90.0, 92.5, 95.0, 97.5, 100.0, 102.5, 105.0, 107.5, 110.0,
+            115.0, 120.0, 130.0, 140.0,
+        ];
+        let calibrated =
+            SviSmile::calibrate(F, T, &synthetic_market_data(&original, &strikes)).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
 
@@ -931,6 +935,39 @@ mod tests {
         ];
         let result = SviSmile::calibrate(100.0, 1.0, &data);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn calibrate_grid_search_fails_frown() {
+        // SVI w(k) = a + b[rho*dk + sqrt(dk^2 + sigma^2)] is always convex in k.
+        // A concave "frown" (high ATM, low wings) forces b < 0 or min_var < 0
+        // for every grid point, so the grid search finds no valid starting point.
+        let data = vec![
+            (60.0, 0.001),
+            (80.0, 0.001),
+            (90.0, 0.40),
+            (100.0, 0.50),
+            (110.0, 0.40),
+            (120.0, 0.001),
+            (140.0, 0.001),
+        ];
+        let result = SviSmile::calibrate(100.0, 1.0, &data);
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, VolSurfError::CalibrationError { model: "SVI", .. }),
+            "expected SVI CalibrationError, got: {err}"
+        );
+        assert!(err.to_string().contains("grid search"));
+    }
+
+    #[test]
+    fn calibration_error_format_svi_linear_solve() {
+        let err = VolSurfError::CalibrationError {
+            message: "linear solve failed at optimal (m, sigma)".into(),
+            model: "SVI",
+            rms_error: None,
+        };
+        assert!(err.to_string().contains("linear solve failed"));
     }
 
     #[test]

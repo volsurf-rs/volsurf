@@ -30,10 +30,6 @@ pub enum VolSurfError {
     /// Numerical computation failed (e.g., NaN, ill-conditioned matrix).
     #[error("numerical error: {message}")]
     NumericalError { message: String },
-
-    /// Arbitrage violation detected in the surface.
-    #[error("arbitrage detected: {message}")]
-    ArbitrageViolation { message: String },
 }
 
 #[cfg(test)]
@@ -110,11 +106,6 @@ mod tests {
             message: "NaN detected".into(),
         };
         assert!(format!("{err3}").contains("NaN detected"));
-
-        let err4 = VolSurfError::ArbitrageViolation {
-            message: "calendar spread".into(),
-        };
-        assert!(format!("{err4}").contains("calendar spread"));
     }
 
     #[test]

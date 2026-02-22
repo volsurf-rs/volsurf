@@ -170,6 +170,21 @@ mod tests {
         assert_eq!(v.magnitude, 0.007);
     }
 
+    #[test]
+    fn merge_not_free_empty_violations_with_clean() {
+        let report_a = ArbitrageReport {
+            is_free: false,
+            butterfly_violations: vec![],
+        };
+        let report_b = ArbitrageReport {
+            is_free: true,
+            butterfly_violations: vec![],
+        };
+        let merged = report_a.merge(&report_b);
+        assert!(!merged.is_free);
+        assert!(merged.butterfly_violations.is_empty());
+    }
+
     // ========== worst_violation() ==========
 
     #[test]
@@ -202,6 +217,29 @@ mod tests {
         let worst = report.worst_violation().unwrap();
         assert_eq!(worst.strike, 85.0);
         assert_eq!(worst.magnitude, 0.010);
+    }
+
+    #[test]
+    fn worst_violation_tied_magnitudes() {
+        let report = ArbitrageReport {
+            is_free: false,
+            butterfly_violations: vec![
+                ButterflyViolation {
+                    strike: 90.0,
+                    density: -0.01,
+                    magnitude: 0.005,
+                },
+                ButterflyViolation {
+                    strike: 110.0,
+                    density: -0.02,
+                    magnitude: 0.005,
+                },
+            ],
+        };
+        let worst = report.worst_violation().unwrap();
+        assert!((worst.magnitude - 0.005).abs() < 1e-15);
+        // max_by with total_cmp returns last equal element
+        assert_eq!(worst.strike, 110.0);
     }
 
     // ========== SABR butterfly detection ==========
