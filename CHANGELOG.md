@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-22
+
+### Changed
+
+- Tracing fields in calibration diagnostics: `rms` renamed to `rms_implied_vol` (SABR) and `rms_total_variance` (SSVI/eSSVI) to clarify the metric space
+
+### Removed
+
+- `VolSurfError::ArbitrageViolation` variant — was unused; `VolSurfError` is `#[non_exhaustive]` so downstream wildcard matches are unaffected, but code referencing this variant by name will need updating
+
+### Added
+
+- Non-uniform strike calibration round-trip tests for SVI and SABR
+- 12 coverage gap tests across SVI, SABR, SSVI, and arbitrage modules
+
+## [0.3.0] "Production Grade" - 2026-02-22
+
+### Added
+
+- `EssviSurface` — Hendriks-Martini (2019) extended SSVI with tenor-dependent rho for calendar arbitrage freedom
+- `EssviSlice` — zero-cost newtype over `SsviSlice` with baked-in rho(theta)
+- `EssviSurface::calibrate()` — 3-stage calibration: per-tenor SVI, rho(theta) regression, global (eta, gamma) optimization with Eq. 5.7 constraint enforcement
+- `SurfaceBuilder::dividend_yield()` for forward calculation via F = S*exp((r-q)*T)
+- `SurfaceBuilder::add_tenor_with_forward()` to bypass forward computation with market-observed forwards
+- `log_moneyness()`, `moneyness()`, `forward_price()` now return `Result<f64>` with input validation
+- Parallel surface construction via `rayon` feature in `SurfaceBuilder::build()`
+- Dupire local vol benchmarks validating NFR performance targets
+- SECURITY.md with private vulnerability reporting via GitHub Security Advisories
+
+### Fixed
+
+- Better error messages when calibration produces non-monotone ATM total variances
+- Integration tests use non-constant forwards for realistic DJX scenarios
+
 ## [0.2.1] - 2026-02-17
 
 ### Added
@@ -47,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Domain newtypes: `Strike`, `Tenor`, `Vol`, `Variance`, `OptionType` with `Copy`, `Debug`, `Serde` support
-- `VolSurfError` enum with `thiserror`, `#[non_exhaustive]`, and 4 structured variants: `CalibrationError`, `InvalidInput`, `NumericalError`, `ArbitrageViolation`
+- `VolSurfError` enum with `thiserror`, `#[non_exhaustive]`, and 4 structured variants: `CalibrationError`, `InvalidInput`, `NumericalError`, `ArbitrageViolation` (removed in v0.4.0)
 - `SmileSection` trait (`Send + Sync + Debug`) for single-tenor smile evaluation with `vol()`, `variance()`, `density()`, `forward()`, `expiry()`, `is_arbitrage_free()`
 - `VolSurface` trait (`Send + Sync + Debug`) for multi-tenor surfaces with `black_vol()`, `black_variance()`, `smile_at()`, `diagnostics()`
 - `LocalVol` trait for future Dupire local vol extraction
@@ -66,7 +100,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/volsurf-rs/volsurf/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/volsurf-rs/volsurf/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/volsurf-rs/volsurf/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/volsurf-rs/volsurf/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/volsurf-rs/volsurf/releases/tag/v0.1.0

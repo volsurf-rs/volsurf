@@ -840,6 +840,18 @@ mod tests {
         assert_abs_diff_eq!(g0, 2.9184, epsilon = 1e-10);
     }
 
+    fn vol_rms(a: &SviSmile, b: &SviSmile, strikes: &[f64]) -> f64 {
+        (strikes
+            .iter()
+            .map(|&k| {
+                let diff = a.vol(k).unwrap().0 - b.vol(k).unwrap().0;
+                diff * diff
+            })
+            .sum::<f64>()
+            / strikes.len() as f64)
+            .sqrt()
+    }
+
     /// Generate synthetic market data from known SVI params.
     fn synthetic_market_data(smile: &SviSmile, strikes: &[f64]) -> Vec<(f64, f64)> {
         strikes
@@ -855,38 +867,17 @@ mod tests {
         let data = synthetic_market_data(&original, &strikes);
 
         let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
-
-        // Check round-trip RMS
-        let rms = (data
-            .iter()
-            .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
-                (fitted - sigma).powi(2)
-            })
-            .sum::<f64>()
-            / data.len() as f64)
-            .sqrt();
+        let rms = vol_rms(&original, &calibrated, &strikes);
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
 
     #[test]
     fn calibrate_round_trip_skewed() {
-        // More aggressive skew
         let original = SviSmile::new(100.0, 0.5, 0.02, 0.6, -0.6, 0.05, 0.15).unwrap();
         let strikes: Vec<f64> = (0..15).map(|i| 70.0 + 4.0 * i as f64).collect();
-        let data = synthetic_market_data(&original, &strikes);
-
-        let calibrated = SviSmile::calibrate(100.0, 0.5, &data).unwrap();
-
-        let rms = (data
-            .iter()
-            .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
-                (fitted - sigma).powi(2)
-            })
-            .sum::<f64>()
-            / data.len() as f64)
-            .sqrt();
+        let calibrated =
+            SviSmile::calibrate(100.0, 0.5, &synthetic_market_data(&original, &strikes)).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
 
@@ -894,19 +885,9 @@ mod tests {
     fn calibrate_round_trip_symmetric() {
         let original = SviSmile::new(100.0, 1.0, 0.04, 0.3, 0.0, 0.0, 0.2).unwrap();
         let strikes: Vec<f64> = (0..20).map(|i| 60.0 + 4.0 * i as f64).collect();
-        let data = synthetic_market_data(&original, &strikes);
-
-        let calibrated = SviSmile::calibrate(100.0, 1.0, &data).unwrap();
-
-        let rms = (data
-            .iter()
-            .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
-                (fitted - sigma).powi(2)
-            })
-            .sum::<f64>()
-            / data.len() as f64)
-            .sqrt();
+        let calibrated =
+            SviSmile::calibrate(100.0, 1.0, &synthetic_market_data(&original, &strikes)).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
 
@@ -917,19 +898,9 @@ mod tests {
             60.0, 70.0, 80.0, 85.0, 90.0, 92.5, 95.0, 97.5, 100.0, 102.5, 105.0, 107.5, 110.0,
             115.0, 120.0, 130.0, 140.0,
         ];
-        let data = synthetic_market_data(&original, &strikes);
-
-        let calibrated = SviSmile::calibrate(F, T, &data).unwrap();
-
-        let rms = (data
-            .iter()
-            .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
-                (fitted - sigma).powi(2)
-            })
-            .sum::<f64>()
-            / data.len() as f64)
-            .sqrt();
+        let calibrated =
+            SviSmile::calibrate(F, T, &synthetic_market_data(&original, &strikes)).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
         assert!(rms < 0.001, "round-trip RMS {rms} should be < 0.001");
     }
 
@@ -986,6 +957,7 @@ mod tests {
             matches!(err, VolSurfError::CalibrationError { model: "SVI", .. }),
             "expected SVI CalibrationError, got: {err}"
         );
+        assert!(err.to_string().contains("grid search"));
     }
 
     #[test]

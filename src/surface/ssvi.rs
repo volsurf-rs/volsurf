@@ -996,7 +996,7 @@ mod tests {
 
     #[test]
     fn calendar_arb_single_tenor_empty() {
-        let surface = SsviSurface::new(-0.3, 0.5, 0.5, vec![0.04], vec![1.0], vec![100.0]).unwrap();
+        let surface = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04]).unwrap();
         let violations = surface.calendar_arb_analytical();
         assert!(violations.is_empty());
     }

@@ -238,6 +238,8 @@ mod tests {
         };
         let worst = report.worst_violation().unwrap();
         assert!((worst.magnitude - 0.005).abs() < 1e-15);
+        // max_by with total_cmp returns last equal element
+        assert_eq!(worst.strike, 110.0);
     }
 
     // ========== SABR butterfly detection ==========
