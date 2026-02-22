@@ -78,7 +78,7 @@ impl LocalVol for DupireLocalVol {
 
         let smile = self.surface.smile_at(expiry)?;
         let fwd = smile.forward();
-        let y = log_moneyness(strike, fwd);
+        let y = log_moneyness(strike, fwd)?;
 
         let w = self.surface.black_variance(expiry, strike)?.0;
         if w <= 0.0 {
@@ -423,6 +423,58 @@ mod tests {
     }
 
     // Multiple expiries on flat vol surface (Gatheral Ch.1)
+    #[test]
+    fn propagates_error_from_zero_forward() {
+        #[derive(Debug)]
+        struct ZeroFwdSurface;
+
+        #[derive(Debug)]
+        struct ZeroFwdSmile;
+
+        impl SmileSection for ZeroFwdSmile {
+            fn vol(&self, _: f64) -> error::Result<Vol> {
+                Ok(Vol(0.2))
+            }
+            fn variance(&self, _: f64) -> error::Result<Variance> {
+                Ok(Variance(0.01))
+            }
+            fn forward(&self) -> f64 {
+                0.0
+            }
+            fn expiry(&self) -> f64 {
+                0.5
+            }
+            fn density(&self, _: f64) -> error::Result<f64> {
+                unimplemented!()
+            }
+            fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
+                unimplemented!()
+            }
+        }
+
+        impl VolSurface for ZeroFwdSurface {
+            fn black_vol(&self, _: f64, _: f64) -> error::Result<Vol> {
+                Ok(Vol(0.2))
+            }
+            fn black_variance(&self, _: f64, _: f64) -> error::Result<Variance> {
+                Ok(Variance(0.01))
+            }
+            fn smile_at(&self, _: f64) -> error::Result<Box<dyn SmileSection>> {
+                Ok(Box::new(ZeroFwdSmile))
+            }
+            fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+                unimplemented!()
+            }
+        }
+
+        let dupire = DupireLocalVol::new(Arc::new(ZeroFwdSurface));
+        let err = dupire.local_vol(0.5, 100.0).unwrap_err();
+        assert!(
+            matches!(err, VolSurfError::InvalidInput { .. }),
+            "expected InvalidInput from log_moneyness, got {err:?}"
+        );
+    }
+
     #[test]
     fn flat_vol_short_expiry_forward_difference() {
         // T=0.015 < 2*h (h=0.01), uses forward difference path

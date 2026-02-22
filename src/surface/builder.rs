@@ -262,9 +262,10 @@ impl SurfaceBuilder {
                 if let Some(fwd) = tenor.forward {
                     validate_positive(fwd, "per-tenor forward")?;
                 }
-                let forward = tenor
-                    .forward
-                    .unwrap_or_else(|| conventions::forward_price(spot, rate, q, tenor.expiry));
+                let forward = match tenor.forward {
+                    Some(fwd) => fwd,
+                    None => conventions::forward_price(spot, rate, q, tenor.expiry)?,
+                };
 
                 let smile: Box<dyn SmileSection> = match model {
                     SmileModel::Svi => {

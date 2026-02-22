@@ -4,6 +4,7 @@
 //! testing fixed examples. They help catch edge cases and ensure robustness.
 
 use proptest::prelude::*;
+use volsurf::conventions;
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use volsurf::surface::{PiecewiseSurface, SsviSurface, SurfaceBuilder, VolSurface};
 
@@ -421,5 +422,50 @@ proptest! {
                 vols[i]
             );
         }
+    }
+}
+
+// --- Property Test 11: log_moneyness / moneyness consistency ---
+
+proptest! {
+    /// exp(log_moneyness(K, F)) should equal moneyness(K, F) for all valid inputs.
+    #[test]
+    fn log_moneyness_exp_equals_moneyness(
+        strike in 0.01_f64..1e6,
+        forward in 0.01_f64..1e6,
+    ) {
+        let k = conventions::log_moneyness(strike, forward).unwrap();
+        let m = conventions::moneyness(strike, forward).unwrap();
+        prop_assert!(
+            (k.exp() - m).abs() < 1e-10,
+            "exp(log_moneyness) should equal moneyness: exp({}) = {} vs {}",
+            k, k.exp(), m
+        );
+    }
+
+    #[test]
+    fn moneyness_positive_inputs_always_succeed(
+        strike in 0.01_f64..1e6,
+        forward in 0.01_f64..1e6,
+    ) {
+        let k = conventions::log_moneyness(strike, forward);
+        let m = conventions::moneyness(strike, forward);
+        prop_assert!(k.is_ok());
+        prop_assert!(m.is_ok());
+        prop_assert!(m.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn forward_price_positive_inputs_succeed(
+        spot in 0.01_f64..1e4,
+        rate in -0.1_f64..0.2,
+        q in -0.05_f64..0.1,
+        expiry in 0.01_f64..30.0,
+    ) {
+        let f = conventions::forward_price(spot, rate, q, expiry);
+        prop_assert!(f.is_ok());
+        let fwd = f.unwrap();
+        prop_assert!(fwd > 0.0);
+        prop_assert!(fwd.is_finite());
     }
 }
