@@ -440,7 +440,14 @@ impl SabrSmile {
         let rms = (nm_result.fval / market_vols.len() as f64).sqrt();
 
         #[cfg(feature = "logging")]
-        tracing::debug!(alpha, beta, rho, nu, rms, "SABR calibration complete");
+        tracing::debug!(
+            alpha,
+            beta,
+            rho,
+            nu,
+            rms_implied_vol = rms,
+            "SABR calibration complete"
+        );
 
         Self::new(forward, expiry, alpha, beta, rho, nu).map_err(|e| {
             VolSurfError::CalibrationError {
@@ -1057,6 +1064,37 @@ mod tests {
     }
 
     #[test]
+    fn vol_taylor_branch_continuity() {
+        let smile = make_smile();
+        let k_inside = F * (-5e-8_f64).exp();
+        let k_outside = F * (-5e-5_f64).exp();
+        let v_inside = smile.vol(k_inside).unwrap().0;
+        let v_outside = smile.vol(k_outside).unwrap().0;
+        let v_atm = smile.vol(F).unwrap().0;
+        assert!(v_inside.is_finite());
+        assert!(
+            (v_inside - v_atm).abs() < 1e-6,
+            "Taylor branch should be near ATM vol"
+        );
+        assert!(
+            (v_inside - v_outside).abs() < 1e-4,
+            "Taylor and exact branches should be continuous"
+        );
+    }
+
+    #[test]
+    fn vol_nu_zero_otm_strikes() {
+        let smile = SabrSmile::new(F, T, ALPHA, BETA, 0.0, 0.0).unwrap();
+        for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
+            let v = smile.vol(k).unwrap().0;
+            assert!(
+                v > 0.01 && v < 1.0,
+                "nu=0 vol at K={k} should be in (0.01, 1.0), got {v}"
+            );
+        }
+    }
+
+    #[test]
     fn vol_extreme_rho() {
         // rho = ±0.999: should still produce valid vols
         let s_pos = SabrSmile::new(F, T, EQ_ALPHA, BETA, 0.999, NU).unwrap();
@@ -1463,6 +1501,37 @@ mod tests {
     }
 
     #[test]
+    fn calibrate_grid_search_fails_overflow_alpha() {
+        // ATM vol near f64 overflow: sigma_atm * F^(1-beta) overflows, making
+        // the Newton target = Inf. Alpha diverges for all (rho, nu) grid points,
+        // so the grid search finds no valid starting point.
+        let data = vec![
+            (90.0, 1e150),
+            (95.0, 1e150),
+            (100.0, 1e150),
+            (105.0, 1e150),
+            (110.0, 1e150),
+        ];
+        let result = SabrSmile::calibrate(100.0, 1.0, 0.5, &data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, VolSurfError::CalibrationError { model: "SABR", .. }),
+            "expected SABR CalibrationError, got: {err}"
+        );
+    }
+
+    #[test]
+    fn calibration_error_format_sabr_alpha_solve() {
+        let err = VolSurfError::CalibrationError {
+            message: "alpha solve failed at optimal (rho, nu)".into(),
+            model: "SABR",
+            rms_error: None,
+        };
+        assert!(err.to_string().contains("alpha solve failed"));
+    }
+
+    #[test]
     fn calibrate_params_pass_validation() {
         // Calibrated params should always be valid (pass SabrSmile::new)
         let original = SabrSmile::new(F, T, 2.0, 0.5, -0.3, 0.4).unwrap();
@@ -1525,6 +1594,22 @@ mod tests {
         assert!(
             rms < 0.001,
             "short expiry round-trip RMS {rms} should be < 0.001"
+        );
+    }
+
+    #[test]
+    fn calibrate_round_trip_non_uniform_strikes() {
+        let original = make_smile();
+        let strikes = vec![
+            60.0, 70.0, 80.0, 85.0, 90.0, 92.5, 95.0, 97.5, 100.0, 102.5, 105.0, 107.5, 110.0,
+            115.0, 120.0, 130.0, 140.0,
+        ];
+        let data = sabr_synthetic_data(&original, &strikes);
+        let calibrated = SabrSmile::calibrate(F, T, BETA, &data).unwrap();
+        let rms = vol_rms(&original, &calibrated, &strikes);
+        assert!(
+            rms < 0.001,
+            "non-uniform round-trip RMS {rms} should be < 0.001"
         );
     }
 

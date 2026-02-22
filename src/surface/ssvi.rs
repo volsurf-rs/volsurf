@@ -584,7 +584,7 @@ impl SsviSurface {
             rho = rho_global,
             eta = opt_eta,
             gamma = opt_gamma,
-            rms,
+            rms_total_variance = rms,
             "SSVI calibration complete"
         );
 
@@ -992,6 +992,13 @@ mod tests {
     fn new_single_tenor() {
         let s = SsviSurface::new(0.0, 1.0, 0.5, vec![1.0], vec![100.0], vec![0.04]);
         assert!(s.is_ok());
+    }
+
+    #[test]
+    fn calendar_arb_single_tenor_empty() {
+        let surface = SsviSurface::new(-0.3, 0.5, 0.5, vec![0.04], vec![1.0], vec![100.0]).unwrap();
+        let violations = surface.calendar_arb_analytical();
+        assert!(violations.is_empty());
     }
 
     #[test]
@@ -1676,6 +1683,48 @@ mod tests {
         ];
         let result = SsviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn calibrate_rejects_non_monotone_atm_variances() {
+        let short_tenor_data: Vec<(f64, f64)> = vec![
+            (80.0, 0.45),
+            (90.0, 0.42),
+            (95.0, 0.41),
+            (100.0, 0.40),
+            (105.0, 0.41),
+            (110.0, 0.42),
+            (120.0, 0.45),
+        ];
+        let long_tenor_data: Vec<(f64, f64)> = vec![
+            (80.0, 0.18),
+            (90.0, 0.16),
+            (95.0, 0.155),
+            (100.0, 0.15),
+            (105.0, 0.155),
+            (110.0, 0.16),
+            (120.0, 0.18),
+        ];
+        let market_data = vec![short_tenor_data, long_tenor_data];
+        let tenors = vec![0.25, 1.0];
+        let forwards = vec![100.0, 100.0];
+        let result = SsviSurface::calibrate(&market_data, &tenors, &forwards);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("non-monotone"),
+            "expected non-monotone error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn calibration_error_format_ssvi_global_grid() {
+        let err = VolSurfError::CalibrationError {
+            message: "grid search found no valid starting point".into(),
+            model: "SSVI",
+            rms_error: None,
+        };
+        assert!(err.to_string().contains("grid search"));
     }
 
     #[test]

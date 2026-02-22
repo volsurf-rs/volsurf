@@ -748,7 +748,7 @@ impl EssviSurface {
             a = final_a,
             eta = opt_eta,
             gamma = opt_gamma,
-            rms,
+            rms_total_variance = rms,
             "eSSVI calibration complete"
         );
 
