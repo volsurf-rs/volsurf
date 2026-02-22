@@ -11,6 +11,10 @@ homepage = "https://volsurf-rs.github.io"
 documentation = "https://docs.rs/volsurf"
 readme = "README.md"
 
+[workspace]
+members = [".", "python"]
+resolver = "2"
+
 [features]
 default = []
 logging = ["dep:tracing"]

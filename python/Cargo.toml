@@ -1,0 +1,15 @@
+[package]
+name = "volsurf-python"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "volsurf"
+crate-type = ["cdylib"]
+
+[dependencies]
+volsurf = { path = ".." }
+pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods"] }
+numpy = "0.28"
+serde_json = "1.0"
