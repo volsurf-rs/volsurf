@@ -36,7 +36,11 @@ fn djx_thetas() -> Vec<f64> {
 }
 
 fn djx_forwards() -> Vec<f64> {
-    vec![160.0; 10]
+    // S=160, ~2% carry ⟹ F(T) = 160·exp(0.02·T)
+    djx_tenors()
+        .iter()
+        .map(|&t| 160.0 * (0.02 * t).exp())
+        .collect()
 }
 
 fn paper_surface() -> EssviSurface {
@@ -392,20 +396,20 @@ fn ssvi_degeneracy_surface() {
 
 #[test]
 fn paper_surface_total_variance_monotone_in_theta() {
-    // Calendar no-arb: at any fixed k, w(k, θ₂) ≥ w(k, θ₁) when θ₂ > θ₁
+    // Calendar no-arb: at any fixed strike, w(T₂, K) ≥ w(T₁, K) when T₂ > T₁
     let s = paper_surface();
     let tenors = djx_tenors();
-    let fwd = 160.0;
+    let spot = 160.0;
 
-    for &k_offset in &[-0.3_f64, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3] {
-        let strike = fwd * k_offset.exp();
+    for &log_strike_offset in &[-0.3_f64, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3] {
+        let strike = spot * log_strike_offset.exp();
         let mut prev_var = 0.0;
 
         for (i, &t) in tenors.iter().enumerate() {
             let var = s.black_variance(t, strike).unwrap().0;
             assert!(
                 var >= prev_var - 1e-12,
-                "calendar arb at k={k_offset}, tenor[{i}]={t}: var={var:.8} < prev={prev_var:.8}"
+                "calendar arb at strike={strike:.2}, tenor[{i}]={t}: var={var:.8} < prev={prev_var:.8}"
             );
             prev_var = var;
         }
@@ -417,9 +421,15 @@ fn paper_surface_atm_variance_matches_thetas() {
     let s = paper_surface();
     let thetas = djx_thetas();
     let tenors = djx_tenors();
+    let forwards = djx_forwards();
 
-    for (i, (&t, &theta)) in tenors.iter().zip(thetas.iter()).enumerate() {
-        let var = s.black_variance(t, 160.0).unwrap().0;
+    for (i, ((&t, &theta), &fwd)) in tenors
+        .iter()
+        .zip(thetas.iter())
+        .zip(forwards.iter())
+        .enumerate()
+    {
+        let var = s.black_variance(t, fwd).unwrap().0;
         assert!(
             (var - theta).abs() < 1e-12,
             "ATM variance mismatch at tenor[{i}]={t}: var={var}, theta={theta}"
