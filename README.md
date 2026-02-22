@@ -30,7 +30,7 @@ Production-ready volatility surface construction for equity and FX derivatives.
 - Combined `SurfaceDiagnostics` report
 
 **Implied Volatility**
-- **Black** (lognormal) implied vol via Jackel rational approximation (3 ULP accuracy)
+- **Black** (lognormal) implied vol via Jackel rational approximation (near-machine-precision)
 - **Normal** (Bachelier) implied vol and pricing (Jackel 2017) -- supports negative forwards
 - **Displaced diffusion** -- interpolates between normal (beta=0) and Black (beta=1)
 
@@ -49,19 +49,19 @@ Production-ready volatility surface construction for equity and FX derivatives.
 
 ```toml
 [dependencies]
-volsurf = "0.2"
+volsurf = "0.4"
 ```
 
 Optional features:
 
 ```toml
-volsurf = { version = "0.2", features = ["logging"] }
+volsurf = { version = "0.4", features = ["parallel", "logging"] }
 ```
 
 | Feature | Description |
 |---------|-------------|
+| `parallel` | `rayon` support for parallel surface construction |
 | `logging` | `tracing` instrumentation in calibration and build paths |
-| `parallel` | `rayon` support for parallel surface construction (v0.3) |
 
 Requires Rust edition 2024 (rustc 1.85+).
 
@@ -240,8 +240,9 @@ Measured with Criterion.rs on Apple Silicon. All performance targets exceeded.
 |---------|------|--------------|
 | v0.1 | First Light | SVI smile, cubic spline, ragged grid surface, builder API |
 | v0.2 | Market Ready | SABR, SSVI, calendar arbitrage, surface diagnostics |
-| **v0.2.1** | | **eSSVI surface + calibration, Normal/Displaced IV, Dupire local vol** |
-| v0.3 | Production Grade | Parallel construction, benchmark validation |
+| v0.2.1 | | Normal/Displaced IV, Dupire local vol, serde validation, CI |
+| v0.3 | Production Grade | eSSVI surface + calibration, parallel construction, dividend yield |
+| **v0.4** | **Hardening** | **Coverage gaps, tracing diagnostics, dead code removal** |
 | v1.0 | Stable | API stability, PyO3 bindings, WASM target |
 
 ## References
