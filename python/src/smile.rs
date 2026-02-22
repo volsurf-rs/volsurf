@@ -6,6 +6,67 @@ use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use crate::error::to_py_err;
 use crate::types::PyArbitrageReport;
 
+macro_rules! impl_smile_methods {
+    ($name:ident) => {
+        #[pymethods]
+        impl $name {
+            fn vol(&self, strike: f64) -> PyResult<f64> {
+                Ok(self.inner.vol(strike).map_err(to_py_err)?.0)
+            }
+
+            fn variance(&self, strike: f64) -> PyResult<f64> {
+                Ok(self.inner.variance(strike).map_err(to_py_err)?.0)
+            }
+
+            fn density(&self, strike: f64) -> PyResult<f64> {
+                self.inner.density(strike).map_err(to_py_err)
+            }
+
+            #[getter]
+            fn forward(&self) -> f64 {
+                self.inner.forward()
+            }
+
+            #[getter]
+            fn expiry(&self) -> f64 {
+                self.inner.expiry()
+            }
+
+            fn is_arbitrage_free(&self) -> PyResult<PyArbitrageReport> {
+                Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
+            }
+
+            fn to_json(&self) -> PyResult<String> {
+                serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
+            }
+
+            #[staticmethod]
+            #[pyo3(signature = (s))]
+            fn from_json(s: &str) -> PyResult<Self> {
+                serde_json::from_str(s)
+                    .map(|inner| Self { inner })
+                    .map_err(|e| PyValueError::new_err(e.to_string()))
+            }
+
+            #[pyo3(signature = (strikes))]
+            fn vol_array<'py>(
+                &self,
+                py: Python<'py>,
+                strikes: PyReadonlyArray1<'py, f64>,
+            ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+                let stk: Vec<f64> = strikes.as_array().to_vec();
+                let inner = &self.inner;
+                let data = py.detach(|| {
+                    stk.iter()
+                        .map(|&k| inner.vol(k).map(|v| v.0))
+                        .collect::<Result<Vec<f64>, _>>()
+                });
+                Ok(data.map_err(to_py_err)?.into_pyarray(py))
+            }
+        }
+    };
+}
+
 #[pyclass(frozen, name = "SviSmile")]
 pub struct PySviSmile {
     inner: SviSmile,
@@ -27,61 +88,9 @@ impl PySviSmile {
         let inner = SviSmile::new(forward, expiry, a, b, rho, m, sigma).map_err(to_py_err)?;
         Ok(Self { inner })
     }
-
-    fn vol(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.vol(strike).map_err(to_py_err)?.0)
-    }
-
-    fn variance(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.variance(strike).map_err(to_py_err)?.0)
-    }
-
-    fn density(&self, strike: f64) -> PyResult<f64> {
-        self.inner.density(strike).map_err(to_py_err)
-    }
-
-    #[getter]
-    fn forward(&self) -> f64 {
-        self.inner.forward()
-    }
-
-    #[getter]
-    fn expiry(&self) -> f64 {
-        self.inner.expiry()
-    }
-
-    fn is_arbitrage_free(&self) -> PyResult<PyArbitrageReport> {
-        Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
-    }
-
-    fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
-    }
-
-    #[staticmethod]
-    #[pyo3(signature = (s))]
-    fn from_json(s: &str) -> PyResult<Self> {
-        serde_json::from_str(s)
-            .map(|inner| Self { inner })
-            .map_err(|e| PyValueError::new_err(e.to_string()))
-    }
-
-    #[pyo3(signature = (strikes))]
-    fn vol_array<'py>(
-        &self,
-        py: Python<'py>,
-        strikes: PyReadonlyArray1<'py, f64>,
-    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let stk: Vec<f64> = strikes.as_array().to_vec();
-        let inner = &self.inner;
-        let data = py.detach(|| {
-            stk.iter()
-                .map(|&k| inner.vol(k).map(|v| v.0))
-                .collect::<Result<Vec<f64>, _>>()
-        });
-        Ok(data.map_err(to_py_err)?.into_pyarray(py))
-    }
 }
+
+impl_smile_methods!(PySviSmile);
 
 #[pyclass(frozen, name = "SabrSmile")]
 pub struct PySabrSmile {
@@ -96,61 +105,9 @@ impl PySabrSmile {
         let inner = SabrSmile::new(forward, expiry, alpha, beta, rho, nu).map_err(to_py_err)?;
         Ok(Self { inner })
     }
-
-    fn vol(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.vol(strike).map_err(to_py_err)?.0)
-    }
-
-    fn variance(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.variance(strike).map_err(to_py_err)?.0)
-    }
-
-    fn density(&self, strike: f64) -> PyResult<f64> {
-        self.inner.density(strike).map_err(to_py_err)
-    }
-
-    #[getter]
-    fn forward(&self) -> f64 {
-        self.inner.forward()
-    }
-
-    #[getter]
-    fn expiry(&self) -> f64 {
-        self.inner.expiry()
-    }
-
-    fn is_arbitrage_free(&self) -> PyResult<PyArbitrageReport> {
-        Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
-    }
-
-    fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
-    }
-
-    #[staticmethod]
-    #[pyo3(signature = (s))]
-    fn from_json(s: &str) -> PyResult<Self> {
-        serde_json::from_str(s)
-            .map(|inner| Self { inner })
-            .map_err(|e| PyValueError::new_err(e.to_string()))
-    }
-
-    #[pyo3(signature = (strikes))]
-    fn vol_array<'py>(
-        &self,
-        py: Python<'py>,
-        strikes: PyReadonlyArray1<'py, f64>,
-    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let stk: Vec<f64> = strikes.as_array().to_vec();
-        let inner = &self.inner;
-        let data = py.detach(|| {
-            stk.iter()
-                .map(|&k| inner.vol(k).map(|v| v.0))
-                .collect::<Result<Vec<f64>, _>>()
-        });
-        Ok(data.map_err(to_py_err)?.into_pyarray(py))
-    }
 }
+
+impl_smile_methods!(PySabrSmile);
 
 #[pyclass(frozen, name = "SplineSmile")]
 pub struct PySplineSmile {
@@ -165,58 +122,6 @@ impl PySplineSmile {
         let inner = SplineSmile::new(forward, expiry, strikes, variances).map_err(to_py_err)?;
         Ok(Self { inner })
     }
-
-    fn vol(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.vol(strike).map_err(to_py_err)?.0)
-    }
-
-    fn variance(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.variance(strike).map_err(to_py_err)?.0)
-    }
-
-    fn density(&self, strike: f64) -> PyResult<f64> {
-        self.inner.density(strike).map_err(to_py_err)
-    }
-
-    #[getter]
-    fn forward(&self) -> f64 {
-        self.inner.forward()
-    }
-
-    #[getter]
-    fn expiry(&self) -> f64 {
-        self.inner.expiry()
-    }
-
-    fn is_arbitrage_free(&self) -> PyResult<PyArbitrageReport> {
-        Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
-    }
-
-    fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
-    }
-
-    #[staticmethod]
-    #[pyo3(signature = (s))]
-    fn from_json(s: &str) -> PyResult<Self> {
-        serde_json::from_str(s)
-            .map(|inner| Self { inner })
-            .map_err(|e| PyValueError::new_err(e.to_string()))
-    }
-
-    #[pyo3(signature = (strikes))]
-    fn vol_array<'py>(
-        &self,
-        py: Python<'py>,
-        strikes: PyReadonlyArray1<'py, f64>,
-    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let stk: Vec<f64> = strikes.as_array().to_vec();
-        let inner = &self.inner;
-        let data = py.detach(|| {
-            stk.iter()
-                .map(|&k| inner.vol(k).map(|v| v.0))
-                .collect::<Result<Vec<f64>, _>>()
-        });
-        Ok(data.map_err(to_py_err)?.into_pyarray(py))
-    }
 }
+
+impl_smile_methods!(PySplineSmile);

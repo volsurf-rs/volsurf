@@ -3,14 +3,11 @@ use std::sync::Arc;
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::PyType;
-use volsurf::conventions::StickyKind;
 use volsurf::smile::{ArbitrageReport, ButterflyViolation};
 use volsurf::surface::{CalendarViolation, SmileModel, SurfaceDiagnostics};
 use volsurf::{OptionType, SmileSection, VolSurface};
 
 use crate::error::to_py_err;
-
-// ── Enums ──
 
 #[pyclass(eq, eq_int, frozen, from_py_object, name = "OptionType")]
 #[derive(Clone, PartialEq)]
@@ -33,31 +30,6 @@ impl From<OptionType> for PyOptionType {
         match v {
             OptionType::Call => PyOptionType::Call,
             OptionType::Put => PyOptionType::Put,
-        }
-    }
-}
-
-#[pyclass(eq, eq_int, frozen, from_py_object, name = "StickyKind")]
-#[derive(Clone, PartialEq)]
-pub enum PyStickyKind {
-    StickyStrike,
-    StickyDelta,
-}
-
-impl From<PyStickyKind> for StickyKind {
-    fn from(v: PyStickyKind) -> Self {
-        match v {
-            PyStickyKind::StickyStrike => StickyKind::StickyStrike,
-            PyStickyKind::StickyDelta => StickyKind::StickyDelta,
-        }
-    }
-}
-
-impl From<StickyKind> for PyStickyKind {
-    fn from(v: StickyKind) -> Self {
-        match v {
-            StickyKind::StickyStrike => PyStickyKind::StickyStrike,
-            StickyKind::StickyDelta => PyStickyKind::StickyDelta,
         }
     }
 }
@@ -99,8 +71,6 @@ impl PySmileModel {
         self.inner == other.inner
     }
 }
-
-// ── PySmile ──
 
 #[pyclass(frozen, name = "Smile")]
 pub struct PySmile {
@@ -151,8 +121,6 @@ impl PySmile {
         Ok(data.map_err(to_py_err)?.into_pyarray(py))
     }
 }
-
-// ── PySurface ──
 
 #[pyclass(frozen, from_py_object, name = "Surface")]
 #[derive(Clone)]
@@ -209,9 +177,7 @@ impl PySurface {
     }
 }
 
-// ── Diagnostics ──
-
-#[pyclass(frozen, from_py_object, name = "ButterflyViolation")]
+#[pyclass(frozen, skip_from_py_object, name = "ButterflyViolation")]
 #[derive(Clone)]
 pub struct PyButterflyViolation {
     #[pyo3(get)]
@@ -242,7 +208,7 @@ impl From<&ButterflyViolation> for PyButterflyViolation {
     }
 }
 
-#[pyclass(frozen, from_py_object, name = "ArbitrageReport")]
+#[pyclass(frozen, skip_from_py_object, name = "ArbitrageReport")]
 #[derive(Clone)]
 pub struct PyArbitrageReport {
     #[pyo3(get)]
@@ -289,7 +255,7 @@ impl From<ArbitrageReport> for PyArbitrageReport {
     }
 }
 
-#[pyclass(frozen, from_py_object, name = "CalendarViolation")]
+#[pyclass(frozen, skip_from_py_object, name = "CalendarViolation")]
 #[derive(Clone)]
 pub struct PyCalendarViolation {
     #[pyo3(get)]
@@ -326,7 +292,7 @@ impl From<&CalendarViolation> for PyCalendarViolation {
     }
 }
 
-#[pyclass(frozen, from_py_object, name = "SurfaceDiagnostics")]
+#[pyclass(frozen, skip_from_py_object, name = "SurfaceDiagnostics")]
 #[derive(Clone)]
 pub struct PySurfaceDiagnostics {
     #[pyo3(get)]

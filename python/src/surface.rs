@@ -1,13 +1,46 @@
 use std::sync::Arc;
 
 use numpy::{IntoPyArray, PyArray2, PyReadonlyArray1};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use volsurf::VolSurface;
 use volsurf::surface::{EssviSurface, SsviSurface, SurfaceBuilder};
 
 use crate::error::to_py_err;
 use crate::types::{PySmile, PySmileModel, PySurface, PySurfaceDiagnostics};
+
+macro_rules! impl_vol_grid {
+    ($name:ident) => {
+        #[pymethods]
+        impl $name {
+            #[pyo3(signature = (expiries, strikes))]
+            fn vol_grid<'py>(
+                &self,
+                py: Python<'py>,
+                expiries: PyReadonlyArray1<'py, f64>,
+                strikes: PyReadonlyArray1<'py, f64>,
+            ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+                let exp: Vec<f64> = expiries.as_array().to_vec();
+                let stk: Vec<f64> = strikes.as_array().to_vec();
+                let (nexp, nstk) = (exp.len(), stk.len());
+                let inner = &self.inner;
+                let data = py.detach(|| {
+                    let mut out = Vec::with_capacity(nexp * nstk);
+                    for &t in &exp {
+                        for &k in &stk {
+                            out.push(inner.black_vol(t, k)?.0);
+                        }
+                    }
+                    Ok::<_, volsurf::VolSurfError>(out)
+                });
+                let arr =
+                    numpy::ndarray::Array2::from_shape_vec([nexp, nstk], data.map_err(to_py_err)?)
+                        .expect("shape matches capacity");
+                Ok(arr.into_pyarray(py))
+            }
+        }
+    };
+}
 
 #[pyclass(frozen, name = "SsviSurface")]
 pub struct PySsviSurface {
@@ -90,32 +123,9 @@ impl PySsviSurface {
             serde_json::from_str(s).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self { inner })
     }
-
-    #[pyo3(signature = (expiries, strikes))]
-    fn vol_grid<'py>(
-        &self,
-        py: Python<'py>,
-        expiries: PyReadonlyArray1<'py, f64>,
-        strikes: PyReadonlyArray1<'py, f64>,
-    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        let exp: Vec<f64> = expiries.as_array().to_vec();
-        let stk: Vec<f64> = strikes.as_array().to_vec();
-        let (nexp, nstk) = (exp.len(), stk.len());
-        let inner = &self.inner;
-        let data = py.detach(|| {
-            let mut out = Vec::with_capacity(nexp * nstk);
-            for &t in &exp {
-                for &k in &stk {
-                    out.push(inner.black_vol(t, k)?.0);
-                }
-            }
-            Ok::<_, volsurf::VolSurfError>(out)
-        });
-        let arr = numpy::ndarray::Array2::from_shape_vec([nexp, nstk], data.map_err(to_py_err)?)
-            .expect("shape matches capacity");
-        Ok(arr.into_pyarray(py))
-    }
 }
+
+impl_vol_grid!(PySsviSurface);
 
 #[pyclass(frozen, name = "EssviSurface")]
 pub struct PyEssviSurface {
@@ -216,36 +226,17 @@ impl PyEssviSurface {
             serde_json::from_str(s).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self { inner })
     }
+}
 
-    #[pyo3(signature = (expiries, strikes))]
-    fn vol_grid<'py>(
-        &self,
-        py: Python<'py>,
-        expiries: PyReadonlyArray1<'py, f64>,
-        strikes: PyReadonlyArray1<'py, f64>,
-    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        let exp: Vec<f64> = expiries.as_array().to_vec();
-        let stk: Vec<f64> = strikes.as_array().to_vec();
-        let (nexp, nstk) = (exp.len(), stk.len());
-        let inner = &self.inner;
-        let data = py.detach(|| {
-            let mut out = Vec::with_capacity(nexp * nstk);
-            for &t in &exp {
-                for &k in &stk {
-                    out.push(inner.black_vol(t, k)?.0);
-                }
-            }
-            Ok::<_, volsurf::VolSurfError>(out)
-        });
-        let arr = numpy::ndarray::Array2::from_shape_vec([nexp, nstk], data.map_err(to_py_err)?)
-            .expect("shape matches capacity");
-        Ok(arr.into_pyarray(py))
-    }
+impl_vol_grid!(PyEssviSurface);
+
+fn consumed() -> PyErr {
+    PyRuntimeError::new_err("builder already consumed by build()")
 }
 
 #[pyclass(name = "SurfaceBuilder")]
 pub struct PySurfaceBuilder {
-    inner: SurfaceBuilder,
+    inner: Option<SurfaceBuilder>,
 }
 
 #[pymethods]
@@ -253,34 +244,39 @@ impl PySurfaceBuilder {
     #[new]
     fn new() -> Self {
         Self {
-            inner: SurfaceBuilder::new(),
+            inner: Some(SurfaceBuilder::new()),
         }
     }
 
-    fn model(&mut self, model: &PySmileModel) {
-        let taken = std::mem::take(&mut self.inner);
-        self.inner = taken.model(model.inner);
+    fn model(&mut self, model: &PySmileModel) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.model(model.inner));
+        Ok(())
     }
 
-    fn spot(&mut self, spot: f64) {
-        let taken = std::mem::take(&mut self.inner);
-        self.inner = taken.spot(spot);
+    fn spot(&mut self, spot: f64) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.spot(spot));
+        Ok(())
     }
 
-    fn rate(&mut self, rate: f64) {
-        let taken = std::mem::take(&mut self.inner);
-        self.inner = taken.rate(rate);
+    fn rate(&mut self, rate: f64) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.rate(rate));
+        Ok(())
     }
 
-    fn dividend_yield(&mut self, q: f64) {
-        let taken = std::mem::take(&mut self.inner);
-        self.inner = taken.dividend_yield(q);
+    fn dividend_yield(&mut self, q: f64) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.dividend_yield(q));
+        Ok(())
     }
 
     #[pyo3(signature = (expiry, strikes, vols))]
-    fn add_tenor(&mut self, expiry: f64, strikes: Vec<f64>, vols: Vec<f64>) {
-        let taken = std::mem::take(&mut self.inner);
-        self.inner = taken.add_tenor(expiry, &strikes, &vols);
+    fn add_tenor(&mut self, expiry: f64, strikes: Vec<f64>, vols: Vec<f64>) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.add_tenor(expiry, &strikes, &vols));
+        Ok(())
     }
 
     #[pyo3(signature = (expiry, strikes, vols, forward))]
@@ -290,14 +286,15 @@ impl PySurfaceBuilder {
         strikes: Vec<f64>,
         vols: Vec<f64>,
         forward: f64,
-    ) {
-        let taken = std::mem::take(&mut self.inner);
-        self.inner = taken.add_tenor_with_forward(expiry, &strikes, &vols, forward);
+    ) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.add_tenor_with_forward(expiry, &strikes, &vols, forward));
+        Ok(())
     }
 
     fn build(&mut self) -> PyResult<PySurface> {
-        let taken = std::mem::take(&mut self.inner);
-        let surface = taken.build().map_err(to_py_err)?;
+        let b = self.inner.take().ok_or_else(consumed)?;
+        let surface = b.build().map_err(to_py_err)?;
         Ok(PySurface {
             inner: Arc::new(surface) as Arc<dyn VolSurface>,
         })
