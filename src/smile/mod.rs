@@ -37,6 +37,16 @@ use crate::validate::validate_positive;
 /// Methods return `Result` so implementations can report numerical failures
 /// (e.g., negative variance, NaN) rather than panicking.
 ///
+/// # Default Methods
+///
+/// [`density()`](SmileSection::density) computes the risk-neutral density
+/// q(K) = d²C/dK² via Breeden-Litzenberger (1978) finite differences with
+/// relative step h = K × 10⁻⁴. Override this in models with analytical
+/// density (e.g., SVI via the g-function) for better accuracy.
+///
+/// [`variance()`](SmileSection::variance) derives total variance from
+/// `vol()` as σ²T. Override when direct variance computation is cheaper.
+///
 /// # Examples
 ///
 /// ```
