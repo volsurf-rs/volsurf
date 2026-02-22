@@ -2279,4 +2279,68 @@ mod tests {
         let result = EssviSurface::calibrate(&data, &[0.5, 1.0], &[100.0, 100.0]);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn calibrate_exercises_a_clipping() {
+        use crate::smile::SviSmile;
+
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+
+        // Step-like rho transition forces Stage 2 to fit a large `a`.
+        // b decays with tenor to give the calibrator freedom on gamma.
+        let svi_params: [(f64, f64, f64); 4] = [
+            //  (a,     b,    rho)          m=0, sigma=0.1 for all
+            (0.005, 0.06, -0.70),
+            (0.015, 0.045, -0.68),
+            (0.035, 0.03, -0.65),
+            (0.070, 0.02, -0.15),
+        ];
+
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+
+        let market_data: Vec<Vec<(f64, f64)>> = tenors
+            .iter()
+            .zip(&svi_params)
+            .zip(&strikes)
+            .map(|((&t, &(a, b, rho)), ks)| {
+                let svi = SviSmile::new(100.0, t, a, b, rho, 0.0, 0.1).unwrap();
+                ks.iter().map(|&k| (k, svi.vol(k).unwrap().0)).collect()
+            })
+            .collect();
+
+        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+        let rho_diff = cal.rho_m() - cal.rho_0();
+        let a_bound = a_max_eq57(cal.gamma(), rho_diff, cal.rho_m());
+
+        // a_max well below A_SCAN_MAX=3.0 proves the constraint is non-trivial
+        assert!(
+            a_bound < 2.5,
+            "a_max={a_bound:.3} should be below scan ceiling"
+        );
+
+        // Clipping was binding: calibrated a sits at the Eq. 5.7 bound
+        assert!(
+            cal.a() <= a_bound + 1e-10,
+            "a={} exceeds a_max={a_bound}",
+            cal.a()
+        );
+        assert!(
+            (cal.a() - a_bound).abs() < 1e-10,
+            "a={} should equal a_max={a_bound} (clipping binding)",
+            cal.a()
+        );
+
+        let rms = rms_vol_error(&cal, &tenors, &market_data);
+        assert!(rms < 0.02, "RMS {rms} too large");
+
+        assert!(
+            cal.calendar_check_structural().is_empty(),
+            "calendar structural violations after a-clipping"
+        );
+    }
 }
