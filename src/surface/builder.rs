@@ -46,6 +46,7 @@ use rayon::prelude::*;
 /// let sabr = SmileModel::Sabr { beta: 0.5 }; // 4+ strikes, equity backbone
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(try_from = "SmileModelRaw")]
 pub enum SmileModel {
     /// SVI parametric model (Gatheral 2004). Requires ≥ 5 strikes per tenor.
     #[default]
@@ -62,6 +63,29 @@ pub enum SmileModel {
         /// CEV exponent, must be in \[0, 1\].
         beta: f64,
     },
+}
+
+#[derive(Deserialize)]
+enum SmileModelRaw {
+    Svi,
+    CubicSpline,
+    Sabr { beta: f64 },
+}
+
+impl TryFrom<SmileModelRaw> for SmileModel {
+    type Error = String;
+    fn try_from(raw: SmileModelRaw) -> std::result::Result<Self, String> {
+        match raw {
+            SmileModelRaw::Svi => Ok(Self::Svi),
+            SmileModelRaw::CubicSpline => Ok(Self::CubicSpline),
+            SmileModelRaw::Sabr { beta } => {
+                if !(0.0..=1.0).contains(&beta) {
+                    return Err(format!("beta must be in [0, 1], got {beta}"));
+                }
+                Ok(Self::Sabr { beta })
+            }
+        }
+    }
 }
 
 /// Builder for constructing volatility surfaces from market data.
@@ -1075,5 +1099,21 @@ mod tests {
         let json = serde_json::to_string(&model).unwrap();
         assert!(json.contains("Sabr"));
         assert!(json.contains("beta"));
+    }
+
+    #[test]
+    fn smile_model_sabr_rejects_invalid_beta() {
+        for bad in [r#"{"Sabr":{"beta":-0.1}}"#, r#"{"Sabr":{"beta":1.5}}"#] {
+            assert!(serde_json::from_str::<SmileModel>(bad).is_err());
+        }
+    }
+
+    #[test]
+    fn smile_model_sabr_boundary_beta() {
+        for beta in [0.0, 1.0] {
+            let json = format!(r#"{{"Sabr":{{"beta":{beta}}}}}"#);
+            let model: SmileModel = serde_json::from_str(&json).unwrap();
+            assert_eq!(model, SmileModel::Sabr { beta });
+        }
     }
 }
