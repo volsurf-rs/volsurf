@@ -63,6 +63,11 @@ use crate::types::{Variance, Vol};
 /// ```
 pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// Black implied volatility σ(T, K).
+    ///
+    /// The `black_` prefix disambiguates from [`LocalVol::local_vol`](crate::local_vol::LocalVol::local_vol),
+    /// which also maps (T, K) → σ but means the instantaneous diffusion
+    /// coefficient. [`SmileSection::vol`] omits the prefix because there is
+    /// no ambiguity at the single-tenor level.
     fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol>;
 
     /// Black total variance σ²(T, K) · T.
@@ -73,8 +78,11 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
 
     /// A smile section at the given expiry.
     ///
-    /// Returns a boxed trait object because parametric surfaces (SSVI, eSSVI)
-    /// compute slices on the fly rather than storing them.
+    /// Returns an owned `Box<dyn SmileSection>` because parametric surfaces
+    /// (SSVI, eSSVI) compute slices on the fly from global parameters —
+    /// there is no stored object to borrow. A reference return would require
+    /// interior mutability. The heap allocation is acceptable: `smile_at()`
+    /// is called once per tenor setup, not per option.
     fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>>;
 
     /// Surface-level arbitrage diagnostics (butterfly + calendar).

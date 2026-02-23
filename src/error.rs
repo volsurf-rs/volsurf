@@ -10,6 +10,9 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, VolSurfError>;
 
 /// Errors that can occur during volatility surface construction and queries.
+///
+/// This enum is `#[non_exhaustive]`: new variants may be added in minor
+/// releases. Match statements should include a wildcard arm.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum VolSurfError {
@@ -19,7 +22,17 @@ pub enum VolSurfError {
         message: String,
         /// Model that failed (e.g., "SVI", "SABR").
         model: &'static str,
-        /// Final RMS error at convergence, if available.
+        /// Final RMS error, if the optimizer ran.
+        ///
+        /// `Some(rms)` — the optimizer converged but the result was invalid or
+        /// the error exceeded the tolerance. The value indicates how close the
+        /// fit was; adjusting initial parameters may help.
+        ///
+        /// `None` — a structural failure (no valid grid point, singular matrix,
+        /// failed alpha solve) prevented the optimizer from running. Retrying
+        /// with the same data will not help.
+        ///
+        /// Units: vol space for SABR, total variance for SSVI and eSSVI.
         rms_error: Option<f64>,
     },
 

@@ -18,6 +18,23 @@
 //! These types wrap `f64`, which does not implement `Eq` or `Ord` because `NaN`
 //! breaks total ordering. We derive `PartialEq` and `PartialOrd` only. Do not
 //! add `Eq` without handling `NaN` explicitly.
+//!
+//! # Why no `From<f64>`?
+//!
+//! Explicit `Vol(0.20)` construction is preferred over `.into()`. Implementing
+//! `From<f64>` would allow implicit conversion in generic contexts, weakening
+//! the type safety these newtypes provide.
+//!
+//! # Why no `Default`?
+//!
+//! Zero is not a meaningful default for financial quantities. `Strike(0.0)` and
+//! `Tenor(0.0)` fail validation throughout the library; `Vol(0.0)` is degenerate.
+//!
+//! # Why no `Neg` on `Vol` and `Variance`?
+//!
+//! Negative volatility and negative variance are physically meaningless.
+//! `Strike` and `Tenor` omit `Neg` for consistency, though negative values
+//! are representable via direct construction.
 
 use std::fmt;
 

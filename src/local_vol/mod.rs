@@ -19,9 +19,12 @@ pub use dupire::DupireLocalVol;
 use crate::error;
 use crate::types::Vol;
 
-/// Local volatility surface.
+/// Local volatility surface: σ_loc(T, K).
 ///
-/// Provides σ_loc(T, K) at any point, derived from an implied vol surface.
+/// Separated from [`VolSurface`](crate::VolSurface) to avoid forcing every
+/// surface implementation to embed Dupire finite-difference numerics.
+/// Instead, compose [`DupireLocalVol`]
+/// around any `Arc<dyn VolSurface>`.
 pub trait LocalVol: Send + Sync + std::fmt::Debug {
     /// Local volatility at the given expiry and strike.
     fn local_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol>;
