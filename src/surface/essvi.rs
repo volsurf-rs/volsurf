@@ -2359,4 +2359,102 @@ mod tests {
         let roundtrip: StructuralViolation = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtrip, v);
     }
+
+    // Issue #22: quadratic a-scan concentrates grid near a=0 for near-constant rho.
+    // When rho_0 and rho_m are close, the optimal a is small and the old linear
+    // grid would overshoot it. Quadratic spacing puts more points near a=0.
+    #[test]
+    fn calibrate_near_constant_rho_produces_small_a() {
+        let original = EssviSurface::new(
+            -0.30,
+            -0.28,
+            0.1,
+            0.5,
+            0.5,
+            vec![0.25, 0.5, 1.0, 2.0],
+            vec![100.0; 4],
+            vec![0.04, 0.08, 0.16, 0.32],
+        )
+        .unwrap();
+
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+        assert!(
+            cal.a() < 0.5,
+            "near-constant rho profile should yield small a, got {}",
+            cal.a()
+        );
+
+        let rms = rms_vol_error(&cal, &tenors, &market_data);
+        assert!(rms < 0.005, "round-trip RMS {rms} should be < 0.005");
+    }
+
+    // Issue #22: when source has rho_0 == rho_m, calibration should recover
+    // near-equal rho_0/rho_m. The value of `a` is unconstrained when rho is
+    // constant because (rho_m - rho_0) * x^a ≈ 0 regardless of a.
+    #[test]
+    fn calibrate_constant_rho_recovers_flat_rho() {
+        let original = EssviSurface::new(
+            -0.3,
+            -0.3,
+            0.0,
+            0.5,
+            0.5,
+            vec![0.25, 0.5, 1.0, 2.0],
+            vec![100.0; 4],
+            vec![0.04, 0.08, 0.16, 0.32],
+        )
+        .unwrap();
+
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+        // Per-tenor SVI rho estimates are noisy, so the reconstructed rho(theta)
+        // won't be perfectly flat. But the spread should be small.
+        let rho_first = cal.rho(*cal.thetas().first().unwrap());
+        let rho_last = cal.rho(*cal.thetas().last().unwrap());
+        assert_abs_diff_eq!(rho_first, rho_last, epsilon = 0.03);
+
+        let rms = rms_vol_error(&cal, &tenors, &market_data);
+        assert!(
+            rms < 0.005,
+            "constant-rho round-trip RMS {rms} should be < 0.005"
+        );
+    }
+
+    // Issue #25: ln_tr precomputation in Stage 3 objective.
+    // At theta = theta_max, the ratio theta/theta_max = 1, ln(1) = 0,
+    // exp(a_eff * 0) = 1, so rho(theta_max) = rho_0 + (rho_m - rho_0) = rho_m.
+    // This identity must hold for any calibrated surface to machine epsilon.
+    #[test]
+    fn calibrate_rho_at_theta_max_equals_rho_m() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+
+        // rho(theta_max) must equal rho_m: the power law (theta_max/theta_max)^a = 1^a = 1
+        assert_abs_diff_eq!(cal.rho(cal.theta_max()), cal.rho_m(), epsilon = 1e-14);
+    }
 }
