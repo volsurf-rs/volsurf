@@ -642,14 +642,15 @@ impl EssviSurface {
             "eSSVI Stage 2 rho(theta) fit complete"
         );
 
-        // Observation triples: (theta, log_moneyness, total_variance)
-        let mut all_points: Vec<(f64, f64, f64)> =
+        // Observation tuples: (theta, log_moneyness, total_variance, ln_theta_ratio)
+        let mut all_points: Vec<(f64, f64, f64, f64)> =
             Vec::with_capacity(market_data.iter().map(|v| v.len()).sum());
         for (i, market_vols) in market_data.iter().enumerate() {
+            let ln_tr = (thetas[i].max(1e-10) / theta_max).clamp(0.0, 1.0).ln();
             for &(strike, vol) in market_vols {
                 let k = (strike / forwards[i]).ln();
                 let w_obs = vol * vol * tenors[i];
-                all_points.push((thetas[i], k, w_obs));
+                all_points.push((thetas[i], k, w_obs, ln_tr));
             }
         }
 
@@ -672,10 +673,9 @@ impl EssviSurface {
             };
 
             let mut rss = 0.0;
-            for &(theta, k, w_obs) in &all_points {
+            for &(theta, k, w_obs, ln_tr) in &all_points {
                 let theta_c = theta.max(1e-10);
-                let t_ratio = (theta_c / theta_max).clamp(0.0, 1.0);
-                let rho = (opt_rho_0 + (opt_rho_m - opt_rho_0) * t_ratio.powf(a_eff))
+                let rho = (opt_rho_0 + (opt_rho_m - opt_rho_0) * (a_eff * ln_tr).exp())
                     .clamp(-0.999, 0.999);
                 let phi = eta / theta_c.powf(gamma);
                 let phi_k = phi * k;
