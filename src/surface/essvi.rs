@@ -554,9 +554,11 @@ impl EssviSurface {
 
         let theta_max = *thetas.last().unwrap();
         let xs: Vec<f64> = thetas.iter().map(|&t| t / theta_max).collect();
+        let ln_xs: Vec<f64> = xs.iter().map(|&x| x.ln()).collect();
 
         // Stage 2: fit rho(theta) = rho_0 + (rho_m - rho_0) * (theta/theta_max)^a
         // For given (rho_0, rho_m), scan `a` values to minimize RSS vs per-tenor rhos.
+        // Quadratic spacing concentrates grid near a=0 where narrow optima live (#22).
         let fit_a = |r0: f64, rm: f64| -> (f64, f64) {
             let d = rm - r0;
             if d.abs() < 1e-14 {
@@ -566,12 +568,13 @@ impl EssviSurface {
             let mut best_a = 0.5;
             let mut best_rss = f64::MAX;
             for ia in 0..=A_SCAN_STEPS {
-                let a = A_SCAN_MAX * (ia as f64) / (A_SCAN_STEPS as f64);
+                let t = (ia as f64) / (A_SCAN_STEPS as f64);
+                let a = A_SCAN_MAX * t * t;
                 let rss: f64 = rhos
                     .iter()
                     .enumerate()
                     .map(|(i, &rho_obs)| {
-                        let rho_pred = r0 + d * xs[i].powf(a);
+                        let rho_pred = r0 + d * (a * ln_xs[i]).exp();
                         (rho_pred - rho_obs).powi(2)
                     })
                     .sum();
