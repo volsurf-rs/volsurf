@@ -26,6 +26,8 @@
 //! # References
 //! - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
 
+use std::f64::consts::PI;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
@@ -922,6 +924,40 @@ impl SmileSection for SsviSlice {
         self.expiry
     }
 
+    /// Analytical risk-neutral density via the Gatheral g-function.
+    ///
+    /// ```text
+    /// q(K) = g(k) · n(d₂) / (K · √w)
+    /// ```
+    /// where k = ln(K/F), d₂ = −k/√w − √w/2, and n(·) is the standard
+    /// normal PDF.
+    ///
+    /// # Reference
+    /// Breeden & Litzenberger (1978); Gatheral & Jacquier (2014), §4.
+    fn density(&self, strike: f64) -> error::Result<f64> {
+        validate_positive(strike, "strike")?;
+        let k = (strike / self.forward).ln();
+        let w = self.total_variance(k);
+        if w <= 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("SSVI total variance is non-positive at k={k}: w={w}"),
+            });
+        }
+        let g = self.g_function(k);
+        let sqrt_w = w.sqrt();
+        let d2 = -k / sqrt_w - sqrt_w / 2.0;
+        let n_d2 = (-d2 * d2 / 2.0).exp() / (2.0 * PI).sqrt();
+        Ok(g * n_d2 / (strike * sqrt_w))
+    }
+
+    /// Check butterfly arbitrage by scanning the Gatheral g-function.
+    ///
+    /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
+    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s
+    /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
+    ///
+    /// # Reference
+    /// Gatheral & Jacquier (2014), Theorem 4.1.
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         /// Number of grid points for g-function arbitrage scan.
         const N: usize = 200;
@@ -938,10 +974,15 @@ impl SmileSection for SsviSlice {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let g = self.g_function(k);
             if g < -TOL {
+                let strike = self.forward * k.exp();
+                let d = match self.density(strike) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
                 violations.push(ButterflyViolation {
-                    strike: self.forward * k.exp(),
-                    density: g,
-                    magnitude: g.abs(),
+                    strike,
+                    density: d,
+                    magnitude: d.abs(),
                 });
             }
         }
@@ -2269,6 +2310,41 @@ mod tests {
             "extreme SSVI params should detect butterfly violations"
         );
         assert!(!report.butterfly_violations.is_empty());
+    }
+
+    #[test]
+    fn slice_violation_density_matches_density_method() {
+        let s = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
+        let report = s.is_arbitrage_free().unwrap();
+        assert!(!report.butterfly_violations.is_empty());
+        for v in &report.butterfly_violations {
+            let expected = s.density(v.strike).unwrap();
+            assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
+            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn slice_density_cross_check_breeden_litzenberger() {
+        use crate::implied::black::black_price;
+        use crate::types::OptionType;
+
+        let s = equity_slice();
+        let f = s.forward();
+        let t = s.expiry();
+
+        for &strike in &[80.0, 100.0, 120.0] {
+            let h = strike * 1e-4;
+            let vol_m = s.vol(strike - h).unwrap().0;
+            let vol_0 = s.vol(strike).unwrap().0;
+            let vol_p = s.vol(strike + h).unwrap().0;
+            let c_m = black_price(f, strike - h, vol_m, t, OptionType::Call).unwrap();
+            let c_0 = black_price(f, strike, vol_0, t, OptionType::Call).unwrap();
+            let c_p = black_price(f, strike + h, vol_p, t, OptionType::Call).unwrap();
+            let numerical = (c_p - 2.0 * c_0 + c_m) / (h * h);
+            let analytical = s.density(strike).unwrap();
+            assert_abs_diff_eq!(analytical, numerical, epsilon = 1e-4);
+        }
     }
 
     #[test]

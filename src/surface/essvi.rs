@@ -173,6 +173,10 @@ impl SmileSection for EssviSlice {
         self.0.variance(strike)
     }
 
+    fn density(&self, strike: f64) -> error::Result<f64> {
+        self.0.density(strike)
+    }
+
     fn forward(&self) -> f64 {
         self.0.forward()
     }
@@ -1082,6 +1086,18 @@ mod tests {
         let report = s.is_arbitrage_free().unwrap();
         assert!(!report.is_free);
         assert!(!report.butterfly_violations.is_empty());
+    }
+
+    #[test]
+    fn violation_density_matches_density_method() {
+        let s = EssviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
+        let report = s.is_arbitrage_free().unwrap();
+        assert!(!report.butterfly_violations.is_empty());
+        for v in &report.butterfly_violations {
+            let expected = s.density(v.strike).unwrap();
+            assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
+            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
+        }
     }
 
     #[test]
