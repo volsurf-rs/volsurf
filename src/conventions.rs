@@ -50,7 +50,15 @@ pub fn forward_price(spot: f64, rate: f64, dividend_yield: f64, expiry: f64) -> 
     validate_finite(rate, "rate")?;
     validate_finite(dividend_yield, "dividend_yield")?;
     validate_non_negative(expiry, "expiry")?;
-    Ok(spot * ((rate - dividend_yield) * expiry).exp())
+    let result = spot * ((rate - dividend_yield) * expiry).exp();
+    if !result.is_finite() {
+        return Err(crate::error::VolSurfError::NumericalError {
+            message: format!(
+                "forward price overflow: spot={spot}, rate={rate}, q={dividend_yield}, T={expiry}"
+            ),
+        });
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -231,6 +239,22 @@ mod tests {
         assert!(forward_price(100.0, f64::INFINITY, 0.0, 1.0).is_err());
         assert!(forward_price(100.0, 0.05, f64::NEG_INFINITY, 1.0).is_err());
         assert!(forward_price(100.0, 0.05, 0.0, f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn forward_price_overflow_returns_numerical_error() {
+        use crate::error::VolSurfError;
+        // exp(50*20) = exp(1000) = Inf
+        let err = forward_price(100.0, 50.0, 0.0, 20.0).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
+    }
+
+    #[test]
+    fn forward_price_large_but_valid_succeeds() {
+        // exp(500) ≈ 1.4e217 — large but finite
+        let f = forward_price(1.0, 1.0, 0.0, 500.0).unwrap();
+        assert!(f.is_finite());
+        assert!(f > 1e200);
     }
 
     #[test]
