@@ -44,7 +44,7 @@ pub fn moneyness(strike: f64, forward: f64) -> error::Result<f64> {
 /// Compute forward price from spot: F = S · exp((r − q) · T).
 ///
 /// Returns `Err` if `spot` is non-positive, `rate` or `dividend_yield` is
-/// non-finite, or `expiry` is negative.
+/// non-finite, `expiry` is negative, or the result overflows to infinity.
 pub fn forward_price(spot: f64, rate: f64, dividend_yield: f64, expiry: f64) -> error::Result<f64> {
     validate_positive(spot, "spot")?;
     validate_finite(rate, "rate")?;
@@ -54,7 +54,8 @@ pub fn forward_price(spot: f64, rate: f64, dividend_yield: f64, expiry: f64) -> 
     if !result.is_finite() {
         return Err(crate::error::VolSurfError::NumericalError {
             message: format!(
-                "forward price overflow: spot={spot}, rate={rate}, q={dividend_yield}, T={expiry}"
+                "forward price overflow: spot={spot}, exponent={}, rate={rate}, q={dividend_yield}, T={expiry}",
+                (rate - dividend_yield) * expiry
             ),
         });
     }
@@ -255,6 +256,14 @@ mod tests {
         let f = forward_price(1.0, 1.0, 0.0, 500.0).unwrap();
         assert!(f.is_finite());
         assert!(f > 1e200);
+    }
+
+    #[test]
+    fn forward_price_underflow_to_zero_succeeds() {
+        // exp(-1000) = 0.0 — underflow is finite, accepted
+        let f = forward_price(100.0, -50.0, 0.0, 20.0).unwrap();
+        assert!(f.is_finite());
+        assert_eq!(f, 0.0);
     }
 
     #[test]
