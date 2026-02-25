@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
-use volsurf::surface::{SmileModel, SsviSurface, SurfaceBuilder, VolSurface};
+use volsurf::surface::{EssviSurface, SmileModel, SsviSurface, SurfaceBuilder, VolSurface};
 
 /// Generate synthetic SVI market data (strike, vol) pairs for benchmarking.
 fn generate_market_data(forward: f64, expiry: f64, n_strikes: usize) -> Vec<(f64, f64)> {
@@ -135,6 +135,90 @@ fn calibration_benchmarks(c: &mut Criterion) {
                 black_box(&ssvi_market_data),
                 black_box(&ssvi_tenors),
                 black_box(&ssvi_forwards),
+            )
+            .unwrap()
+        });
+    });
+
+    // eSSVI calibration — three-stage SVI + rho(theta) fit + NM, 4 tenors x 10 strikes
+    let essvi_tenors = vec![0.25, 0.50, 1.0, 2.0];
+    let essvi_forwards = vec![100.0; 4];
+    let essvi_source = EssviSurface::new(
+        -0.40,
+        -0.20,
+        0.5,
+        0.5,
+        0.5,
+        essvi_tenors.clone(),
+        essvi_forwards.clone(),
+        vec![0.01, 0.02, 0.04, 0.08],
+    )
+    .expect("benchmark eSSVI params should be valid");
+    let essvi_market_data: Vec<Vec<(f64, f64)>> = essvi_tenors
+        .iter()
+        .zip(essvi_forwards.iter())
+        .map(|(&t, &f)| {
+            let k_min = f * 0.8;
+            let k_max = f * 1.2;
+            (0..10)
+                .map(|i| {
+                    let k = k_min + (k_max - k_min) * (i as f64 / 9.0);
+                    let v = essvi_source
+                        .black_vol(t, k)
+                        .expect("eSSVI vol should succeed")
+                        .0;
+                    (k, v)
+                })
+                .collect()
+        })
+        .collect();
+    group.bench_function("essvi_calibration", |b| {
+        b.iter(|| {
+            EssviSurface::calibrate(
+                black_box(&essvi_market_data),
+                black_box(&essvi_tenors),
+                black_box(&essvi_forwards),
+            )
+            .unwrap()
+        });
+    });
+
+    // eSSVI near-constant rho — exercises the quadratic a-scan near a=0 (#22)
+    let flat_rho_source = EssviSurface::new(
+        -0.25,
+        -0.23,
+        0.1,
+        0.5,
+        0.5,
+        essvi_tenors.clone(),
+        essvi_forwards.clone(),
+        vec![0.01, 0.02, 0.04, 0.08],
+    )
+    .expect("flat-rho eSSVI params should be valid");
+    let flat_rho_data: Vec<Vec<(f64, f64)>> = essvi_tenors
+        .iter()
+        .zip(essvi_forwards.iter())
+        .map(|(&t, &f)| {
+            let k_min = f * 0.8;
+            let k_max = f * 1.2;
+            (0..10)
+                .map(|i| {
+                    let k = k_min + (k_max - k_min) * (i as f64 / 9.0);
+                    let v = flat_rho_source
+                        .black_vol(t, k)
+                        .expect("eSSVI vol should succeed")
+                        .0;
+                    (k, v)
+                })
+                .collect()
+        })
+        .collect();
+    group.bench_function("essvi_calibration_flat_rho", |b| {
+        b.iter(|| {
+            EssviSurface::calibrate(
+                black_box(&flat_rho_data),
+                black_box(&essvi_tenors),
+                black_box(&essvi_forwards),
             )
             .unwrap()
         });
