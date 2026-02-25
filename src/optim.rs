@@ -304,20 +304,32 @@ mod tests {
 
     #[test]
     fn all_nan_returns_max() {
-        let result = nelder_mead_2d(
-            |_, _| f64::NAN,
-            1.0,
-            1.0,
-            0.5,
-            0.5,
-            &NelderMeadConfig {
-                max_iter: 100,
-                diameter_tol: 1e-12,
-                fvalue_tol: 1e-14,
-            },
-        );
+        // f_spread = MAX - MAX = 0 → converges immediately (no signal to exploit)
+        let result = nelder_mead_2d(|_, _| f64::NAN, 1.0, 1.0, 0.5, 0.5, &default_config());
         assert_eq!(result.fval, f64::MAX, "all-NaN objective should yield MAX");
         assert!(result.x.is_finite(), "x must be finite");
         assert!(result.y.is_finite(), "y must be finite");
+    }
+
+    #[test]
+    fn inf_objective_treated_as_worst() {
+        for bad in [f64::INFINITY, f64::NEG_INFINITY] {
+            let result = nelder_mead_2d(
+                |x, y| {
+                    if x > 2.0 {
+                        bad
+                    } else {
+                        (x - 1.0).powi(2) + y * y
+                    }
+                },
+                1.0,
+                0.0,
+                0.5,
+                0.5,
+                &default_config(),
+            );
+            assert!(result.fval.is_finite(), "fval finite for {bad}");
+            assert!(result.fval < 0.1, "should converge near (1,0) for {bad}");
+        }
     }
 }
