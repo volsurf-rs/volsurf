@@ -26,6 +26,8 @@
 //! # References
 //! - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
 
+use std::f64::consts::PI;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
@@ -922,6 +924,40 @@ impl SmileSection for SsviSlice {
         self.expiry
     }
 
+    /// Analytical risk-neutral density via the Gatheral g-function.
+    ///
+    /// ```text
+    /// q(K) = g(k) · n(d₂) / (K · √w)
+    /// ```
+    /// where k = ln(K/F), d₂ = −k/√w − √w/2, and n(·) is the standard
+    /// normal PDF.
+    ///
+    /// # Reference
+    /// Breeden & Litzenberger (1978); Gatheral & Jacquier (2014), §4.
+    fn density(&self, strike: f64) -> error::Result<f64> {
+        validate_positive(strike, "strike")?;
+        let k = (strike / self.forward).ln();
+        let w = self.total_variance(k);
+        if w <= 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("SSVI total variance is non-positive at k={k}: w={w}"),
+            });
+        }
+        let g = self.g_function(k);
+        let sqrt_w = w.sqrt();
+        let d2 = -k / sqrt_w - sqrt_w / 2.0;
+        let n_d2 = (-d2 * d2 / 2.0).exp() / (2.0 * PI).sqrt();
+        Ok(g * n_d2 / (strike * sqrt_w))
+    }
+
+    /// Check butterfly arbitrage by scanning the Gatheral g-function.
+    ///
+    /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
+    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s
+    /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
+    ///
+    /// # Reference
+    /// Gatheral & Jacquier (2014), Theorem 4.1.
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         /// Number of grid points for g-function arbitrage scan.
         const N: usize = 200;
@@ -938,10 +974,15 @@ impl SmileSection for SsviSlice {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let g = self.g_function(k);
             if g < -TOL {
+                let strike = self.forward * k.exp();
+                let d = match self.density(strike) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
                 violations.push(ButterflyViolation {
-                    strike: self.forward * k.exp(),
-                    density: g,
-                    magnitude: g.abs(),
+                    strike,
+                    density: d,
+                    magnitude: d.abs(),
                 });
             }
         }
