@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] "Stable" - 2026-02-25
+
+### Added
+
+- `volsurf-wasm` crate — WebAssembly bindings via `wasm-bindgen` for SVI, SABR, SSVI, eSSVI, and SurfaceBuilder with 27 smoke tests
+- `volsurf-python` crate — PyO3 bindings with NumPy integration, serde round-trip support, and 207 tests
+- WASM CI job (build + clippy) in GitHub Actions
+
+### Changed
+
+- eSSVI Stage 2/3 calibration optimizations: precomputed `ln(xs)/ln(theta_ratio)` for `exp` instead of `powf`, adaptive rho grid, 21-point quadratic `a`-scan
+- API stability review: sealed internal modules, documented all public types, ensured `Send + Sync + Debug` on all traits
+
+### Fixed
+
+- README updated with v1.0 version numbers, bindings section, and changelog
+
 ## [0.4.0] - 2026-02-22
 
 ### Changed
@@ -100,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/volsurf-rs/volsurf/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/volsurf-rs/volsurf/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/volsurf-rs/volsurf/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/volsurf-rs/volsurf/compare/v0.2.0...v0.2.1
