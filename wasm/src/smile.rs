@@ -55,10 +55,12 @@ impl WasmSviSmile {
         self.inner.density(strike).map_err(to_js_err)
     }
 
+    #[wasm_bindgen(getter)]
     pub fn forward(&self) -> f64 {
         self.inner.forward()
     }
 
+    #[wasm_bindgen(getter)]
     pub fn expiry(&self) -> f64 {
         self.inner.expiry()
     }
@@ -117,10 +119,12 @@ impl WasmSabrSmile {
         self.inner.density(strike).map_err(to_js_err)
     }
 
+    #[wasm_bindgen(getter)]
     pub fn forward(&self) -> f64 {
         self.inner.forward()
     }
 
+    #[wasm_bindgen(getter)]
     pub fn expiry(&self) -> f64 {
         self.inner.expiry()
     }

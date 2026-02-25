@@ -83,6 +83,7 @@ pub struct WasmEssviSurface {
 #[wasm_bindgen]
 impl WasmEssviSurface {
     #[wasm_bindgen(constructor)]
+    // #[expect] is unfulfilled here — wasm_bindgen(constructor) transforms the fn before clippy
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         rho_0: f64,

@@ -2,10 +2,8 @@ use wasm_bindgen::prelude::*;
 
 mod builder;
 mod error;
-mod implied;
 mod smile;
 mod surface;
-mod types;
 
 pub use builder::{WasmPiecewiseSurface, WasmSurfaceBuilder};
 pub use smile::{WasmSabrSmile, WasmSviSmile};
