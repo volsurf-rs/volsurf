@@ -830,6 +830,18 @@ mod tests {
     }
 
     #[test]
+    fn violation_density_matches_density_method() {
+        let smile = SviSmile::new(100.0, 1.0, 0.001, 0.8, -0.7, 0.0, 0.05).unwrap();
+        let report = smile.is_arbitrage_free().unwrap();
+        assert!(!report.butterfly_violations.is_empty());
+        for v in &report.butterfly_violations {
+            let expected = smile.density(v.strike).unwrap();
+            assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
+            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
+        }
+    }
+
+    #[test]
     fn flat_smile_is_arb_free() {
         let smile = SviSmile::new(100.0, 1.0, 0.04, 0.0, 0.0, 0.0, 0.1).unwrap();
         let report = smile.is_arbitrage_free().unwrap();
