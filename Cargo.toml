@@ -12,7 +12,7 @@ documentation = "https://docs.rs/volsurf"
 readme = "README.md"
 
 [workspace]
-members = [".", "python"]
+members = [".", "python", "wasm"]
 resolver = "2"
 
 [features]
