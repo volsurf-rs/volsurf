@@ -173,6 +173,10 @@ impl SmileSection for EssviSlice {
         self.0.variance(strike)
     }
 
+    fn density(&self, strike: f64) -> error::Result<f64> {
+        self.0.density(strike)
+    }
+
     fn forward(&self) -> f64 {
         self.0.forward()
     }
