@@ -35,11 +35,16 @@ pub(crate) fn nelder_mead_2d<F>(
 where
     F: Fn(f64, f64) -> f64,
 {
+    let eval = |x: f64, y: f64| -> f64 {
+        let v = objective(x, y);
+        if v.is_finite() { v } else { f64::MAX }
+    };
+
     let mut simplex = [(x0, y0), (x0 + step_x, y0), (x0, y0 + step_y)];
     let mut f_vals = [
-        objective(simplex[0].0, simplex[0].1),
-        objective(simplex[1].0, simplex[1].1),
-        objective(simplex[2].0, simplex[2].1),
+        eval(simplex[0].0, simplex[0].1),
+        eval(simplex[1].0, simplex[1].1),
+        eval(simplex[2].0, simplex[2].1),
     ];
 
     for _ in 0..config.max_iter {
@@ -69,7 +74,7 @@ where
         // Reflection
         let rx = cx + (cx - simplex[2].0);
         let ry = cy + (cy - simplex[2].1);
-        let fr = objective(rx, ry);
+        let fr = eval(rx, ry);
 
         if fr < f_vals[1] && fr >= f_vals[0] {
             simplex[2] = (rx, ry);
@@ -78,7 +83,7 @@ where
             // Expansion
             let ex = cx + 2.0 * (rx - cx);
             let ey = cy + 2.0 * (ry - cy);
-            let fe = objective(ex, ey);
+            let fe = eval(ex, ey);
             if fe < fr {
                 simplex[2] = (ex, ey);
                 f_vals[2] = fe;
@@ -96,7 +101,7 @@ where
                     cy + 0.5 * (simplex[2].1 - cy),
                 )
             };
-            let fh = objective(hx, hy);
+            let fh = eval(hx, hy);
             if fh < f_vals[2].min(fr) {
                 simplex[2] = (hx, hy);
                 f_vals[2] = fh;
@@ -105,7 +110,7 @@ where
                 for j in 1..3 {
                     simplex[j].0 = simplex[0].0 + 0.5 * (simplex[j].0 - simplex[0].0);
                     simplex[j].1 = simplex[0].1 + 0.5 * (simplex[j].1 - simplex[0].1);
-                    f_vals[j] = objective(simplex[j].0, simplex[j].1);
+                    f_vals[j] = eval(simplex[j].0, simplex[j].1);
                 }
             }
         }
@@ -270,5 +275,49 @@ mod tests {
             &default_config(),
         );
         assert!(result.fval < 1e-4, "starting near minimum should converge");
+    }
+
+    #[test]
+    fn avoids_nan_region() {
+        // NaN for x < 0, valid quadratic for x >= 0. Minimum at (0, 0).
+        let result = nelder_mead_2d(
+            |x, y| {
+                if x < 0.0 { f64::NAN } else { x * x + y * y }
+            },
+            1.0,
+            1.0,
+            0.5,
+            0.5,
+            &default_config(),
+        );
+        assert!(
+            result.fval.is_finite(),
+            "fval must be finite, got {}",
+            result.fval
+        );
+        assert!(
+            result.fval < 1.0,
+            "should find minimum in valid region, got {}",
+            result.fval
+        );
+    }
+
+    #[test]
+    fn all_nan_returns_max() {
+        let result = nelder_mead_2d(
+            |_, _| f64::NAN,
+            1.0,
+            1.0,
+            0.5,
+            0.5,
+            &NelderMeadConfig {
+                max_iter: 100,
+                diameter_tol: 1e-12,
+                fvalue_tol: 1e-14,
+            },
+        );
+        assert_eq!(result.fval, f64::MAX, "all-NaN objective should yield MAX");
+        assert!(result.x.is_finite(), "x must be finite");
+        assert!(result.y.is_finite(), "y must be finite");
     }
 }
