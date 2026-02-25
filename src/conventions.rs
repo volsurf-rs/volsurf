@@ -44,13 +44,22 @@ pub fn moneyness(strike: f64, forward: f64) -> error::Result<f64> {
 /// Compute forward price from spot: F = S · exp((r − q) · T).
 ///
 /// Returns `Err` if `spot` is non-positive, `rate` or `dividend_yield` is
-/// non-finite, or `expiry` is negative.
+/// non-finite, `expiry` is negative, or the result overflows to infinity.
 pub fn forward_price(spot: f64, rate: f64, dividend_yield: f64, expiry: f64) -> error::Result<f64> {
     validate_positive(spot, "spot")?;
     validate_finite(rate, "rate")?;
     validate_finite(dividend_yield, "dividend_yield")?;
     validate_non_negative(expiry, "expiry")?;
-    Ok(spot * ((rate - dividend_yield) * expiry).exp())
+    let result = spot * ((rate - dividend_yield) * expiry).exp();
+    if !result.is_finite() {
+        return Err(crate::error::VolSurfError::NumericalError {
+            message: format!(
+                "forward price overflow: spot={spot}, exponent={}, rate={rate}, q={dividend_yield}, T={expiry}",
+                (rate - dividend_yield) * expiry
+            ),
+        });
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -231,6 +240,94 @@ mod tests {
         assert!(forward_price(100.0, f64::INFINITY, 0.0, 1.0).is_err());
         assert!(forward_price(100.0, 0.05, f64::NEG_INFINITY, 1.0).is_err());
         assert!(forward_price(100.0, 0.05, 0.0, f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn forward_price_overflow_returns_numerical_error() {
+        use crate::error::VolSurfError;
+        // exp(50*20) = exp(1000) = Inf
+        let err = forward_price(100.0, 50.0, 0.0, 20.0).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
+    }
+
+    #[test]
+    fn forward_price_large_but_valid_succeeds() {
+        // exp(500) ≈ 1.4e217 — large but finite
+        let f = forward_price(1.0, 1.0, 0.0, 500.0).unwrap();
+        assert!(f.is_finite());
+        assert!(f > 1e200);
+    }
+
+    #[test]
+    fn forward_price_underflow_to_zero_succeeds() {
+        // exp(-1000) = 0.0 — underflow is finite, accepted
+        let f = forward_price(100.0, -50.0, 0.0, 20.0).unwrap();
+        assert!(f.is_finite());
+        assert_eq!(f, 0.0);
+    }
+
+    #[test]
+    fn forward_price_overflow_via_negative_dividend_yield() {
+        use crate::error::VolSurfError;
+        // r=0, q=-500, T=2 → exponent = (0-(-500))*2 = 1000 → exp overflows
+        let err = forward_price(100.0, 0.0, -500.0, 2.0).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
+    }
+
+    #[test]
+    fn forward_price_overflow_via_large_spot() {
+        use crate::error::VolSurfError;
+        // (MAX/2) * exp(1) ≈ 8.99e307 * 2.718 ≈ 2.44e308 > MAX
+        let err = forward_price(f64::MAX / 2.0, 1.0, 0.0, 1.0).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
+    }
+
+    #[test]
+    fn forward_price_overflow_near_exp_threshold() {
+        use crate::error::VolSurfError;
+        // ln(MAX) ≈ 709.78; exponent=710 with spot=1 overflows
+        let err = forward_price(1.0, 710.0, 0.0, 1.0).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
+
+        // exponent=709 with spot=1 stays finite
+        let f = forward_price(1.0, 709.0, 0.0, 1.0).unwrap();
+        assert!(f.is_finite());
+    }
+
+    #[test]
+    fn forward_price_overflow_error_message_contains_parameters() {
+        let err = forward_price(100.0, 50.0, 0.0, 20.0).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("spot=100"),
+            "message should contain spot: {msg}"
+        );
+        assert!(
+            msg.contains("rate=50"),
+            "message should contain rate: {msg}"
+        );
+        assert!(msg.contains("q=0"), "message should contain q: {msg}");
+        assert!(msg.contains("T=20"), "message should contain T: {msg}");
+        assert!(
+            msg.contains("exponent=1000"),
+            "message should contain exponent: {msg}"
+        );
+    }
+
+    #[test]
+    fn forward_price_tiny_spot_large_exponent_finite() {
+        // MIN_POSITIVE ≈ 2.2e-308, exp(700) ≈ 1e304 → product ≈ 2.2e-4
+        let f = forward_price(f64::MIN_POSITIVE, 100.0, 0.0, 7.0).unwrap();
+        assert!(f.is_finite());
+        assert!(f > 0.0);
+    }
+
+    #[test]
+    fn forward_price_tiny_spot_overflow_exponent() {
+        use crate::error::VolSurfError;
+        // exp(1500) = Inf regardless of spot, MIN_POSITIVE * Inf = Inf
+        let err = forward_price(f64::MIN_POSITIVE, 100.0, 0.0, 15.0).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
     }
 
     #[test]
