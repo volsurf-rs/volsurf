@@ -35,11 +35,16 @@ pub(crate) fn nelder_mead_2d<F>(
 where
     F: Fn(f64, f64) -> f64,
 {
+    let eval = |x: f64, y: f64| -> f64 {
+        let v = objective(x, y);
+        if v.is_finite() { v } else { f64::MAX }
+    };
+
     let mut simplex = [(x0, y0), (x0 + step_x, y0), (x0, y0 + step_y)];
     let mut f_vals = [
-        objective(simplex[0].0, simplex[0].1),
-        objective(simplex[1].0, simplex[1].1),
-        objective(simplex[2].0, simplex[2].1),
+        eval(simplex[0].0, simplex[0].1),
+        eval(simplex[1].0, simplex[1].1),
+        eval(simplex[2].0, simplex[2].1),
     ];
 
     for _ in 0..config.max_iter {
@@ -69,7 +74,7 @@ where
         // Reflection
         let rx = cx + (cx - simplex[2].0);
         let ry = cy + (cy - simplex[2].1);
-        let fr = objective(rx, ry);
+        let fr = eval(rx, ry);
 
         if fr < f_vals[1] && fr >= f_vals[0] {
             simplex[2] = (rx, ry);
@@ -78,7 +83,7 @@ where
             // Expansion
             let ex = cx + 2.0 * (rx - cx);
             let ey = cy + 2.0 * (ry - cy);
-            let fe = objective(ex, ey);
+            let fe = eval(ex, ey);
             if fe < fr {
                 simplex[2] = (ex, ey);
                 f_vals[2] = fe;
@@ -96,7 +101,7 @@ where
                     cy + 0.5 * (simplex[2].1 - cy),
                 )
             };
-            let fh = objective(hx, hy);
+            let fh = eval(hx, hy);
             if fh < f_vals[2].min(fr) {
                 simplex[2] = (hx, hy);
                 f_vals[2] = fh;
@@ -105,7 +110,7 @@ where
                 for j in 1..3 {
                     simplex[j].0 = simplex[0].0 + 0.5 * (simplex[j].0 - simplex[0].0);
                     simplex[j].1 = simplex[0].1 + 0.5 * (simplex[j].1 - simplex[0].1);
-                    f_vals[j] = objective(simplex[j].0, simplex[j].1);
+                    f_vals[j] = eval(simplex[j].0, simplex[j].1);
                 }
             }
         }
@@ -270,5 +275,224 @@ mod tests {
             &default_config(),
         );
         assert!(result.fval < 1e-4, "starting near minimum should converge");
+    }
+
+    #[test]
+    fn avoids_nan_region() {
+        // NaN for x < 0, valid quadratic for x >= 0. Minimum at (0, 0).
+        let result = nelder_mead_2d(
+            |x, y| {
+                if x < 0.0 { f64::NAN } else { x * x + y * y }
+            },
+            1.0,
+            1.0,
+            0.5,
+            0.5,
+            &default_config(),
+        );
+        assert!(
+            result.fval.is_finite(),
+            "fval must be finite, got {}",
+            result.fval
+        );
+        assert!(
+            result.fval < 1.0,
+            "should find minimum in valid region, got {}",
+            result.fval
+        );
+    }
+
+    #[test]
+    fn all_nan_returns_max() {
+        // f_spread = MAX - MAX = 0 -> converges immediately (no signal to exploit)
+        let result = nelder_mead_2d(|_, _| f64::NAN, 1.0, 1.0, 0.5, 0.5, &default_config());
+        assert_eq!(result.fval, f64::MAX, "all-NaN objective should yield MAX");
+        assert!(result.x.is_finite(), "x must be finite");
+        assert!(result.y.is_finite(), "y must be finite");
+    }
+
+    #[test]
+    fn inf_objective_treated_as_worst() {
+        for bad in [f64::INFINITY, f64::NEG_INFINITY] {
+            let result = nelder_mead_2d(
+                |x, y| {
+                    if x > 2.0 {
+                        bad
+                    } else {
+                        (x - 1.0).powi(2) + y * y
+                    }
+                },
+                1.0,
+                0.0,
+                0.5,
+                0.5,
+                &default_config(),
+            );
+            assert!(result.fval.is_finite(), "fval finite for {bad}");
+            assert!(result.fval < 0.1, "should converge near (1,0) for {bad}");
+        }
+    }
+
+    #[test]
+    fn initial_simplex_partial_nan() {
+        // Two of three initial vertices land in NaN territory (x < 0).
+        // Simplex: (-1, 0) NaN, (1, 0) valid, (-1, 1) NaN.
+        // Optimizer must sort the valid vertex to best and still converge.
+        let result = nelder_mead_2d(
+            |x, y| {
+                if x < 0.0 {
+                    f64::NAN
+                } else {
+                    (x - 1.0).powi(2) + y * y
+                }
+            },
+            -1.0,
+            0.0,
+            2.0,
+            1.0,
+            &NelderMeadConfig {
+                max_iter: 2000,
+                diameter_tol: 1e-10,
+                fvalue_tol: 1e-12,
+            },
+        );
+        assert!(
+            result.fval.is_finite(),
+            "fval must be finite, got {}",
+            result.fval
+        );
+        assert!(
+            result.fval < 0.1,
+            "should converge near (1,0), got fval={}",
+            result.fval
+        );
+    }
+
+    #[test]
+    fn shrink_path_nan_eval() {
+        // Narrow horizontal band: valid for |y| < 0.04, NaN outside.
+        // Vertex at y=0.1 is NaN. Reflection to y=-0.1 is NaN. Inside
+        // contraction to y=0.05 is also NaN (0.05 > 0.04), forcing shrink.
+        // During shrink, midpoint j=2 lands at y=0.05 (NaN), exercising the
+        // eval guard on the shrink re-evaluation path (line 113).
+        let result = nelder_mead_2d(
+            |x, y| {
+                if y.abs() > 0.04 {
+                    f64::NAN
+                } else {
+                    x * x + y * y
+                }
+            },
+            0.0,
+            0.0,
+            0.1,
+            0.1,
+            &NelderMeadConfig {
+                max_iter: 5000,
+                diameter_tol: 1e-12,
+                fvalue_tol: 1e-14,
+            },
+        );
+        assert!(
+            result.fval.is_finite(),
+            "fval must be finite, got {}",
+            result.fval
+        );
+        assert!(
+            result.fval < 0.01,
+            "should converge near origin, got {}",
+            result.fval
+        );
+    }
+
+    #[test]
+    fn expansion_into_nan_falls_back_to_reflection() {
+        // Objective: x^2 + y^2 with NaN wall at x < -3. The simplex geometry
+        // is set up so the first reflection is better than best, triggering
+        // expansion. The expansion point overshoots past x = -3 into NaN.
+        // The optimizer should fall back to the reflection point.
+        let result = nelder_mead_2d(
+            |x, y| {
+                if x < -3.0 { f64::NAN } else { x * x + y * y }
+            },
+            2.0,
+            0.5,
+            3.0,
+            0.5,
+            &default_config(),
+        );
+        assert!(
+            result.fval.is_finite(),
+            "fval must be finite, got {}",
+            result.fval
+        );
+        assert!(
+            result.fval < 0.01,
+            "should converge near origin, got {}",
+            result.fval
+        );
+    }
+
+    #[test]
+    fn f64_max_objective_passes_through() {
+        // f64::MAX is finite, so the guard must NOT clamp it. The optimizer
+        // should treat it as a very large (but valid) objective value.
+        let result = nelder_mead_2d(
+            |x, y| {
+                if x > 5.0 {
+                    f64::MAX
+                } else {
+                    (x - 1.0).powi(2) + y * y
+                }
+            },
+            1.0,
+            0.0,
+            0.5,
+            0.5,
+            &default_config(),
+        );
+        assert!(result.fval.is_finite(), "fval must be finite");
+        assert!(
+            result.fval < 0.01,
+            "should converge near (1,0), got {}",
+            result.fval
+        );
+    }
+
+    #[test]
+    fn nan_ring_around_minimum() {
+        // Valid bowl inside r < 1.5 from (3, 3), NaN ring for 1.5 <= r < 4,
+        // valid but large beyond r >= 4. The optimizer starts outside the ring
+        // and must navigate through NaN to reach the inner bowl.
+        let result = nelder_mead_2d(
+            |x, y| {
+                let r2 = (x - 3.0).powi(2) + (y - 3.0).powi(2);
+                let r = r2.sqrt();
+                if r < 1.5 {
+                    r2
+                } else if r < 4.0 {
+                    f64::NAN
+                } else {
+                    100.0 + r2
+                }
+            },
+            7.0,
+            7.0,
+            1.0,
+            1.0,
+            &NelderMeadConfig {
+                max_iter: 5000,
+                diameter_tol: 1e-10,
+                fvalue_tol: 1e-12,
+            },
+        );
+        // The optimizer cannot cross the NaN ring, so it stays in the outer
+        // valid region. The key property: it does not panic or return NaN.
+        assert!(
+            result.fval.is_finite(),
+            "fval must be finite despite NaN ring, got {}",
+            result.fval
+        );
+        assert!(result.x.is_finite() && result.y.is_finite());
     }
 }
