@@ -2313,6 +2313,41 @@ mod tests {
     }
 
     #[test]
+    fn slice_violation_density_matches_density_method() {
+        let s = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
+        let report = s.is_arbitrage_free().unwrap();
+        assert!(!report.butterfly_violations.is_empty());
+        for v in &report.butterfly_violations {
+            let expected = s.density(v.strike).unwrap();
+            assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
+            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn slice_density_cross_check_breeden_litzenberger() {
+        use crate::implied::black::black_price;
+        use crate::types::OptionType;
+
+        let s = equity_slice();
+        let f = s.forward();
+        let t = s.expiry();
+
+        for &strike in &[80.0, 100.0, 120.0] {
+            let h = strike * 1e-4;
+            let vol_m = s.vol(strike - h).unwrap().0;
+            let vol_0 = s.vol(strike).unwrap().0;
+            let vol_p = s.vol(strike + h).unwrap().0;
+            let c_m = black_price(f, strike - h, vol_m, t, OptionType::Call).unwrap();
+            let c_0 = black_price(f, strike, vol_0, t, OptionType::Call).unwrap();
+            let c_p = black_price(f, strike + h, vol_p, t, OptionType::Call).unwrap();
+            let numerical = (c_p - 2.0 * c_0 + c_m) / (h * h);
+            let analytical = s.density(strike).unwrap();
+            assert_abs_diff_eq!(analytical, numerical, epsilon = 1e-4);
+        }
+    }
+
+    #[test]
     fn slice_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<SsviSlice>();

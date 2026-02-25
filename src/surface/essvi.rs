@@ -1089,6 +1089,18 @@ mod tests {
     }
 
     #[test]
+    fn violation_density_matches_density_method() {
+        let s = EssviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
+        let report = s.is_arbitrage_free().unwrap();
+        assert!(!report.butterfly_violations.is_empty());
+        for v in &report.butterfly_violations {
+            let expected = s.density(v.strike).unwrap();
+            assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
+            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
+        }
+    }
+
+    #[test]
     fn is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<EssviSlice>();
