@@ -39,6 +39,18 @@ jobs:
           components: rustfmt
       - run: cargo fmt -- --check
 
+  wasm:
+    name: WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p volsurf-wasm --target wasm32-unknown-unknown
+      - run: cargo clippy -p volsurf-wasm --target wasm32-unknown-unknown -- -D warnings
+
   doc:
     name: Documentation
     runs-on: ubuntu-latest
