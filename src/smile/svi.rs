@@ -442,7 +442,8 @@ impl SmileSection for SviSmile {
     /// Check butterfly arbitrage by scanning the Gatheral g-function.
     ///
     /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
-    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s.
+    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s
+    /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
     ///
     /// # Reference
     /// Gatheral & Jacquier (2014), Theorem 4.1.
@@ -462,10 +463,15 @@ impl SmileSection for SviSmile {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let g = self.g_function(k);
             if g < -TOL {
+                let strike = self.forward * k.exp();
+                let d = match self.density(strike) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
                 violations.push(ButterflyViolation {
-                    strike: self.forward * k.exp(),
-                    density: g,
-                    magnitude: g.abs(),
+                    strike,
+                    density: d,
+                    magnitude: d.abs(),
                 });
             }
         }
@@ -821,6 +827,27 @@ mod tests {
             assert!(v.magnitude > 0.0, "violation magnitude should be positive");
             assert!(v.strike > 0.0, "violation strike should be positive");
         }
+    }
+
+    #[test]
+    fn violation_density_matches_density_method() {
+        let smile = SviSmile::new(100.0, 1.0, 0.001, 0.8, -0.7, 0.0, 0.05).unwrap();
+        let report = smile.is_arbitrage_free().unwrap();
+        assert!(!report.butterfly_violations.is_empty());
+        for v in &report.butterfly_violations {
+            let expected = smile.density(v.strike).unwrap();
+            assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
+            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn is_arbitrage_free_skips_density_errors() {
+        // make_invalid_svi has w < 0 everywhere, so g = NEG_INFINITY at all
+        // grid points but density() returns Err — violations get skipped.
+        let smile = make_invalid_svi();
+        let report = smile.is_arbitrage_free().unwrap();
+        assert!(report.butterfly_violations.is_empty());
     }
 
     #[test]
