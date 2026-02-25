@@ -183,6 +183,7 @@ impl VolSurface for PiecewiseSurface {
 
     fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
         validate_positive(expiry, "expiry")?;
+        validate_positive(strike, "strike")?;
 
         match self.locate_tenor(expiry) {
             TenorPosition::Exact(i) => self.smiles[i].variance(strike),
@@ -257,7 +258,7 @@ impl VolSurface for PiecewiseSurface {
                 let t1 = self.tenors[i];
                 let t2 = self.tenors[j];
                 let alpha = (expiry - t1) / (t2 - t1);
-                let fwd = (1.0 - alpha) * f1 + alpha * f2;
+                let fwd = (f1.ln() * (1.0 - alpha) + f2.ln() * alpha).exp();
                 let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
                 let vars: error::Result<Vec<f64>> = grid
                     .iter()
