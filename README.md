@@ -49,13 +49,13 @@ Production-ready volatility surface construction for equity and FX derivatives.
 
 ```toml
 [dependencies]
-volsurf = "0.4"
+volsurf = "1.0"
 ```
 
 Optional features:
 
 ```toml
-volsurf = { version = "0.4", features = ["parallel", "logging"] }
+volsurf = { version = "1.0", features = ["parallel", "logging"] }
 ```
 
 | Feature | Description |
@@ -234,16 +234,34 @@ Measured with Criterion.rs on Apple Silicon. All performance targets exceeded.
 
 **Targets**: vol query < 100 ns, SABR calibration < 1 ms, 20-tenor surface < 10 ms.
 
-## Roadmap
+## Bindings
+
+### Python
+
+```bash
+pip install volsurf
+```
+
+Built with PyO3. See [`python/`](python/) for usage and API docs.
+
+### WebAssembly
+
+```bash
+wasm-pack build wasm/ --target web
+```
+
+Built with wasm-bindgen. See [`wasm/README.md`](wasm/README.md) for JavaScript API and usage examples.
+
+## Changelog
 
 | Version | Name | Key Features |
 |---------|------|--------------|
-| v0.1 | First Light | SVI smile, cubic spline, ragged grid surface, builder API |
-| v0.2 | Market Ready | SABR, SSVI, calendar arbitrage, surface diagnostics |
-| v0.2.1 | | Normal/Displaced IV, Dupire local vol, serde validation, CI |
+| **v1.0** | **Stable** | **API stability, PyO3 bindings, WASM target** |
+| v0.4 | Hardening | Coverage gaps, tracing diagnostics, dead code removal |
 | v0.3 | Production Grade | eSSVI surface + calibration, parallel construction, dividend yield |
-| **v0.4** | **Hardening** | **Coverage gaps, tracing diagnostics, dead code removal** |
-| v1.0 | Stable | API stability, PyO3 bindings, WASM target |
+| v0.2.1 | | Normal/Displaced IV, Dupire local vol, serde validation, CI |
+| v0.2 | Market Ready | SABR, SSVI, calendar arbitrage, surface diagnostics |
+| v0.1 | First Light | SVI smile, cubic spline, ragged grid surface, builder API |
 
 ## References
 
