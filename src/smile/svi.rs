@@ -442,7 +442,8 @@ impl SmileSection for SviSmile {
     /// Check butterfly arbitrage by scanning the Gatheral g-function.
     ///
     /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
-    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s.
+    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s
+    /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
     ///
     /// # Reference
     /// Gatheral & Jacquier (2014), Theorem 4.1.
@@ -462,10 +463,15 @@ impl SmileSection for SviSmile {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let g = self.g_function(k);
             if g < -TOL {
+                let strike = self.forward * k.exp();
+                let d = match self.density(strike) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
                 violations.push(ButterflyViolation {
-                    strike: self.forward * k.exp(),
-                    density: g,
-                    magnitude: g.abs(),
+                    strike,
+                    density: d,
+                    magnitude: d.abs(),
                 });
             }
         }
