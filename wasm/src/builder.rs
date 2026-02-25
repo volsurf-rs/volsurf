@@ -15,6 +15,12 @@ pub struct WasmSurfaceBuilder {
     inner: Option<SurfaceBuilder>,
 }
 
+impl Default for WasmSurfaceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl WasmSurfaceBuilder {
     #[wasm_bindgen(constructor)]
