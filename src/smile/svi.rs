@@ -842,6 +842,15 @@ mod tests {
     }
 
     #[test]
+    fn is_arbitrage_free_skips_density_errors() {
+        // make_invalid_svi has w < 0 everywhere, so g = NEG_INFINITY at all
+        // grid points but density() returns Err — violations get skipped.
+        let smile = make_invalid_svi();
+        let report = smile.is_arbitrage_free().unwrap();
+        assert!(report.butterfly_violations.is_empty());
+    }
+
+    #[test]
     fn flat_smile_is_arb_free() {
         let smile = SviSmile::new(100.0, 1.0, 0.04, 0.0, 0.0, 0.0, 0.1).unwrap();
         let report = smile.is_arbitrage_free().unwrap();
