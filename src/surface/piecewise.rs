@@ -701,4 +701,48 @@ mod tests {
         let var2 = surface.black_variance(0.75, 100.0).unwrap();
         assert_abs_diff_eq!(var2.0, expected2, epsilon = 1e-10);
     }
+
+    #[test]
+    fn smile_at_uses_log_linear_forward_interpolation() {
+        // F1=100, F2=400 → geometric mean at alpha=0.5 is 200, not 250
+        let s1 = flat_smile(100.0, 0.5, 0.20);
+        let s2 = flat_smile(400.0, 1.0, 0.20);
+        let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
+
+        let smile = surface.smile_at(0.75).unwrap();
+        let expected_fwd = (100.0_f64.ln() * 0.5 + 400.0_f64.ln() * 0.5).exp();
+        assert_abs_diff_eq!(smile.forward(), expected_fwd, epsilon = 1e-10);
+        assert_abs_diff_eq!(expected_fwd, 200.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn smile_at_and_black_variance_consistent_with_differing_forwards() {
+        let s1 = flat_smile(90.0, 0.5, 0.22);
+        let s2 = flat_smile(110.0, 1.0, 0.22);
+        let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
+
+        let t = 0.75;
+        let smile = surface.smile_at(t).unwrap();
+        for &k in &[95.0, 100.0, 105.0] {
+            let from_smile = smile.variance(k).unwrap().0;
+            let from_surface = surface.black_variance(t, k).unwrap().0;
+            assert_abs_diff_eq!(from_smile, from_surface, epsilon = 1e-3);
+        }
+    }
+
+    #[test]
+    fn black_variance_rejects_invalid_strikes() {
+        let s1 = flat_smile(100.0, 1.0, 0.20);
+        let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
+
+        for &bad_strike in &[0.0, -100.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                matches!(
+                    surface.black_variance(0.5, bad_strike),
+                    Err(VolSurfError::InvalidInput { .. })
+                ),
+                "should reject strike={bad_strike}"
+            );
+        }
+    }
 }
