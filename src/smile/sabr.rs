@@ -50,8 +50,9 @@ use crate::validate::{validate_non_negative, validate_positive};
 ///
 /// The Hagan formula is a first-order expansion in *T*. The correction factor
 /// `1 + T·(…)` can become negative for long expiries combined with high |ρ|
-/// and ν (roughly *T* > 5 with |ρ| > 0.8). When this happens the correction
-/// is clamped to `f64::EPSILON`, producing a small but positive implied vol.
+/// and ν (e.g. *T* > 10 with |ρ| > 0.9 and ν > 1). When this happens the
+/// correction is clamped to a small positive floor, producing a near-zero
+/// but valid implied vol.
 /// Results in that regime should be treated with caution.
 ///
 /// # References
@@ -235,7 +236,7 @@ impl SabrSmile {
             + t * (omb_sq / 24.0 * alpha * alpha / fk_omb
                 + 0.25 * rho * beta * nu * alpha / fk_mid
                 + (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu))
-            .max(f64::EPSILON);
+            .max(1e-10);
 
         (alpha / denom) * z_ratio * correction
     }
@@ -1152,7 +1153,12 @@ mod tests {
         for &k in &[80.0, 100.0, 120.0] {
             let v = s.vol(k);
             assert!(v.is_ok(), "T=20, K={k}: should not return NumericalError");
-            assert!(v.unwrap().0 > 0.0, "T=20, K={k}: vol must be positive");
+            let vol = v.unwrap().0;
+            assert!(vol > 0.0, "T=20, K={k}: vol must be positive");
+            assert!(
+                vol < 0.01,
+                "T=20, K={k}: clamped vol should be near-zero, got {vol}"
+            );
         }
     }
 
