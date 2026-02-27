@@ -226,6 +226,17 @@ impl PyEssviSurface {
             serde_json::from_str(s).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self { inner })
     }
+
+    #[staticmethod]
+    #[pyo3(signature = (market_data, tenors, forwards))]
+    fn calibrate(
+        market_data: Vec<Vec<(f64, f64)>>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+    ) -> PyResult<Self> {
+        let inner = EssviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
 }
 
 impl_vol_grid!(PyEssviSurface);
