@@ -66,6 +66,13 @@ impl WasmSviSmile {
         self.inner.expiry()
     }
 
+    pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
+        self.inner
+            .is_arbitrage_free()
+            .map(WasmArbitrageReport::from)
+            .map_err(to_js_err)
+    }
+
     pub fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -130,6 +137,13 @@ impl WasmSabrSmile {
         self.inner.expiry()
     }
 
+    pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
+        self.inner
+            .is_arbitrage_free()
+            .map(WasmArbitrageReport::from)
+            .map_err(to_js_err)
+    }
+
     pub fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -147,7 +161,6 @@ pub struct WasmSmile {
 }
 
 impl WasmSmile {
-    #[allow(dead_code)]
     pub(crate) fn new(inner: Box<dyn SmileSection>) -> Self {
         Self { inner }
     }
