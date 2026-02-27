@@ -46,6 +46,14 @@ use crate::validate::{validate_non_negative, validate_positive};
 ///
 /// Common choices: `β = 0.5` (equity), `β = 0` (normal), `β = 1` (lognormal).
 ///
+/// # Approximation limits
+///
+/// The Hagan formula is a first-order expansion in *T*. The correction factor
+/// `1 + T·(…)` can become negative for long expiries combined with high |ρ|
+/// and ν (roughly *T* > 5 with |ρ| > 0.8). When this happens the correction
+/// is clamped to `f64::EPSILON`, producing a small but positive implied vol.
+/// Results in that regime should be treated with caution.
+///
 /// # References
 ///
 /// - Hagan, P. et al., "Managing Smile Risk", Wilmott Magazine, Jan 2002
@@ -219,12 +227,15 @@ impl SabrSmile {
             z / xz
         };
 
-        // Time-dependent correction factor
+        // Time-dependent correction factor — first-order in T, can go negative
+        // for extreme (ρ, ν, T) combinations. Clamp to ε so the formula degrades
+        // to a small positive vol rather than producing NumericalError.
         let fk_omb = fk.powf(omb); // (FK)^(1-β)
-        let correction = 1.0
+        let correction = (1.0
             + t * (omb_sq / 24.0 * alpha * alpha / fk_omb
                 + 0.25 * rho * beta * nu * alpha / fk_mid
-                + (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu);
+                + (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu))
+            .max(f64::EPSILON);
 
         (alpha / denom) * z_ratio * correction
     }
