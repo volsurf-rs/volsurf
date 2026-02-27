@@ -2,7 +2,9 @@ use volsurf::VolSurface;
 use volsurf::surface::{EssviSurface, SsviSurface};
 use wasm_bindgen::prelude::*;
 
+use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
+use crate::smile::WasmSmile;
 
 #[wasm_bindgen]
 pub struct WasmSsviSurface {
@@ -62,6 +64,18 @@ impl WasmSsviSurface {
 
     pub fn thetas(&self) -> Vec<f64> {
         self.inner.thetas().to_vec()
+    }
+
+    pub fn smile_at(&self, expiry: f64) -> Result<WasmSmile, JsValue> {
+        let smile = self.inner.smile_at(expiry).map_err(to_js_err)?;
+        Ok(WasmSmile::new(smile))
+    }
+
+    pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
+        self.inner
+            .diagnostics()
+            .map(WasmSurfaceDiagnostics::from)
+            .map_err(to_js_err)
     }
 
     pub fn to_json(&self) -> Result<String, JsValue> {
@@ -152,6 +166,18 @@ impl WasmEssviSurface {
 
     pub fn thetas(&self) -> Vec<f64> {
         self.inner.thetas().to_vec()
+    }
+
+    pub fn smile_at(&self, expiry: f64) -> Result<WasmSmile, JsValue> {
+        let smile = self.inner.smile_at(expiry).map_err(to_js_err)?;
+        Ok(WasmSmile::new(smile))
+    }
+
+    pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
+        self.inner
+            .diagnostics()
+            .map(WasmSurfaceDiagnostics::from)
+            .map_err(to_js_err)
     }
 
     pub fn to_json(&self) -> Result<String, JsValue> {

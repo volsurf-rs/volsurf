@@ -4,7 +4,9 @@ use volsurf::VolSurface;
 use volsurf::surface::{SmileModel, SurfaceBuilder};
 use wasm_bindgen::prelude::*;
 
+use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
+use crate::smile::WasmSmile;
 
 fn consumed() -> JsValue {
     JsValue::from_str("builder already consumed by build()")
@@ -115,5 +117,17 @@ impl WasmPiecewiseSurface {
             .black_variance(expiry, strike)
             .map_err(to_js_err)?
             .0)
+    }
+
+    pub fn smile_at(&self, expiry: f64) -> Result<WasmSmile, JsValue> {
+        let smile = self.inner.smile_at(expiry).map_err(to_js_err)?;
+        Ok(WasmSmile::new(smile))
+    }
+
+    pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
+        self.inner
+            .diagnostics()
+            .map(WasmSurfaceDiagnostics::from)
+            .map_err(to_js_err)
     }
 }
