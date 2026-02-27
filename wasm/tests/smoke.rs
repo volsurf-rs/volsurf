@@ -531,3 +531,45 @@ fn smile_at_is_arbitrage_free() {
     let report = smile.is_arbitrage_free().unwrap();
     assert!(report.is_arbitrage_free());
 }
+
+// ── Surface calibrate ──
+
+fn two_tenor_market_data() -> (Vec<f64>, Vec<usize>, Vec<f64>, Vec<f64>) {
+    let data_3m: Vec<f64> = vec![
+        80.0, 0.30, 90.0, 0.25, 95.0, 0.23, 100.0, 0.21, 105.0, 0.23, 110.0, 0.25, 120.0, 0.30,
+    ];
+    let data_1y: Vec<f64> = vec![
+        80.0, 0.28, 90.0, 0.24, 95.0, 0.22, 100.0, 0.20, 105.0, 0.22, 110.0, 0.24, 120.0, 0.28,
+    ];
+    let mut flat = data_3m;
+    flat.extend(data_1y);
+    (flat, vec![7, 7], vec![0.25, 1.0], vec![100.0, 100.0])
+}
+
+#[wasm_bindgen_test]
+fn ssvi_calibrate() {
+    let (flat, sizes, tenors, fwds) = two_tenor_market_data();
+    let surf = WasmSsviSurface::calibrate(flat, sizes, tenors, fwds).unwrap();
+    let atm = surf.black_vol(1.0, 100.0).unwrap();
+    assert!(
+        (atm - 0.20).abs() < 0.02,
+        "SSVI calibrate ATM vol={atm}, expected ~0.20"
+    );
+}
+
+#[wasm_bindgen_test]
+fn essvi_calibrate() {
+    let (flat, sizes, tenors, fwds) = two_tenor_market_data();
+    let surf = WasmEssviSurface::calibrate(flat, sizes, tenors, fwds).unwrap();
+    let atm = surf.black_vol(1.0, 100.0).unwrap();
+    assert!(
+        (atm - 0.20).abs() < 0.02,
+        "eSSVI calibrate ATM vol={atm}, expected ~0.20"
+    );
+}
+
+#[wasm_bindgen_test]
+fn ssvi_calibrate_mismatched_sizes() {
+    let (flat, _, tenors, fwds) = two_tenor_market_data();
+    assert!(WasmSsviSurface::calibrate(flat, vec![7, 5], tenors, fwds).is_err());
+}
