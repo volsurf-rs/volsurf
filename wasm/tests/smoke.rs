@@ -347,3 +347,187 @@ fn too_few_points_rejected() {
 fn version_returns_string() {
     assert_eq!(version(), "0.1.0");
 }
+
+// ── is_arbitrage_free on smiles ──
+
+#[wasm_bindgen_test]
+fn svi_is_arbitrage_free() {
+    let smile = WasmSviSmile::new(100.0, 1.0, 0.04, 0.4, -0.4, 0.0, 0.1).unwrap();
+    let report = smile.is_arbitrage_free().unwrap();
+    assert!(report.is_arbitrage_free());
+    assert!(report.butterfly_violations().is_empty());
+
+    let json = report.to_json().unwrap();
+    assert!(json.contains("\"is_free\""));
+    assert!(json.contains("\"butterfly_violations\""));
+}
+
+#[wasm_bindgen_test]
+fn sabr_is_arbitrage_free() {
+    let smile = WasmSabrSmile::new(100.0, 1.0, 0.2, 0.5, -0.3, 0.4).unwrap();
+    let report = smile.is_arbitrage_free().unwrap();
+    assert!(report.is_arbitrage_free());
+}
+
+// ── smile_at on surfaces ──
+
+#[wasm_bindgen_test]
+fn ssvi_smile_at() {
+    let surf = WasmSsviSurface::new(
+        -0.3,
+        1.5,
+        0.5,
+        vec![0.25, 0.5, 1.0],
+        vec![100.0, 100.0, 100.0],
+        vec![0.01, 0.025, 0.06],
+    )
+    .unwrap();
+
+    let smile = surf.smile_at(0.5).unwrap();
+    let vol = smile.vol(100.0).unwrap();
+    assert!(vol > 0.0 && vol < 1.0, "vol={vol}");
+    assert!((smile.expiry() - 0.5).abs() < 1e-10);
+    assert!((smile.forward() - 100.0).abs() < 1e-10);
+
+    let var = smile.variance(100.0).unwrap();
+    assert!((var - vol * vol * 0.5).abs() < 1e-10);
+
+    let d = smile.density(100.0).unwrap();
+    assert!(d > 0.0, "density={d}");
+}
+
+#[wasm_bindgen_test]
+fn essvi_smile_at() {
+    let surf = WasmEssviSurface::new(
+        -0.4,
+        -0.2,
+        0.3,
+        1.5,
+        0.5,
+        vec![0.25, 0.5, 1.0],
+        vec![100.0, 100.0, 100.0],
+        vec![0.01, 0.025, 0.06],
+    )
+    .unwrap();
+
+    let smile = surf.smile_at(0.5).unwrap();
+    let vol = smile.vol(100.0).unwrap();
+    assert!(vol > 0.0 && vol < 1.0, "vol={vol}");
+}
+
+#[wasm_bindgen_test]
+fn builder_smile_at() {
+    let (strikes, vols) = nine_strike_smile();
+    let mut builder = WasmSurfaceBuilder::new();
+    builder.spot(100.0).unwrap();
+    builder.rate(0.05).unwrap();
+    builder
+        .add_tenor(0.5, strikes.clone(), vols.clone())
+        .unwrap();
+    builder.add_tenor(1.0, strikes, vols).unwrap();
+    let surface = builder.build().unwrap();
+
+    let smile = surface.smile_at(0.5).unwrap();
+    let vol = smile.vol(100.0).unwrap();
+    assert!(vol > 0.0 && vol < 1.0, "vol={vol}");
+    assert!((smile.expiry() - 0.5).abs() < 1e-10);
+}
+
+// ── diagnostics on surfaces ──
+
+#[wasm_bindgen_test]
+fn ssvi_diagnostics() {
+    let surf = WasmSsviSurface::new(
+        -0.3,
+        1.5,
+        0.5,
+        vec![0.25, 1.0],
+        vec![100.0, 100.0],
+        vec![0.01, 0.04],
+    )
+    .unwrap();
+
+    let diag = surf.diagnostics().unwrap();
+    assert!(diag.is_arbitrage_free());
+    assert_eq!(diag.smile_reports().len(), 2);
+    assert!(diag.calendar_violations().is_empty());
+
+    let json = diag.to_json().unwrap();
+    assert!(json.contains("\"smile_reports\""));
+    assert!(json.contains("\"calendar_violations\""));
+}
+
+#[wasm_bindgen_test]
+fn essvi_diagnostics() {
+    let surf = WasmEssviSurface::new(
+        -0.4,
+        -0.2,
+        0.3,
+        1.5,
+        0.5,
+        vec![0.25, 1.0],
+        vec![100.0, 100.0],
+        vec![0.01, 0.04],
+    )
+    .unwrap();
+
+    let diag = surf.diagnostics().unwrap();
+    assert!(diag.is_arbitrage_free());
+    assert_eq!(diag.smile_reports().len(), 2);
+}
+
+#[wasm_bindgen_test]
+fn builder_diagnostics() {
+    let (strikes, vols) = nine_strike_smile();
+    let mut builder = WasmSurfaceBuilder::new();
+    builder.spot(100.0).unwrap();
+    builder.rate(0.05).unwrap();
+    builder
+        .add_tenor(0.5, strikes.clone(), vols.clone())
+        .unwrap();
+    builder.add_tenor(1.0, strikes, vols).unwrap();
+    let surface = builder.build().unwrap();
+
+    let diag = surface.diagnostics().unwrap();
+    assert_eq!(diag.smile_reports().len(), 2);
+}
+
+// ── butterfly violations (negative test) ──
+
+#[wasm_bindgen_test]
+fn svi_butterfly_violations_detected() {
+    // Aggressive slope + small curvature → g(k) goes negative in wings
+    let smile = WasmSviSmile::new(100.0, 1.0, 0.001, 0.8, -0.7, 0.0, 0.05).unwrap();
+    let report = smile.is_arbitrage_free().unwrap();
+    assert!(!report.is_arbitrage_free());
+
+    let violations = report.butterfly_violations();
+    assert!(!violations.is_empty());
+    for v in &violations {
+        assert!(v.strike() > 0.0);
+        assert!(v.density() < 0.0);
+        assert!(v.magnitude() > 0.0);
+    }
+
+    let json = report.to_json().unwrap();
+    assert!(json.contains("\"is_free\":false"));
+}
+
+// ── WasmSmile is_arbitrage_free (via smile_at) ──
+
+#[wasm_bindgen_test]
+fn smile_at_is_arbitrage_free() {
+    let surf = WasmSsviSurface::new(
+        -0.3,
+        1.5,
+        0.5,
+        vec![0.25, 1.0],
+        vec![100.0, 100.0],
+        vec![0.01, 0.04],
+    )
+    .unwrap();
+
+    let smile = surf.smile_at(0.5).unwrap();
+    let report = smile.is_arbitrage_free().unwrap();
+    assert!(report.is_arbitrage_free());
+}
