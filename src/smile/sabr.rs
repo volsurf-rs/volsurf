@@ -1171,6 +1171,43 @@ mod tests {
     }
 
     #[test]
+    fn vol_correction_boundary_degrades_monotonically() {
+        // T=8 is in the unclamped regime, T=12 is near the sign-change boundary.
+        // Vol should degrade monotonically — no discontinuity at the clamp.
+        let s8 = SabrSmile::new(100.0, 8.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let s12 = SabrSmile::new(100.0, 12.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let v8 = s8.vol(100.0).unwrap().0;
+        let v12 = s12.vol(100.0).unwrap().0;
+        assert!(
+            v8 > v12,
+            "vol should decrease as T increases past the boundary"
+        );
+        assert!(v12 > 0.0, "T=12 vol should still be positive");
+    }
+
+    #[test]
+    fn vol_negative_correction_clamped_beta_one() {
+        // beta=1 (lognormal): omb=0 kills two correction terms, only (2-3ρ²)/24·ν²
+        // remains. Clamp should still fire for extreme ρ and long T.
+        let s = SabrSmile::new(100.0, 20.0, 0.20, 1.0, -0.95, 1.5).unwrap();
+        let v = s.vol(100.0).unwrap().0;
+        assert!(v > 0.0, "beta=1 clamped vol must be positive");
+        assert!(v < 0.01, "beta=1 clamped vol should be near-zero, got {v}");
+    }
+
+    #[test]
+    fn arb_free_clamped_regime() {
+        // In the clamped regime the smile is nearly flat at ~0, so density ≈ 0
+        // everywhere. The arb scan should complete without crashing.
+        let s = SabrSmile::new(100.0, 20.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let report = s.is_arbitrage_free();
+        assert!(
+            report.is_ok(),
+            "arb scan should not error in clamped regime"
+        );
+    }
+
+    #[test]
     fn vol_general_approaches_atm() {
         // As K → F from both sides, general formula should approach ATM formula
         let s = make_equity_smile();
