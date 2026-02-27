@@ -46,6 +46,15 @@ use crate::validate::{validate_non_negative, validate_positive};
 ///
 /// Common choices: `β = 0.5` (equity), `β = 0` (normal), `β = 1` (lognormal).
 ///
+/// # Approximation limits
+///
+/// The Hagan formula is a first-order expansion in *T*. The correction factor
+/// `1 + T·(…)` can become negative for long expiries combined with high |ρ|
+/// and ν (e.g. *T* > 10 with |ρ| > 0.9 and ν > 1). When this happens the
+/// correction is clamped to a small positive floor, producing a near-zero
+/// but valid implied vol.
+/// Results in that regime should be treated with caution.
+///
 /// # References
 ///
 /// - Hagan, P. et al., "Managing Smile Risk", Wilmott Magazine, Jan 2002
@@ -219,12 +228,15 @@ impl SabrSmile {
             z / xz
         };
 
-        // Time-dependent correction factor
+        // Time-dependent correction factor — first-order in T, can go negative
+        // for extreme (ρ, ν, T) combinations. Clamp to ε so the formula degrades
+        // to a small positive vol rather than producing NumericalError.
         let fk_omb = fk.powf(omb); // (FK)^(1-β)
-        let correction = 1.0
+        let correction = (1.0
             + t * (omb_sq / 24.0 * alpha * alpha / fk_omb
                 + 0.25 * rho * beta * nu * alpha / fk_mid
-                + (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu);
+                + (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu))
+            .max(1e-10);
 
         (alpha / denom) * z_ratio * correction
     }
@@ -1130,6 +1142,68 @@ mod tests {
         assert!(
             (v - v_short).abs() > 0.001,
             "Long vs short expiry ATM vol should differ"
+        );
+    }
+
+    // Hagan correction factor goes negative for extreme (ρ, ν, T) — issue #50.
+    // The correction clamp ensures vol() returns positive rather than NumericalError.
+    #[test]
+    fn vol_negative_correction_clamped_t20() {
+        let s = SabrSmile::new(100.0, 20.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        for &k in &[80.0, 100.0, 120.0] {
+            let v = s.vol(k);
+            assert!(v.is_ok(), "T=20, K={k}: should not return NumericalError");
+            let vol = v.unwrap().0;
+            assert!(vol > 0.0, "T=20, K={k}: vol must be positive");
+            assert!(
+                vol < 0.01,
+                "T=20, K={k}: clamped vol should be near-zero, got {vol}"
+            );
+        }
+    }
+
+    #[test]
+    fn vol_negative_correction_clamped_t10() {
+        let s = SabrSmile::new(100.0, 10.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let v = s.vol(100.0).unwrap().0;
+        assert!(v > 0.0, "T=10, ATM vol must be positive, got {v}");
+        assert!(v.is_finite(), "T=10, ATM vol must be finite");
+    }
+
+    #[test]
+    fn vol_correction_boundary_degrades_monotonically() {
+        // T=8 is in the unclamped regime, T=12 is near the sign-change boundary.
+        // Vol should degrade monotonically — no discontinuity at the clamp.
+        let s8 = SabrSmile::new(100.0, 8.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let s12 = SabrSmile::new(100.0, 12.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let v8 = s8.vol(100.0).unwrap().0;
+        let v12 = s12.vol(100.0).unwrap().0;
+        assert!(
+            v8 > v12,
+            "vol should decrease as T increases past the boundary"
+        );
+        assert!(v12 > 0.0, "T=12 vol should still be positive");
+    }
+
+    #[test]
+    fn vol_negative_correction_clamped_beta_one() {
+        // beta=1 (lognormal): omb=0 kills two correction terms, only (2-3ρ²)/24·ν²
+        // remains. Clamp should still fire for extreme ρ and long T.
+        let s = SabrSmile::new(100.0, 20.0, 0.20, 1.0, -0.95, 1.5).unwrap();
+        let v = s.vol(100.0).unwrap().0;
+        assert!(v > 0.0, "beta=1 clamped vol must be positive");
+        assert!(v < 0.01, "beta=1 clamped vol should be near-zero, got {v}");
+    }
+
+    #[test]
+    fn arb_free_clamped_regime() {
+        // In the clamped regime the smile is nearly flat at ~0, so density ≈ 0
+        // everywhere. The arb scan should complete without crashing.
+        let s = SabrSmile::new(100.0, 20.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let report = s.is_arbitrage_free();
+        assert!(
+            report.is_ok(),
+            "arb scan should not error in clamped regime"
         );
     }
 
