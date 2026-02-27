@@ -1144,6 +1144,26 @@ mod tests {
         );
     }
 
+    // Hagan correction factor goes negative for extreme (ρ, ν, T) — issue #50.
+    // The clamp to f64::EPSILON ensures vol() returns positive rather than NumericalError.
+    #[test]
+    fn vol_negative_correction_clamped_t20() {
+        let s = SabrSmile::new(100.0, 20.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        for &k in &[80.0, 100.0, 120.0] {
+            let v = s.vol(k);
+            assert!(v.is_ok(), "T=20, K={k}: should not return NumericalError");
+            assert!(v.unwrap().0 > 0.0, "T=20, K={k}: vol must be positive");
+        }
+    }
+
+    #[test]
+    fn vol_negative_correction_clamped_t10() {
+        let s = SabrSmile::new(100.0, 10.0, 0.3, 0.5, -0.95, 1.5).unwrap();
+        let v = s.vol(100.0).unwrap().0;
+        assert!(v > 0.0, "T=10, ATM vol must be positive, got {v}");
+        assert!(v.is_finite(), "T=10, ATM vol must be finite");
+    }
+
     #[test]
     fn vol_general_approaches_atm() {
         // As K → F from both sides, general formula should approach ATM formula
