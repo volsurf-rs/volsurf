@@ -1146,7 +1146,7 @@ mod tests {
     }
 
     // Hagan correction factor goes negative for extreme (ρ, ν, T) — issue #50.
-    // The clamp to f64::EPSILON ensures vol() returns positive rather than NumericalError.
+    // The correction clamp ensures vol() returns positive rather than NumericalError.
     #[test]
     fn vol_negative_correction_clamped_t20() {
         let s = SabrSmile::new(100.0, 20.0, 0.3, 0.5, -0.95, 1.5).unwrap();
