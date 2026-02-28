@@ -320,22 +320,17 @@ impl SsviSurface {
     /// # References
     /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
     pub fn calendar_arb_analytical(&self) -> Vec<CalendarViolation> {
-        const K_GRID: usize = 41;
-        const K_MIN: f64 = -2.0;
-        const K_MAX: f64 = 2.0;
         const TOL: f64 = -1e-10;
 
         let mut violations = Vec::new();
 
         for i in 0..self.tenors.len().saturating_sub(1) {
-            let theta = self.thetas[i];
             let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
+            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
 
-            for j in 0..K_GRID {
-                let k = K_MIN + (K_MAX - K_MIN) * (j as f64) / ((K_GRID - 1) as f64);
-                if self.dw_dtheta(theta, k) < TOL {
-                    let strike = f_avg * k.exp();
-                    let k_short = (strike / self.forwards[i]).ln();
+            for &strike in &grid {
+                let k_short = (strike / self.forwards[i]).ln();
+                if self.dw_dtheta(self.thetas[i], k_short) < TOL {
                     let k_long = (strike / self.forwards[i + 1]).ln();
                     violations.push(CalendarViolation {
                         strike,
@@ -2157,6 +2152,32 @@ mod tests {
         // Single tenor: no consecutive pairs, so no calendar violations.
         let s = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.16]).unwrap();
         assert!(s.calendar_arb_analytical().is_empty());
+    }
+
+    #[test]
+    fn calendar_arb_analytical_differing_forwards() {
+        let s = SsviSurface::new(
+            -0.3,
+            0.5,
+            0.5,
+            vec![0.25, 0.5, 1.0, 2.0],
+            vec![95.0, 100.0, 105.0, 110.0],
+            vec![0.04, 0.08, 0.16, 0.32],
+        )
+        .unwrap();
+
+        let analytical = s.calendar_arb_analytical();
+        assert!(
+            analytical.is_empty(),
+            "valid SSVI with differing forwards should be arb-free, got {} violations",
+            analytical.len()
+        );
+
+        let diag = s.diagnostics().unwrap();
+        assert!(
+            diag.calendar_violations.is_empty(),
+            "diagnostics should agree: no calendar violations"
+        );
     }
 
     #[test]
