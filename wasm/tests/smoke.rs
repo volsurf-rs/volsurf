@@ -532,8 +532,6 @@ fn smile_at_is_arbitrage_free() {
     assert!(report.is_arbitrage_free());
 }
 
-// ── Surface calibrate ──
-
 fn two_tenor_market_data() -> (Vec<f64>, Vec<usize>, Vec<f64>, Vec<f64>) {
     let data_3m: Vec<f64> = vec![
         80.0, 0.30, 90.0, 0.25, 95.0, 0.23, 100.0, 0.21, 105.0, 0.23, 110.0, 0.25, 120.0, 0.30,
@@ -572,4 +570,10 @@ fn essvi_calibrate() {
 fn ssvi_calibrate_mismatched_sizes() {
     let (flat, _, tenors, fwds) = two_tenor_market_data();
     assert!(WasmSsviSurface::calibrate(flat, vec![7, 5], tenors, fwds).is_err());
+}
+
+#[wasm_bindgen_test]
+fn essvi_calibrate_mismatched_sizes() {
+    let (flat, _, tenors, fwds) = two_tenor_market_data();
+    assert!(WasmEssviSurface::calibrate(flat, vec![7, 5], tenors, fwds).is_err());
 }

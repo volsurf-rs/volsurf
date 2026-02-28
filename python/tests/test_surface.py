@@ -289,6 +289,39 @@ class TestSsviSurfaceCalibrate:
             SsviSurface.calibrate([self.MARKET_3M], [0.25], [100.0])
 
 
+class TestEssviSurfaceCalibrate:
+    MARKET_3M = [
+        (80.0, 0.30), (90.0, 0.25), (95.0, 0.23),
+        (100.0, 0.21), (105.0, 0.23), (110.0, 0.25), (120.0, 0.30),
+    ]
+    MARKET_1Y = [
+        (80.0, 0.28), (90.0, 0.24), (95.0, 0.22),
+        (100.0, 0.20), (105.0, 0.22), (110.0, 0.24), (120.0, 0.28),
+    ]
+
+    def test_calibrate(self):
+        s = EssviSurface.calibrate(
+            [self.MARKET_3M, self.MARKET_1Y],
+            [0.25, 1.0],
+            [100.0, 100.0],
+        )
+        v = s.black_vol(0.5, 100.0)
+        assert v > 0 and math.isfinite(v)
+
+    def test_calibrate_atm_roundtrip(self):
+        s = EssviSurface.calibrate(
+            [self.MARKET_3M, self.MARKET_1Y],
+            [0.25, 1.0],
+            [100.0, 100.0],
+        )
+        atm_1y = s.black_vol(1.0, 100.0)
+        assert abs(atm_1y - 0.20) < 0.02
+
+    def test_calibrate_insufficient_tenors(self):
+        with pytest.raises(ValueError):
+            EssviSurface.calibrate([self.MARKET_3M], [0.25], [100.0])
+
+
 class TestEssviSurface:
     def test_construct(self):
         s = EssviSurface(**ESSVI_EQUITY)
