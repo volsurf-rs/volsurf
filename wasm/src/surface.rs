@@ -6,6 +6,31 @@ use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
 use crate::smile::WasmSmile;
 
+fn market_data_from_flat(
+    flat: &[f64],
+    tenor_sizes: &[usize],
+) -> Result<Vec<Vec<(f64, f64)>>, JsValue> {
+    let total: usize = tenor_sizes.iter().map(|&n| n * 2).sum();
+    if flat.len() != total {
+        return Err(JsValue::from_str(&format!(
+            "market_data_flat length {} does not match tenor_sizes (expected {})",
+            flat.len(),
+            total,
+        )));
+    }
+    let mut offset = 0;
+    let mut out = Vec::with_capacity(tenor_sizes.len());
+    for &n in tenor_sizes {
+        let pairs: Vec<(f64, f64)> = flat[offset..offset + n * 2]
+            .chunks(2)
+            .map(|c| (c[0], c[1]))
+            .collect();
+        out.push(pairs);
+        offset += n * 2;
+    }
+    Ok(out)
+}
+
 #[wasm_bindgen]
 pub struct WasmSsviSurface {
     inner: SsviSurface,
@@ -85,6 +110,17 @@ impl WasmSsviSurface {
     pub fn from_json(s: &str) -> Result<WasmSsviSurface, JsValue> {
         let inner: SsviSurface =
             serde_json::from_str(s).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    pub fn calibrate(
+        market_data_flat: Vec<f64>,
+        tenor_sizes: Vec<usize>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+    ) -> Result<WasmSsviSurface, JsValue> {
+        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
+        let inner = SsviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
         Ok(Self { inner })
     }
 }
@@ -187,6 +223,17 @@ impl WasmEssviSurface {
     pub fn from_json(s: &str) -> Result<WasmEssviSurface, JsValue> {
         let inner: EssviSurface =
             serde_json::from_str(s).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    pub fn calibrate(
+        market_data_flat: Vec<f64>,
+        tenor_sizes: Vec<usize>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+    ) -> Result<WasmEssviSurface, JsValue> {
+        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
+        let inner = EssviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
         Ok(Self { inner })
     }
 }

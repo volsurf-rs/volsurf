@@ -89,6 +89,19 @@ class TestSviSmile:
         assert abs(smile.vol(80.0) - expected) < 1e-14
         assert abs(smile.vol(120.0) - expected) < 1e-14
 
+    def test_calibrate(self):
+        market = [
+            (80.0, 0.30), (90.0, 0.25), (95.0, 0.23),
+            (100.0, 0.20), (105.0, 0.23), (110.0, 0.25), (120.0, 0.30),
+        ]
+        smile = SviSmile.calibrate(100.0, 1.0, market)
+        atm = smile.vol(100.0)
+        assert abs(atm - 0.20) < 0.01
+
+    def test_calibrate_insufficient_points(self):
+        with pytest.raises(ValueError):
+            SviSmile.calibrate(100.0, 1.0, [(90.0, 0.25), (100.0, 0.20)])
+
 
 class TestSabrSmile:
     def test_construct_valid(self):
@@ -152,6 +165,19 @@ class TestSabrSmile:
     def test_nu_zero_valid(self):
         smile = SabrSmile(100.0, 1.0, 0.2, 0.5, -0.3, 0.0)
         assert smile.vol(100.0) > 0
+
+    def test_calibrate(self):
+        market = [
+            (85.0, 0.25), (90.0, 0.23), (95.0, 0.21),
+            (100.0, 0.20), (105.0, 0.21), (110.0, 0.23), (115.0, 0.26),
+        ]
+        smile = SabrSmile.calibrate(100.0, 1.0, 0.5, market)
+        atm = smile.vol(100.0)
+        assert abs(atm - 0.20) < 0.01
+
+    def test_calibrate_insufficient_points(self):
+        with pytest.raises(ValueError):
+            SabrSmile.calibrate(100.0, 1.0, 0.5, [(90.0, 0.25), (100.0, 0.20)])
 
 
 class TestSplineSmile:

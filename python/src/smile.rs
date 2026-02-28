@@ -88,6 +88,13 @@ impl PySviSmile {
         let inner = SviSmile::new(forward, expiry, a, b, rho, m, sigma).map_err(to_py_err)?;
         Ok(Self { inner })
     }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, market_vols))]
+    fn calibrate(forward: f64, expiry: f64, market_vols: Vec<(f64, f64)>) -> PyResult<Self> {
+        let inner = SviSmile::calibrate(forward, expiry, &market_vols).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
 }
 
 impl_smile_methods!(PySviSmile);
@@ -103,6 +110,18 @@ impl PySabrSmile {
     #[pyo3(signature = (forward, expiry, alpha, beta, rho, nu))]
     fn new(forward: f64, expiry: f64, alpha: f64, beta: f64, rho: f64, nu: f64) -> PyResult<Self> {
         let inner = SabrSmile::new(forward, expiry, alpha, beta, rho, nu).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, beta, market_vols))]
+    fn calibrate(
+        forward: f64,
+        expiry: f64,
+        beta: f64,
+        market_vols: Vec<(f64, f64)>,
+    ) -> PyResult<Self> {
+        let inner = SabrSmile::calibrate(forward, expiry, beta, &market_vols).map_err(to_py_err)?;
         Ok(Self { inner })
     }
 }
