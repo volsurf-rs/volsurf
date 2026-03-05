@@ -41,8 +41,10 @@ pub struct StructuralViolation {
 /// Result of per-tenor SVI calibration, used as input to
 /// [`EssviSurface::from_per_tenor()`].
 ///
-/// Carries the calibrated [`SviSmile`], ATM total variance θ, fit RMS error,
+/// Carries the calibrated [`SviSmile`](crate::smile::SviSmile), ATM total variance θ, fit RMS error,
 /// and the original market data needed by the global eSSVI optimizer.
+/// `from_per_tenor()` validates `tenor`, `forward`, and `theta` but not
+/// individual `market_data` entries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PerTenorFit {
     /// Time to expiry in years.
@@ -2862,6 +2864,25 @@ mod tests {
         let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
         let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
         fits[1].theta = f64::NAN;
+        let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::VolSurfError::InvalidInput { .. }
+        ));
+    }
+
+    #[test]
+    fn from_per_tenor_rejects_zero_theta() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5];
+        let forwards = vec![100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        fits[0].theta = 0.0;
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
         assert!(matches!(
             err,

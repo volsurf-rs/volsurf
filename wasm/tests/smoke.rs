@@ -578,8 +578,6 @@ fn essvi_calibrate_mismatched_sizes() {
     assert!(WasmEssviSurface::calibrate(flat, vec![7, 5], tenors, fwds).is_err());
 }
 
-// ── Two-stage eSSVI API ──
-
 #[wasm_bindgen_test]
 fn essvi_fit_per_tenor() {
     let (flat, sizes, tenors, fwds) = two_tenor_market_data();
