@@ -186,7 +186,7 @@ impl SviSmile {
         /// Minimum market quotes for SVI calibration (5 free params).
         const MIN_POINTS: usize = 5;
         /// Grid search resolution for (m, sigma) initialization.
-        const GRID_N: usize = 15;
+        const GRID_N: usize = 21;
         /// Nelder-Mead iteration limit.
         const NM_MAX_ITER: usize = 300;
         /// Simplex diameter convergence threshold.
@@ -216,6 +216,52 @@ impl SviSmile {
             .map(|&(s, _)| (s / forward).ln())
             .collect();
         let w_vals: Vec<f64> = market_vols.iter().map(|&(_, v)| v * v * expiry).collect();
+
+        // Pre-filter: remove vol-cliff artifacts (cabinet-level OTM quotes).
+        // Sort by log-moneyness, scan for >50% vol drops between consecutive points,
+        // keep the side with more points. Fallback to full data if too few survive.
+        let (k_vals, w_vals) = {
+            let vols: Vec<f64> = market_vols.iter().map(|&(_, v)| v).collect();
+            let mut order: Vec<usize> = (0..k_vals.len()).collect();
+            order.sort_by(|&a, &b| k_vals[a].total_cmp(&k_vals[b]));
+
+            let mut has_drop = false;
+            let mut has_rise = false;
+            let mut cliff_idx = None;
+            for i in 0..order.len().saturating_sub(1) {
+                let v_cur = vols[order[i]];
+                let v_next = vols[order[i + 1]];
+                if v_next < 0.5 * v_cur {
+                    has_drop = true;
+                    if cliff_idx.is_none() {
+                        cliff_idx = Some(i);
+                    }
+                }
+                if v_next > 2.0 * v_cur {
+                    has_rise = true;
+                }
+            }
+
+            // Both rise and drop means frown/W-shape — don't filter
+            if let Some(ci) = cliff_idx.filter(|_| !has_rise || !has_drop) {
+                let left_count = ci + 1;
+                let right_count = order.len() - left_count;
+                let keep: &[usize] = if left_count >= right_count {
+                    &order[..left_count]
+                } else {
+                    &order[left_count..]
+                };
+                if keep.len() >= MIN_POINTS {
+                    let k_f: Vec<f64> = keep.iter().map(|&i| k_vals[i]).collect();
+                    let w_f: Vec<f64> = keep.iter().map(|&i| w_vals[i]).collect();
+                    (k_f, w_f)
+                } else {
+                    (k_vals, w_vals)
+                }
+            } else {
+                (k_vals, w_vals)
+            }
+        };
 
         let k_min = k_vals.iter().cloned().fold(f64::INFINITY, f64::min);
         let k_max = k_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -283,7 +329,8 @@ impl SviSmile {
         for im in 0..GRID_N {
             let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
             for is in 0..GRID_N {
-                let sigma = sigma_lo + (sigma_hi - sigma_lo) * (is as f64) / ((GRID_N - 1) as f64);
+                let t = is as f64 / (GRID_N - 1) as f64;
+                let sigma = sigma_lo * (sigma_hi / sigma_lo).powf(t);
                 let rss = objective(m, sigma);
                 if rss < best_rss {
                     best_rss = rss;
@@ -303,7 +350,8 @@ impl SviSmile {
 
         // Nelder-Mead 2D optimization over (m, sigma)
         let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
-        let step_s = ((sigma_hi - sigma_lo) / (GRID_N as f64) * 0.5).max(0.001);
+        let step_s =
+            (best_sigma * (sigma_hi / sigma_lo).ln() / ((GRID_N - 1) as f64) * 0.5).max(0.001);
 
         let nm_config = crate::optim::NelderMeadConfig {
             max_iter: NM_MAX_ITER,
@@ -1183,5 +1231,79 @@ mod tests {
         let json =
             r#"{"forward":100.0,"expiry":1.0,"a":-1.0,"b":0.4,"rho":-0.4,"m":0.0,"sigma":0.1}"#;
         assert!(serde_json::from_str::<SviSmile>(json).is_err());
+    }
+
+    // Real market data tests — ES futures options with cabinet-level OTM call artifacts.
+    // Source: vol-arb/scripts/essvi_fixtures/fail_00.json tenor[1], fail_10.json tenor[0].
+
+    #[test]
+    fn calibrate_real_data_fail_00_tenor1() {
+        // T=0.212, F=6099.69, 40 strikes. Vol cliff at k~+0.002: put vols 19-28%, call vols 7-8%.
+        let forward = 6099.694029589387;
+        let expiry = 0.21189634192714274;
+        #[rustfmt::skip]
+        let data: Vec<(f64, f64)> = vec![
+            (6110.0, 0.0730505873), (6170.0, 0.0755070638), (6175.0, 0.0756816599),
+            (6180.0, 0.0758177423), (6190.0, 0.0761682847), (6200.0, 0.0764665067),
+            (6275.0, 0.0783416580), (6350.0, 0.0797123411),
+            (4950.0, 0.2817714778), (5000.0, 0.2752316740), (5025.0, 0.2721449775),
+            (5075.0, 0.2660942206), (5080.0, 0.2654167174), (5120.0, 0.2605702346),
+            (5140.0, 0.2580952222), (5200.0, 0.2513427505), (5230.0, 0.2480107054),
+            (5275.0, 0.2430436076), (5325.0, 0.2378082330), (5350.0, 0.2352714337),
+            (5360.0, 0.2342019069), (5470.0, 0.2235805604), (5525.0, 0.2185461412),
+            (5625.0, 0.2100749330), (5640.0, 0.2088287216), (5695.0, 0.2045126109),
+            (5710.0, 0.2033832903), (5750.0, 0.2003749512), (5800.0, 0.1969502219),
+            (5845.0, 0.1941444803), (5855.0, 0.1935502308), (5870.0, 0.1927241764),
+            (5875.0, 0.1924352123), (5890.0, 0.1917753903), (5925.0, 0.1902211011),
+            (5930.0, 0.1899562582), (5935.0, 0.1897236482), (5990.0, 0.1884446645),
+            (6025.0, 0.1879697111), (6045.0, 0.1880807256),
+        ];
+
+        // Previously failed with "grid search found no valid starting point".
+        // With the vol-cliff filter, calibration succeeds by removing call-side cabinet quotes.
+        let smile = SviSmile::calibrate(forward, expiry, &data)
+            .expect("calibration should succeed with vol-cliff filter");
+
+        // One-sided fit overshoots ATM (degenerate b/rho), but should stay finite
+        let atm_vol = smile.vol(forward).unwrap().0;
+        assert!(
+            atm_vol > 0.10 && atm_vol < 1.0,
+            "ATM vol {atm_vol:.4} outside [0.10, 1.0]"
+        );
+    }
+
+    #[test]
+    fn calibrate_real_data_fail_10_tenor0() {
+        // T=0.045, F=6056.25, 41 strikes. Extreme cliff: put vols 39-49%, call vols 3-8%.
+        let forward = 6056.245540908916;
+        let expiry = 0.04487413491520268;
+        #[rustfmt::skip]
+        let data: Vec<(f64, f64)> = vec![
+            (6060.0, 0.0332844455), (6065.0, 0.0364709299), (6110.0, 0.0522470818),
+            (6170.0, 0.0656003863), (6175.0, 0.0667243682), (6180.0, 0.0676347474),
+            (6190.0, 0.0692914683), (6200.0, 0.0710054533), (6275.0, 0.0844261158),
+            (4950.0, 0.4949932398), (5000.0, 0.4804532933), (5025.0, 0.4741619460),
+            (5075.0, 0.4613972029), (5080.0, 0.4603371389), (5120.0, 0.4503366675),
+            (5140.0, 0.4455547253), (5200.0, 0.4321813183), (5230.0, 0.4261146526),
+            (5275.0, 0.4180120045), (5325.0, 0.4094725198), (5350.0, 0.4061600199),
+            (5360.0, 0.4042961866), (5470.0, 0.3915701721), (5525.0, 0.3888935341),
+            (5625.0, 0.3903589289), (5640.0, 0.3932377995), (5695.0, 0.3971587872),
+            (5710.0, 0.3956144257), (5750.0, 0.3996213817), (5800.0, 0.4071047302),
+            (5845.0, 0.4154294991), (5855.0, 0.4179475079), (5870.0, 0.4215683415),
+            (5875.0, 0.4228200998), (5890.0, 0.4267101409), (5925.0, 0.4369235105),
+            (5930.0, 0.4384938957), (5935.0, 0.4402228744), (5990.0, 0.4631120008),
+            (6025.0, 0.4777678857), (6045.0, 0.4874670663),
+        ];
+
+        // Extreme case (16 DTE, non-monotonic put wing): previously failed with
+        // "grid search found no valid starting point". One-sided data after filter
+        // leaves SVI ill-conditioned, but calibration must not error.
+        let smile = SviSmile::calibrate(forward, expiry, &data)
+            .expect("calibration should succeed with vol-cliff filter");
+        let atm_vol = smile.vol(forward).unwrap().0;
+        assert!(
+            atm_vol.is_finite() && atm_vol > 0.0,
+            "ATM vol should be finite and positive, got {atm_vol}"
+        );
     }
 }
