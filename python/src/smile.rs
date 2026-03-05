@@ -72,6 +72,12 @@ pub struct PySviSmile {
     inner: SviSmile,
 }
 
+impl PySviSmile {
+    pub(crate) fn from_inner(inner: SviSmile) -> Self {
+        Self { inner }
+    }
+}
+
 #[pymethods]
 impl PySviSmile {
     #[new]

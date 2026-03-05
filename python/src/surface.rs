@@ -4,7 +4,7 @@ use numpy::{IntoPyArray, PyArray2, PyReadonlyArray1};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use volsurf::VolSurface;
-use volsurf::surface::{EssviSurface, SsviSurface, SurfaceBuilder};
+use volsurf::surface::{EssviSurface, PerTenorFit, SsviSurface, SurfaceBuilder};
 
 use crate::error::to_py_err;
 use crate::types::{PySmile, PySmileModel, PySurface, PySurfaceDiagnostics};
@@ -138,6 +138,44 @@ impl PySsviSurface {
 
 impl_vol_grid!(PySsviSurface);
 
+#[pyclass(frozen, name = "PerTenorFit")]
+pub struct PyPerTenorFit {
+    inner: PerTenorFit,
+}
+
+#[pymethods]
+impl PyPerTenorFit {
+    #[getter]
+    fn tenor(&self) -> f64 {
+        self.inner.tenor
+    }
+
+    #[getter]
+    fn forward(&self) -> f64 {
+        self.inner.forward
+    }
+
+    #[getter]
+    fn theta(&self) -> f64 {
+        self.inner.theta
+    }
+
+    #[getter]
+    fn rms_error(&self) -> f64 {
+        self.inner.rms_error
+    }
+
+    #[getter]
+    fn svi(&self) -> crate::smile::PySviSmile {
+        crate::smile::PySviSmile::from_inner(self.inner.svi.clone())
+    }
+
+    #[getter]
+    fn market_data(&self) -> Vec<(f64, f64)> {
+        self.inner.market_data.clone()
+    }
+}
+
 #[pyclass(frozen, name = "EssviSurface")]
 pub struct PyEssviSurface {
     inner: EssviSurface,
@@ -246,6 +284,29 @@ impl PyEssviSurface {
         forwards: Vec<f64>,
     ) -> PyResult<Self> {
         let inner = EssviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (market_data, tenors, forwards))]
+    fn fit_per_tenor(
+        market_data: Vec<Vec<(f64, f64)>>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+    ) -> PyResult<Vec<PyPerTenorFit>> {
+        let fits =
+            EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).map_err(to_py_err)?;
+        Ok(fits
+            .into_iter()
+            .map(|f| PyPerTenorFit { inner: f })
+            .collect())
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (fits))]
+    fn from_per_tenor(fits: Vec<PyRef<'_, PyPerTenorFit>>) -> PyResult<Self> {
+        let inner_fits: Vec<PerTenorFit> = fits.iter().map(|f| f.inner.clone()).collect();
+        let inner = EssviSurface::from_per_tenor(&inner_fits).map_err(to_py_err)?;
         Ok(Self { inner })
     }
 }

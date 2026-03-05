@@ -5,6 +5,7 @@ from conftest import ESSVI_EQUITY, SSVI_EQUITY
 from volsurf import (
     DupireLocalVol,
     EssviSurface,
+    PerTenorFit,
     SmileModel,
     SsviSurface,
     SurfaceBuilder,
@@ -385,3 +386,68 @@ class TestDupireLocalVol:
         dupire = DupireLocalVol(surf)
         with pytest.raises((ValueError, RuntimeError)):
             dupire.local_vol(0.5, 0.0)
+
+
+class TestEssviTwoStageApi:
+    MARKET_3M = [
+        (80.0, 0.30), (90.0, 0.25), (95.0, 0.23),
+        (100.0, 0.21), (105.0, 0.23), (110.0, 0.25), (120.0, 0.30),
+    ]
+    MARKET_1Y = [
+        (80.0, 0.28), (90.0, 0.24), (95.0, 0.22),
+        (100.0, 0.20), (105.0, 0.22), (110.0, 0.24), (120.0, 0.28),
+    ]
+
+    def test_fit_per_tenor(self):
+        fits = EssviSurface.fit_per_tenor(
+            [self.MARKET_3M, self.MARKET_1Y],
+            [0.25, 1.0],
+            [100.0, 100.0],
+        )
+        assert len(fits) == 2
+        assert isinstance(fits[0], PerTenorFit)
+        assert fits[0].tenor == 0.25
+        assert fits[1].tenor == 1.0
+        assert fits[0].theta > 0
+        assert fits[1].theta > fits[0].theta
+        assert fits[0].rms_error < 0.01
+        assert len(fits[0].market_data) == 7
+
+    def test_from_per_tenor(self):
+        fits = EssviSurface.fit_per_tenor(
+            [self.MARKET_3M, self.MARKET_1Y],
+            [0.25, 1.0],
+            [100.0, 100.0],
+        )
+        surface = EssviSurface.from_per_tenor(fits)
+        v = surface.black_vol(0.5, 100.0)
+        assert v > 0 and math.isfinite(v)
+
+    def test_fit_prune_rebuild(self):
+        market_2y = [
+            (80.0, 0.26), (90.0, 0.22), (95.0, 0.21),
+            (100.0, 0.19), (105.0, 0.21), (110.0, 0.23), (120.0, 0.27),
+        ]
+        fits = EssviSurface.fit_per_tenor(
+            [self.MARKET_3M, self.MARKET_1Y, market_2y],
+            [0.25, 1.0, 2.0],
+            [100.0, 100.0, 100.0],
+        )
+        assert len(fits) == 3
+        # Drop middle tenor and rebuild
+        pruned = [fits[0], fits[2]]
+        surface = EssviSurface.from_per_tenor(pruned)
+        v = surface.black_vol(1.0, 100.0)
+        assert v > 0 and math.isfinite(v)
+
+    def test_per_tenor_fit_svi_getter(self):
+        fits = EssviSurface.fit_per_tenor(
+            [self.MARKET_3M, self.MARKET_1Y],
+            [0.25, 1.0],
+            [100.0, 100.0],
+        )
+        svi = fits[0].svi
+        assert svi.forward == 100.0
+        assert svi.expiry == 0.25
+        v = svi.vol(100.0)
+        assert v > 0 and math.isfinite(v)

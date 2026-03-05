@@ -35,6 +35,7 @@ fn volsurf(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<implied::PyNormalImpliedVol>()?;
     m.add_class::<implied::PyDisplacedImpliedVol>()?;
     m.add_class::<PySsviSurface>()?;
+    m.add_class::<PyPerTenorFit>()?;
     m.add_class::<PyEssviSurface>()?;
     m.add_class::<PySurfaceBuilder>()?;
     m.add_class::<PyDupireLocalVol>()?;
