@@ -38,6 +38,27 @@ pub struct StructuralViolation {
     pub condition_rhs: f64,
 }
 
+/// Result of per-tenor SVI calibration, used as input to
+/// [`EssviSurface::from_per_tenor()`].
+///
+/// Carries the calibrated [`SviSmile`], ATM total variance θ, fit RMS error,
+/// and the original market data needed by the global eSSVI optimizer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PerTenorFit {
+    /// Time to expiry in years.
+    pub tenor: f64,
+    /// Forward price at this tenor.
+    pub forward: f64,
+    /// Calibrated SVI smile.
+    pub svi: crate::smile::SviSmile,
+    /// ATM total variance θ = σ²(F)·T.
+    pub theta: f64,
+    /// RMS implied-vol fitting error (vol space, not total variance).
+    pub rms_error: f64,
+    /// Original (strike, implied_vol) market observations.
+    pub market_data: Vec<(f64, f64)>,
+}
+
 /// A single-tenor slice through an eSSVI surface.
 ///
 /// Evaluates the eSSVI total variance formula at a fixed ATM total variance θ,
@@ -429,6 +450,95 @@ impl EssviSurface {
             thetas,
             theta_max,
         })
+    }
+
+    /// Run per-tenor SVI calibration without the global eSSVI fit.
+    ///
+    /// Returns one [`PerTenorFit`] per tenor, each carrying the calibrated
+    /// [`SviSmile`](crate::smile::SviSmile), ATM total variance θ, fitting
+    /// RMS error, and the original market data. The caller can inspect the
+    /// results, prune problematic tenors, and pass the remainder to
+    /// [`from_per_tenor()`](Self::from_per_tenor).
+    ///
+    /// No monotonicity check is performed — that is the caller's responsibility
+    /// (or handled automatically by `from_per_tenor()`).
+    ///
+    /// # Arguments
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
+    /// * `tenors` — Expiry times in years, all positive and finite
+    /// * `forwards` — Forward prices at each tenor, all positive and finite
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] for length mismatches or
+    /// non-positive values. Returns [`VolSurfError::CalibrationError`] if
+    /// any per-tenor SVI calibration fails.
+    pub fn fit_per_tenor(
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
+    ) -> error::Result<Vec<PerTenorFit>> {
+        if tenors.len() != forwards.len() || tenors.len() != market_data.len() {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "tenors, forwards, and market_data must have the same length: {}, {}, {}",
+                    tenors.len(),
+                    forwards.len(),
+                    market_data.len()
+                ),
+            });
+        }
+        for (i, &t) in tenors.iter().enumerate() {
+            if !t.is_finite() || t <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("tenors[{i}] must be positive and finite, got {t}"),
+                });
+            }
+        }
+        for (i, &f) in forwards.iter().enumerate() {
+            if !f.is_finite() || f <= 0.0 {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!("forwards[{i}] must be positive and finite, got {f}"),
+                });
+            }
+        }
+
+        let mut fits = Vec::with_capacity(tenors.len());
+        for (i, market_vols) in market_data.iter().enumerate() {
+            let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
+                .map_err(|e| VolSurfError::CalibrationError {
+                    message: format!(
+                        "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
+                        tenors[i]
+                    ),
+                    model: "eSSVI",
+                    rms_error: None,
+                })?;
+            let theta = svi.variance(forwards[i])?.0;
+
+            let mut sum_sq = 0.0;
+            let mut n = 0usize;
+            for &(strike, market_vol) in market_vols {
+                let fitted_vol = svi.vol(strike)?.0;
+                sum_sq += (fitted_vol - market_vol).powi(2);
+                n += 1;
+            }
+            let rms_error = if n > 0 {
+                (sum_sq / n as f64).sqrt()
+            } else {
+                0.0
+            };
+
+            fits.push(PerTenorFit {
+                tenor: tenors[i],
+                forward: forwards[i],
+                svi,
+                theta,
+                rms_error,
+                market_data: market_vols.clone(),
+            });
+        }
+
+        Ok(fits)
     }
 
     /// Calibrate an eSSVI surface from per-tenor market implied vols.
