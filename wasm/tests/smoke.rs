@@ -577,3 +577,39 @@ fn essvi_calibrate_mismatched_sizes() {
     let (flat, _, tenors, fwds) = two_tenor_market_data();
     assert!(WasmEssviSurface::calibrate(flat, vec![7, 5], tenors, fwds).is_err());
 }
+
+// ── Two-stage eSSVI API ──
+
+#[wasm_bindgen_test]
+fn essvi_fit_per_tenor() {
+    let (flat, sizes, tenors, fwds) = two_tenor_market_data();
+    let fits = WasmEssviSurface::fit_per_tenor(flat, sizes, tenors, fwds).unwrap();
+    assert_eq!(fits.len(), 2);
+    assert!((fits[0].tenor() - 0.25).abs() < 1e-12);
+    assert!((fits[1].tenor() - 1.0).abs() < 1e-12);
+    assert!(fits[0].theta() > 0.0);
+    assert!(fits[1].theta() > fits[0].theta());
+    assert!(fits[0].rms_error() < 0.01);
+}
+
+#[wasm_bindgen_test]
+fn essvi_fit_per_tenor_svi_getter() {
+    let (flat, sizes, tenors, fwds) = two_tenor_market_data();
+    let fits = WasmEssviSurface::fit_per_tenor(flat, sizes, tenors, fwds).unwrap();
+    let svi = fits[0].svi();
+    assert!((svi.forward() - 100.0).abs() < 1e-12);
+    let vol = svi.vol(100.0).unwrap();
+    assert!(vol > 0.0 && vol < 1.0);
+}
+
+#[wasm_bindgen_test]
+fn essvi_from_per_tenor_json() {
+    let (flat, sizes, tenors, fwds) = two_tenor_market_data();
+    let fits = WasmEssviSurface::fit_per_tenor(flat, sizes, tenors, fwds).unwrap();
+    let json0 = fits[0].to_json().unwrap();
+    let json1 = fits[1].to_json().unwrap();
+    let json = format!("[{json0},{json1}]");
+    let surf = WasmEssviSurface::from_per_tenor_json(&json).unwrap();
+    let vol = surf.black_vol(0.5, 100.0).unwrap();
+    assert!(vol > 0.0 && vol < 1.0, "interpolated vol={vol}");
+}

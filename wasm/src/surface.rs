@@ -1,10 +1,10 @@
 use volsurf::VolSurface;
-use volsurf::surface::{EssviSurface, SsviSurface};
+use volsurf::surface::{EssviSurface, PerTenorFit, SsviSurface};
 use wasm_bindgen::prelude::*;
 
 use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
-use crate::smile::WasmSmile;
+use crate::smile::{WasmSmile, WasmSviSmile};
 
 fn market_data_from_flat(
     flat: &[f64],
@@ -235,5 +235,67 @@ impl WasmEssviSurface {
         let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
         let inner = EssviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
         Ok(Self { inner })
+    }
+
+    pub fn fit_per_tenor(
+        market_data_flat: Vec<f64>,
+        tenor_sizes: Vec<usize>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+    ) -> Result<Vec<WasmPerTenorFit>, JsValue> {
+        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
+        let fits =
+            EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).map_err(to_js_err)?;
+        Ok(fits.into_iter().map(WasmPerTenorFit::from).collect())
+    }
+
+    pub fn from_per_tenor_json(json: &str) -> Result<WasmEssviSurface, JsValue> {
+        let fits: Vec<PerTenorFit> =
+            serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let inner = EssviSurface::from_per_tenor(&fits).map_err(to_js_err)?;
+        Ok(Self { inner })
+    }
+}
+
+#[wasm_bindgen]
+pub struct WasmPerTenorFit {
+    inner: PerTenorFit,
+}
+
+impl From<PerTenorFit> for WasmPerTenorFit {
+    fn from(inner: PerTenorFit) -> Self {
+        Self { inner }
+    }
+}
+
+#[wasm_bindgen]
+impl WasmPerTenorFit {
+    #[wasm_bindgen(getter)]
+    pub fn tenor(&self) -> f64 {
+        self.inner.tenor
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn forward(&self) -> f64 {
+        self.inner.forward
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn theta(&self) -> f64 {
+        self.inner.theta
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn rms_error(&self) -> f64 {
+        self.inner.rms_error
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn svi(&self) -> WasmSviSmile {
+        WasmSviSmile::from_inner(self.inner.svi.clone())
+    }
+
+    pub fn to_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }

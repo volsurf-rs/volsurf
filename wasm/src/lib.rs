@@ -11,7 +11,7 @@ pub use arbitrage::{
 };
 pub use builder::{WasmPiecewiseSurface, WasmSurfaceBuilder};
 pub use smile::{WasmSabrSmile, WasmSmile, WasmSviSmile};
-pub use surface::{WasmEssviSurface, WasmSsviSurface};
+pub use surface::{WasmEssviSurface, WasmPerTenorFit, WasmSsviSurface};
 
 #[wasm_bindgen]
 pub fn version() -> String {
