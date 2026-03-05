@@ -217,6 +217,52 @@ impl SviSmile {
             .collect();
         let w_vals: Vec<f64> = market_vols.iter().map(|&(_, v)| v * v * expiry).collect();
 
+        // Pre-filter: remove vol-cliff artifacts (cabinet-level OTM quotes).
+        // Sort by log-moneyness, scan for >50% vol drops between consecutive points,
+        // keep the side with more points. Fallback to full data if too few survive.
+        let (k_vals, w_vals) = {
+            let vols: Vec<f64> = market_vols.iter().map(|&(_, v)| v).collect();
+            let mut order: Vec<usize> = (0..k_vals.len()).collect();
+            order.sort_by(|&a, &b| k_vals[a].total_cmp(&k_vals[b]));
+
+            let mut has_drop = false;
+            let mut has_rise = false;
+            let mut cliff_idx = None;
+            for i in 0..order.len().saturating_sub(1) {
+                let v_cur = vols[order[i]];
+                let v_next = vols[order[i + 1]];
+                if v_next < 0.5 * v_cur {
+                    has_drop = true;
+                    if cliff_idx.is_none() {
+                        cliff_idx = Some(i);
+                    }
+                }
+                if v_next > 2.0 * v_cur {
+                    has_rise = true;
+                }
+            }
+
+            // Both rise and drop means frown/W-shape — don't filter
+            if let Some(ci) = cliff_idx.filter(|_| !has_rise || !has_drop) {
+                let left_count = ci + 1;
+                let right_count = order.len() - left_count;
+                let keep: &[usize] = if left_count >= right_count {
+                    &order[..left_count]
+                } else {
+                    &order[left_count..]
+                };
+                if keep.len() >= MIN_POINTS {
+                    let k_f: Vec<f64> = keep.iter().map(|&i| k_vals[i]).collect();
+                    let w_f: Vec<f64> = keep.iter().map(|&i| w_vals[i]).collect();
+                    (k_f, w_f)
+                } else {
+                    (k_vals, w_vals)
+                }
+            } else {
+                (k_vals, w_vals)
+            }
+        };
+
         let k_min = k_vals.iter().cloned().fold(f64::INFINITY, f64::min);
         let k_max = k_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let k_range = (k_max - k_min).max(0.1);
