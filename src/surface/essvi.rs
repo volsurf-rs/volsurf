@@ -2641,4 +2641,174 @@ mod tests {
             "expected non-monotone error, got: {err}"
         );
     }
+
+    // Two-stage API tests
+
+    #[test]
+    fn fit_per_tenor_returns_correct_fits() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        assert_eq!(fits.len(), 4);
+
+        for (i, fit) in fits.iter().enumerate() {
+            assert_eq!(fit.tenor, tenors[i]);
+            assert_eq!(fit.forward, forwards[i]);
+            assert!(fit.theta > 0.0, "theta should be positive");
+            assert!(
+                fit.rms_error < 0.005,
+                "per-tenor RMS {:.4} too high",
+                fit.rms_error
+            );
+            assert!(fit.svi.rho().abs() < 1.0, "rho out of range");
+            assert_eq!(fit.market_data.len(), 15);
+        }
+
+        for w in fits.windows(2) {
+            assert!(w[1].theta > w[0].theta, "thetas should be monotone");
+        }
+    }
+
+    #[test]
+    fn from_per_tenor_with_pruned_tenors() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+
+        // Drop tenor[1] (0.5y) — middle tenor, keeps monotone thetas
+        let pruned: Vec<_> = fits
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 1)
+            .map(|(_, f)| f.clone())
+            .collect();
+        assert_eq!(pruned.len(), 3);
+
+        let surface = EssviSurface::from_per_tenor(&pruned).unwrap();
+        let vol = surface.black_vol(1.0, 100.0).unwrap();
+        assert!(vol.0 > 0.0 && vol.0 < 1.0, "vol {:.4} out of range", vol.0);
+    }
+
+    #[test]
+    fn calibrate_equivalence_with_two_stage() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        let one_shot = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let two_stage = EssviSurface::from_per_tenor(&fits).unwrap();
+
+        // Should be bit-identical since calibrate() delegates
+        assert_eq!(one_shot.rho_0(), two_stage.rho_0());
+        assert_eq!(one_shot.rho_m(), two_stage.rho_m());
+        assert_eq!(one_shot.a(), two_stage.a());
+        assert_eq!(one_shot.eta(), two_stage.eta());
+        assert_eq!(one_shot.gamma(), two_stage.gamma());
+
+        for &t in &[0.25, 0.5, 1.0, 2.0] {
+            for &k in &[80.0, 100.0, 120.0] {
+                let v1 = one_shot.black_vol(t, k).unwrap();
+                let v2 = two_stage.black_vol(t, k).unwrap();
+                assert_eq!(v1.0, v2.0, "vol mismatch at t={t}, k={k}");
+            }
+        }
+    }
+
+    #[test]
+    fn per_tenor_fit_serde_round_trip() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+
+        let json = serde_json::to_string(&fits[0]).unwrap();
+        let deser: PerTenorFit = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.tenor, fits[0].tenor);
+        assert_eq!(deser.forward, fits[0].forward);
+        assert_eq!(deser.theta, fits[0].theta);
+        assert_eq!(deser.rms_error, fits[0].rms_error);
+        assert_eq!(deser.svi, fits[0].svi);
+        assert_eq!(deser.market_data.len(), fits[0].market_data.len());
+    }
+
+    #[test]
+    fn from_per_tenor_rejects_empty() {
+        let err = EssviSurface::from_per_tenor(&[]).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::VolSurfError::InvalidInput { .. }
+        ));
+    }
+
+    #[test]
+    fn from_per_tenor_rejects_single_tenor() {
+        let original = equity_surface();
+        let tenors = vec![0.25];
+        let forwards = vec![100.0];
+        let strikes: Vec<Vec<f64>> = vec![(0..15).map(|i| 70.0 + 4.0 * i as f64).collect()];
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::VolSurfError::InvalidInput { .. }
+        ));
+    }
+
+    #[test]
+    fn from_per_tenor_rejects_non_monotone_theta() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5];
+        let forwards = vec![100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+
+        // Swap thetas to break monotonicity
+        fits[0].theta = fits[1].theta + 0.01;
+
+        let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
+        assert!(
+            err.to_string().contains("non-monotone"),
+            "expected non-monotone error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn fit_per_tenor_rejects_length_mismatch() {
+        let err =
+            EssviSurface::fit_per_tenor(&[vec![(100.0, 0.2)]], &[0.25, 0.5], &[100.0]).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::VolSurfError::InvalidInput { .. }
+        ));
+    }
 }
