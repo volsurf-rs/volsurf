@@ -541,52 +541,24 @@ impl EssviSurface {
         Ok(fits)
     }
 
-    /// Calibrate an eSSVI surface from per-tenor market implied vols.
+    /// Build an eSSVI surface from pre-computed per-tenor SVI fits.
     ///
-    /// Uses a three-stage approach:
-    /// 1. Per-tenor SVI calibration to extract ATM total variances (θ) and skews (ρ)
-    /// 2. Fit the ρ(θ) parametric curve to per-tenor skews (Hendriks-Martini Eq. 5.6)
-    /// 3. Global optimization of (η, γ) via grid search + Nelder-Mead
+    /// This is Stage 2 of the two-stage calibration API. The caller runs
+    /// [`fit_per_tenor()`](Self::fit_per_tenor) first, inspects the results,
+    /// optionally prunes problematic tenors, then passes the remainder here.
     ///
-    /// The Eq. 5.7 calendar no-arbitrage constraint on the shape exponent `a` is
-    /// enforced dynamically as γ varies during Stage 3 optimization.
+    /// Internally fits the ρ(θ) parametric curve (Hendriks-Martini Eq. 5.6)
+    /// and optimizes (η, γ) via grid search + Nelder-Mead.
     ///
     /// # Arguments
-    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
-    /// * `tenors` — Expiry times in years, all positive and finite
-    /// * `forwards` — Forward prices at each tenor, all positive and finite
+    /// * `fits` — Per-tenor SVI calibration results (≥ 2, sorted by tenor,
+    ///   monotonically increasing θ)
     ///
     /// # Errors
-    /// Returns [`VolSurfError::InvalidInput`] for invalid inputs (< 2 tenors,
-    /// length mismatches, non-positive values). Returns [`VolSurfError::CalibrationError`]
-    /// if per-tenor SVI calibration or global optimization fails.
-    ///
-    /// # Example
-    /// ```
-    /// use volsurf::surface::EssviSurface;
-    ///
-    /// let data_3m: Vec<(f64, f64)> = (0..10)
-    ///     .map(|i| (80.0 + 4.0 * i as f64, 0.20 + 0.01 * (i as f64 - 5.0).abs()))
-    ///     .collect();
-    /// let data_1y: Vec<(f64, f64)> = (0..10)
-    ///     .map(|i| (80.0 + 4.0 * i as f64, 0.18 + 0.008 * (i as f64 - 5.0).abs()))
-    ///     .collect();
-    ///
-    /// let surface = EssviSurface::calibrate(
-    ///     &[data_3m, data_1y],
-    ///     &[0.25, 1.0],
-    ///     &[100.0, 100.0],
-    /// )?;
-    /// # Ok::<(), volsurf::VolSurfError>(())
-    /// ```
-    pub fn calibrate(
-        market_data: &[Vec<(f64, f64)>],
-        tenors: &[f64],
-        forwards: &[f64],
-    ) -> error::Result<Self> {
-        #[cfg(feature = "logging")]
-        tracing::debug!(n_tenors = tenors.len(), "eSSVI calibration started");
-
+    /// Returns [`VolSurfError::InvalidInput`] if fewer than 2 tenors are
+    /// provided. Returns [`VolSurfError::CalibrationError`] if θ values are
+    /// non-monotone or global optimization fails.
+    pub fn from_per_tenor(fits: &[PerTenorFit]) -> error::Result<Self> {
         const MIN_TENORS: usize = 2;
         const GRID_N: usize = 15;
         const NM_MAX_ITER: usize = 300;
@@ -595,58 +567,19 @@ impl EssviSurface {
         const A_SCAN_STEPS: usize = 20;
         const A_SCAN_MAX: f64 = 3.0;
 
-        if tenors.len() < MIN_TENORS {
+        if fits.len() < MIN_TENORS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
                     "at least {MIN_TENORS} tenors required for eSSVI calibration, got {}",
-                    tenors.len()
+                    fits.len()
                 ),
             });
         }
-        if tenors.len() != forwards.len() || tenors.len() != market_data.len() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors, forwards, and market_data must have the same length: {}, {}, {}",
-                    tenors.len(),
-                    forwards.len(),
-                    market_data.len()
-                ),
-            });
-        }
-        for (i, &t) in tenors.iter().enumerate() {
-            if !t.is_finite() || t <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("tenors[{i}] must be positive and finite, got {t}"),
-                });
-            }
-        }
-        for (i, &f) in forwards.iter().enumerate() {
-            if !f.is_finite() || f <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("forwards[{i}] must be positive and finite, got {f}"),
-                });
-            }
-        }
 
-        // Stage 1: per-tenor SVI calibration → thetas + per-tenor rho estimates
-        let n_tenors = tenors.len();
-        let mut thetas = Vec::with_capacity(n_tenors);
-        let mut rhos = Vec::with_capacity(n_tenors);
-
-        for (i, market_vols) in market_data.iter().enumerate() {
-            let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
-                .map_err(|e| VolSurfError::CalibrationError {
-                    message: format!(
-                        "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
-                        tenors[i]
-                    ),
-                    model: "eSSVI",
-                    rms_error: None,
-                })?;
-            let theta = svi.variance(forwards[i])?.0;
-            thetas.push(theta);
-            rhos.push(svi.rho());
-        }
+        let tenors: Vec<f64> = fits.iter().map(|f| f.tenor).collect();
+        let forwards: Vec<f64> = fits.iter().map(|f| f.forward).collect();
+        let thetas: Vec<f64> = fits.iter().map(|f| f.theta).collect();
+        let rhos: Vec<f64> = fits.iter().map(|f| f.svi.rho()).collect();
 
         for (i, w) in thetas.windows(2).enumerate() {
             if w[1] <= w[0] {
@@ -671,8 +604,6 @@ impl EssviSurface {
         let ln_xs: Vec<f64> = xs.iter().map(|&x| x.ln()).collect();
 
         // Stage 2: fit rho(theta) = rho_0 + (rho_m - rho_0) * (theta/theta_max)^a
-        // For given (rho_0, rho_m), scan `a` values to minimize RSS vs per-tenor rhos.
-        // Quadratic spacing concentrates grid near a=0 where narrow optima live (#22).
         let fit_a = |r0: f64, rm: f64| -> (f64, f64) {
             let d = rm - r0;
             if d.abs() < 1e-14 {
@@ -700,7 +631,6 @@ impl EssviSurface {
             (best_a, best_rss)
         };
 
-        // Adaptive grid range centered on observed rhos
         let rho_min = rhos.iter().cloned().fold(f64::INFINITY, f64::min);
         let rho_max = rhos.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let rho_lo = (rho_min - 0.15).max(-0.99);
@@ -723,7 +653,6 @@ impl EssviSurface {
             }
         }
 
-        // Refine (rho_0, rho_m) with Nelder-Mead
         let rho_step = (rho_hi - rho_lo) / (GRID_N as f64) * 0.5;
         let nm_config = crate::optim::NelderMeadConfig {
             max_iter: NM_MAX_ITER,
@@ -756,20 +685,19 @@ impl EssviSurface {
             "eSSVI Stage 2 rho(theta) fit complete"
         );
 
-        // Observation tuples: (theta, log_moneyness, total_variance, ln_theta_ratio)
+        // Observation tuples from original market data
         let mut all_points: Vec<(f64, f64, f64, f64)> =
-            Vec::with_capacity(market_data.iter().map(|v| v.len()).sum());
-        for (i, market_vols) in market_data.iter().enumerate() {
-            let ln_tr = (thetas[i].max(1e-10) / theta_max).clamp(0.0, 1.0).ln();
-            for &(strike, vol) in market_vols {
-                let k = (strike / forwards[i]).ln();
-                let w_obs = vol * vol * tenors[i];
-                all_points.push((thetas[i], k, w_obs, ln_tr));
+            Vec::with_capacity(fits.iter().map(|f| f.market_data.len()).sum());
+        for fit in fits {
+            let ln_tr = (fit.theta.max(1e-10) / theta_max).clamp(0.0, 1.0).ln();
+            for &(strike, vol) in &fit.market_data {
+                let k = (strike / fit.forward).ln();
+                let w_obs = vol * vol * fit.tenor;
+                all_points.push((fit.theta, k, w_obs, ln_tr));
             }
         }
 
-        // Stage 3: optimize (eta, gamma) with fitted rho(theta).
-        // Eq. 5.7 enforced dynamically: a_eff = min(a_fitted, a_max(gamma)).
+        // Stage 3: optimize (eta, gamma) with fitted rho(theta)
         let rho_diff = opt_rho_m - opt_rho_0;
         let objective = |eta: f64, gamma: f64| -> f64 {
             if eta <= 0.0 || !eta.is_finite() || !gamma.is_finite() || !(0.0..=1.0).contains(&gamma)
@@ -870,20 +798,65 @@ impl EssviSurface {
         );
 
         Self::new(
-            opt_rho_0,
-            opt_rho_m,
-            final_a,
-            opt_eta,
-            opt_gamma,
-            tenors.to_vec(),
-            forwards.to_vec(),
-            thetas,
+            opt_rho_0, opt_rho_m, final_a, opt_eta, opt_gamma, tenors, forwards, thetas,
         )
         .map_err(|e| VolSurfError::CalibrationError {
             message: format!("calibrated eSSVI params invalid: {e}"),
             model: "eSSVI",
             rms_error: Some(rms),
         })
+    }
+
+    /// Calibrate an eSSVI surface from per-tenor market implied vols.
+    ///
+    /// Convenience wrapper that calls [`fit_per_tenor()`](Self::fit_per_tenor)
+    /// followed by [`from_per_tenor()`](Self::from_per_tenor). Use the
+    /// two-stage API directly when you need to inspect or prune per-tenor
+    /// results before the global fit.
+    ///
+    /// # Arguments
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
+    /// * `tenors` — Expiry times in years, all positive and finite
+    /// * `forwards` — Forward prices at each tenor, all positive and finite
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] for invalid inputs (< 2 tenors,
+    /// length mismatches, non-positive values). Returns [`VolSurfError::CalibrationError`]
+    /// if per-tenor SVI calibration or global optimization fails.
+    ///
+    /// # Example
+    /// ```
+    /// use volsurf::surface::EssviSurface;
+    ///
+    /// let data_3m: Vec<(f64, f64)> = (0..10)
+    ///     .map(|i| (80.0 + 4.0 * i as f64, 0.20 + 0.01 * (i as f64 - 5.0).abs()))
+    ///     .collect();
+    /// let data_1y: Vec<(f64, f64)> = (0..10)
+    ///     .map(|i| (80.0 + 4.0 * i as f64, 0.18 + 0.008 * (i as f64 - 5.0).abs()))
+    ///     .collect();
+    ///
+    /// let surface = EssviSurface::calibrate(
+    ///     &[data_3m, data_1y],
+    ///     &[0.25, 1.0],
+    ///     &[100.0, 100.0],
+    /// )?;
+    /// # Ok::<(), volsurf::VolSurfError>(())
+    /// ```
+    pub fn calibrate(
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
+    ) -> error::Result<Self> {
+        if tenors.len() < 2 {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "at least 2 tenors required for eSSVI calibration, got {}",
+                    tenors.len()
+                ),
+            });
+        }
+        let fits = Self::fit_per_tenor(market_data, tenors, forwards)?;
+        Self::from_per_tenor(&fits)
     }
 
     /// Maturity-dependent correlation ρ(θ) (Hendriks-Martini 2019, Eq. 3.1).
