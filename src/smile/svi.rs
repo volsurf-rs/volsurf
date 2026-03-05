@@ -26,7 +26,7 @@ use crate::types::Vol;
 use crate::validate::validate_positive;
 
 /// SVI volatility smile with 5 parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "SviSmileRaw", into = "SviSmileRaw")]
 pub struct SviSmile {
     forward: f64,

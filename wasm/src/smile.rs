@@ -18,6 +18,12 @@ pub struct WasmSviSmile {
     inner: SviSmile,
 }
 
+impl WasmSviSmile {
+    pub(crate) fn from_inner(inner: SviSmile) -> Self {
+        Self { inner }
+    }
+}
+
 #[wasm_bindgen]
 impl WasmSviSmile {
     #[wasm_bindgen(constructor)]
