@@ -613,3 +613,13 @@ fn essvi_from_per_tenor_json() {
     let vol = surf.black_vol(0.5, 100.0).unwrap();
     assert!(vol > 0.0 && vol < 1.0, "interpolated vol={vol}");
 }
+
+#[wasm_bindgen_test]
+fn essvi_from_per_tenor_json_rejects_empty() {
+    assert!(WasmEssviSurface::from_per_tenor_json("[]").is_err());
+}
+
+#[wasm_bindgen_test]
+fn essvi_from_per_tenor_json_rejects_invalid() {
+    assert!(WasmEssviSurface::from_per_tenor_json("not json").is_err());
+}

@@ -451,3 +451,15 @@ class TestEssviTwoStageApi:
         assert svi.expiry == 0.25
         v = svi.vol(100.0)
         assert v > 0 and math.isfinite(v)
+
+    def test_from_per_tenor_rejects_empty(self):
+        with pytest.raises((ValueError, RuntimeError)):
+            EssviSurface.from_per_tenor([])
+
+    def test_fit_per_tenor_rejects_length_mismatch(self):
+        with pytest.raises((ValueError, RuntimeError)):
+            EssviSurface.fit_per_tenor(
+                [self.MARKET_3M],
+                [0.25, 1.0],
+                [100.0],
+            )
