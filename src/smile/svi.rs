@@ -186,7 +186,7 @@ impl SviSmile {
         /// Minimum market quotes for SVI calibration (5 free params).
         const MIN_POINTS: usize = 5;
         /// Grid search resolution for (m, sigma) initialization.
-        const GRID_N: usize = 15;
+        const GRID_N: usize = 21;
         /// Nelder-Mead iteration limit.
         const NM_MAX_ITER: usize = 300;
         /// Simplex diameter convergence threshold.
@@ -329,7 +329,8 @@ impl SviSmile {
         for im in 0..GRID_N {
             let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
             for is in 0..GRID_N {
-                let sigma = sigma_lo + (sigma_hi - sigma_lo) * (is as f64) / ((GRID_N - 1) as f64);
+                let t = is as f64 / (GRID_N - 1) as f64;
+                let sigma = sigma_lo * (sigma_hi / sigma_lo).powf(t);
                 let rss = objective(m, sigma);
                 if rss < best_rss {
                     best_rss = rss;
@@ -349,7 +350,8 @@ impl SviSmile {
 
         // Nelder-Mead 2D optimization over (m, sigma)
         let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
-        let step_s = ((sigma_hi - sigma_lo) / (GRID_N as f64) * 0.5).max(0.001);
+        let step_s =
+            (best_sigma * (sigma_hi / sigma_lo).ln() / ((GRID_N - 1) as f64) * 0.5).max(0.001);
 
         let nm_config = crate::optim::NelderMeadConfig {
             max_iter: NM_MAX_ITER,
