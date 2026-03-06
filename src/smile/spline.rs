@@ -125,11 +125,7 @@ impl SplineSmile {
             });
         }
         for k in &strikes {
-            if !k.is_finite() {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("strikes must be finite, got {k}"),
-                });
-            }
+            validate_positive(*k, "strike")?;
         }
         for (i, w) in strikes.windows(2).enumerate() {
             if w[1] <= w[0] {
@@ -390,6 +386,18 @@ mod tests {
     #[test]
     fn rejects_negative_forward() {
         let result = SplineSmile::new(-100.0, 0.25, vec![1.0, 2.0, 3.0], vec![0.04, 0.04, 0.04]);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn rejects_negative_strike() {
+        let result = SplineSmile::new(100.0, 0.25, vec![-1.0, 2.0, 3.0], vec![0.04, 0.04, 0.04]);
+        assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn rejects_zero_strike() {
+        let result = SplineSmile::new(100.0, 0.25, vec![0.0, 2.0, 3.0], vec![0.04, 0.04, 0.04]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
