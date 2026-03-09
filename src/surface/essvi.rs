@@ -2649,18 +2649,22 @@ mod tests {
         let market_data = vec![tenor_0, tenor_1, tenor_2];
 
         // With the vol-cliff filter, per-tenor SVI calibration no longer fails with
-        // "grid search found no valid starting point". However, one-sided data produces
-        // degenerate SVI params with non-monotone ATM theta, which eSSVI correctly rejects.
-        let err = EssviSurface::calibrate(&market_data, &tenors, &forwards)
-            .expect_err("one-sided SVI fits produce non-monotone theta");
-        assert!(
-            matches!(err, crate::error::VolSurfError::CalibrationError { .. }),
-            "expected CalibrationError, got: {err}"
-        );
-        assert!(
-            err.to_string().contains("non-monotone"),
-            "expected non-monotone error, got: {err}"
-        );
+        // "grid search found no valid starting point". The m-bounds fix prevents degenerate
+        // SVI params (b → ∞, ρ → ±1), so per-tenor fits are reasonable enough for eSSVI
+        // to succeed despite one-sided data after cliff filtering.
+        let surface = EssviSurface::calibrate(&market_data, &tenors, &forwards)
+            .expect("eSSVI calibration should succeed with m-bounded SVI fits");
+
+        // With one-sided data (cliff-filtered), SVI fits are imprecise but not
+        // degenerate. eSSVI now succeeds but quality is poor — ATM vols are finite
+        // but may be significantly off for tenors with the worst data.
+        for (&t, &f) in tenors.iter().zip(forwards.iter()) {
+            let vol = surface.black_vol(t, f).unwrap().0;
+            assert!(
+                vol.is_finite() && vol > 0.0,
+                "ATM vol at T={t} should be finite and positive, got {vol}"
+            );
+        }
     }
 
     // Two-stage API tests
