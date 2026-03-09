@@ -290,9 +290,16 @@ impl SviSmile {
             Some((x[0], x[1], x[2], rss)) // (a, b_rho, b, rss)
         };
 
+        // Bound m to a sensible range around the data. Without this, Nelder-Mead
+        // can drift m far from the data range, producing degenerate fits where
+        // all points lie on one asymptote (b → ∞, ρ → ±1, m far away).
+        // Allow m to range 1.5× the data span beyond each edge.
+        let m_bound_lo = k_min - 1.5 * k_range;
+        let m_bound_hi = k_max + 1.5 * k_range;
+
         // Objective function: RSS with penalty for invalid params
         let objective = |m: f64, sigma: f64| -> f64 {
-            if sigma <= 0.0 {
+            if sigma <= 0.0 || m < m_bound_lo || m > m_bound_hi {
                 return f64::MAX;
             }
             match inner_solve(m, sigma) {
@@ -1501,5 +1508,45 @@ mod tests {
         let s3 = SviSmile::calibrate(forward, expiry, &data).unwrap();
         assert_eq!(s1, s2, "calibrate() not deterministic (run 1 vs 2)");
         assert_eq!(s2, s3, "calibrate() not deterministic (run 2 vs 3)");
+    }
+
+    #[test]
+    fn calibrate_spx_both_sided_skew() {
+        // SPX Jan 13 2025 snapshot, Feb 21 expiry, both OTM puts + calls.
+        // Steep put skew (47% at 70% moneyness → 15% ATM → 18% at 120% moneyness).
+        // Should produce ATM vol ~14.5%, not blow up.
+        let forward = 5876.5982;
+        let expiry = 0.106849;
+        #[rustfmt::skip]
+        let data: Vec<(f64, f64)> = vec![
+            (4100.0, 0.4732372167), (4350.0, 0.4185548802),
+            (4625.0, 0.3586987129), (4875.0, 0.3062291404),
+            (4975.0, 0.2861728415), (5070.0, 0.2677133003),
+            (5150.0, 0.2533989022), (5240.0, 0.2377730229),
+            (5325.0, 0.2237641910), (5420.0, 0.2090983236),
+            (5495.0, 0.1978458240), (5545.0, 0.1909091037),
+            (5600.0, 0.1832238219), (5655.0, 0.1758238490),
+            (5705.0, 0.1691892272), (5760.0, 0.1619520673),
+            (5810.0, 0.1554653403), (5865.0, 0.1485963933),
+            (5920.0, 0.1417555115), (5970.0, 0.1358067719),
+            (6025.0, 0.1300346440), (6080.0, 0.1250926343),
+            (6130.0, 0.1218305015), (6185.0, 0.1195831160),
+            (6235.0, 0.1187962506), (6300.0, 0.1191681275),
+            (6390.0, 0.1218569546), (6475.0, 0.1256958312),
+            (6570.0, 0.1324496829), (7000.0, 0.1835421893),
+        ];
+
+        let smile = SviSmile::calibrate(forward, expiry, &data)
+            .expect("SPX both-sided calibration should succeed");
+
+        let atm_vol = smile.vol(forward).unwrap().0;
+        assert!(
+            atm_vol > 0.10 && atm_vol < 0.25,
+            "ATM vol {:.4} outside [10%, 25%] — calibration produced degenerate params",
+            atm_vol
+        );
+
+        let rms = rms_vol_error(&smile, &data);
+        assert!(rms < 0.01, "RMS vol error {rms:.4} exceeds 1% — poor fit");
     }
 }
