@@ -316,27 +316,77 @@ impl SviSmile {
             }
         };
 
-        // Grid search
-        let m_lo = k_min - 0.5 * k_range;
-        let m_hi = k_max + 0.5 * k_range;
-        let sigma_lo = 0.01_f64;
-        let sigma_hi = k_range.max(0.5);
+        // Multi-start grid search: 3 starts with different (m, σ) ranges to escape
+        // local minima in the 2D objective landscape (see Zeliade 2009, §3.2).
+        let starts: [(f64, f64, f64, f64); 3] = [
+            // Start 0: original range
+            (
+                k_min - 0.5 * k_range,
+                k_max + 0.5 * k_range,
+                0.01,
+                k_range.max(0.5),
+            ),
+            // Start 1: same m, tighter σ — catches narrow-σ basins
+            (
+                k_min - 0.5 * k_range,
+                k_max + 0.5 * k_range,
+                0.005,
+                (k_range / 2.0).max(0.2),
+            ),
+            // Start 2: ATM-centered m, wide σ — covers typical equity smile basin
+            (-0.2, 0.2, 0.01, 1.0),
+        ];
+
+        let nm_config = crate::optim::NelderMeadConfig {
+            max_iter: NM_MAX_ITER,
+            diameter_tol: NM_DIAMETER_TOL,
+            fvalue_tol: NM_FVALUE_TOL,
+        };
 
         let mut best_m = 0.0;
         let mut best_sigma = 0.1;
         let mut best_rss = f64::MAX;
 
-        for im in 0..GRID_N {
-            let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
-            for is in 0..GRID_N {
-                let t = is as f64 / (GRID_N - 1) as f64;
-                let sigma = sigma_lo * (sigma_hi / sigma_lo).powf(t);
-                let rss = objective(m, sigma);
-                if rss < best_rss {
-                    best_rss = rss;
-                    best_m = m;
-                    best_sigma = sigma;
+        for &(m_lo, m_hi, sigma_lo, sigma_hi) in &starts {
+            let mut start_m = 0.0;
+            let mut start_sigma = 0.1;
+            let mut start_rss = f64::MAX;
+
+            for im in 0..GRID_N {
+                let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
+                for is in 0..GRID_N {
+                    let t = is as f64 / (GRID_N - 1) as f64;
+                    let sigma = sigma_lo * (sigma_hi / sigma_lo).powf(t);
+                    let rss = objective(m, sigma);
+                    if rss < start_rss {
+                        start_rss = rss;
+                        start_m = m;
+                        start_sigma = sigma;
+                    }
                 }
+            }
+
+            if start_rss >= f64::MAX {
+                continue;
+            }
+
+            let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
+            let step_s =
+                (start_sigma * (sigma_hi / sigma_lo).ln() / ((GRID_N - 1) as f64) * 0.5).max(0.001);
+
+            let nm = crate::optim::nelder_mead_2d(
+                objective,
+                start_m,
+                start_sigma,
+                step_m,
+                step_s,
+                &nm_config,
+            );
+
+            if nm.fval < best_rss {
+                best_rss = nm.fval;
+                best_m = nm.x;
+                best_sigma = nm.y;
             }
         }
 
@@ -348,21 +398,8 @@ impl SviSmile {
             });
         }
 
-        // Nelder-Mead 2D optimization over (m, sigma)
-        let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
-        let step_s =
-            (best_sigma * (sigma_hi / sigma_lo).ln() / ((GRID_N - 1) as f64) * 0.5).max(0.001);
-
-        let nm_config = crate::optim::NelderMeadConfig {
-            max_iter: NM_MAX_ITER,
-            diameter_tol: NM_DIAMETER_TOL,
-            fvalue_tol: NM_FVALUE_TOL,
-        };
-        let nm_result =
-            crate::optim::nelder_mead_2d(objective, best_m, best_sigma, step_m, step_s, &nm_config);
-
         // Recover final parameters
-        let (opt_m, opt_sigma) = (nm_result.x, nm_result.y);
+        let (opt_m, opt_sigma) = (best_m, best_sigma);
 
         let (a, b_rho, b, _rss) =
             inner_solve(opt_m, opt_sigma).ok_or_else(|| VolSurfError::CalibrationError {
@@ -1305,5 +1342,164 @@ mod tests {
             atm_vol.is_finite() && atm_vol > 0.0,
             "ATM vol should be finite and positive, got {atm_vol}"
         );
+    }
+
+    // Real-data fixture tests: ES futures options from vol-arb/scripts/essvi_fixtures/essvi_successes.json.
+    // These exercise SVI calibration on clean market data (no vol-cliff artifacts) across
+    // different tenors to validate the multi-start grid search (#92, #93).
+
+    fn rms_vol_error(smile: &SviSmile, data: &[(f64, f64)]) -> f64 {
+        (data
+            .iter()
+            .map(|&(strike, vol_obs)| {
+                let vol_fit = smile.vol(strike).unwrap().0;
+                (vol_fit - vol_obs).powi(2)
+            })
+            .sum::<f64>()
+            / data.len() as f64)
+            .sqrt()
+    }
+
+    #[test]
+    fn calibrate_real_es_15d() {
+        // Source: essvi_successes.json snapshot[2] tenor[0], DTE=15.3, 45 strikes
+        let forward = 6055.4718518824;
+        let expiry = 0.041889117043121;
+        #[rustfmt::skip]
+        let data: Vec<(f64, f64)> = vec![
+            (4920.0, 0.4223900019718342), (4940.0, 0.4160130335559546),
+            (4975.0, 0.4059536047220062), (4980.0, 0.4041102924314969),
+            (4990.0, 0.4013275163056883), (5010.0, 0.3957023478220799),
+            (5120.0, 0.3620851769504406), (5125.0, 0.3602334713020688),
+            (5170.0, 0.3469515503931146), (5210.0, 0.3345908464586309),
+            (5280.0, 0.3129955324874803), (5325.0, 0.2996367643338352),
+            (5350.0, 0.2920767932130048), (5380.0, 0.2829159766349225),
+            (5410.0, 0.2739666090456421), (5425.0, 0.2694025281972882),
+            (5440.0, 0.2647809527980169), (5475.0, 0.2544764927597573),
+            (5490.0, 0.2503163879294692), (5500.0, 0.2470554952911026),
+            (5515.0, 0.2436761666236449), (5535.0, 0.2375425371287627),
+            (5555.0, 0.2323741188316714), (5590.0, 0.2233370271498877),
+            (5625.0, 0.2143433323941795), (5650.0, 0.208_700_651_085_321),
+            (5655.0, 0.2073374741979704), (5660.0, 0.2063312810156373),
+            (5720.0, 0.1939179206594279), (5795.0, 0.1804443709124559),
+            (5805.0, 0.1788357094872418), (5815.0, 0.1771920609937395),
+            (5870.0, 0.1686669163559528), (5875.0, 0.1678888445524988),
+            (5990.0, 0.1517688737309481), (6025.0, 0.1472334289977049),
+            (6055.0, 0.1439107310546137), (6070.0, 0.116_864_682_154_732),
+            (6075.0, 0.1164335961807721), (6100.0, 0.1138490521891819),
+            (6190.0, 0.1053720514799709), (6225.0, 0.1026879055355855),
+            (6290.0, 0.1009732043280713), (6375.0, 0.1059670932035282),
+            (6390.0, 0.1074644124985002),
+        ];
+
+        let smile =
+            SviSmile::calibrate(forward, expiry, &data).expect("15d calibration should succeed");
+        let rms = rms_vol_error(&smile, &data);
+        assert!(rms < 0.05, "15d RMSE {rms:.4} exceeds 0.05");
+    }
+
+    #[test]
+    fn calibrate_real_es_28d() {
+        // Source: essvi_successes.json snapshot[0] tenor[0], DTE=28.3, 40 strikes
+        let forward = 6064.7034250788;
+        let expiry = 0.077481177275838;
+        #[rustfmt::skip]
+        let data: Vec<(f64, f64)> = vec![
+            (4920.0, 0.341_693_728_892_668), (4940.0, 0.3372436822896396),
+            (4975.0, 0.3288045902621563), (4980.0, 0.3273480025257966),
+            (4990.0, 0.3248606073729282), (5010.0, 0.320_279_883_241_698),
+            (5120.0, 0.2934696300530372), (5170.0, 0.2815187173578774),
+            (5210.0, 0.2716571313313472), (5325.0, 0.2447426026475534),
+            (5380.0, 0.2315572971616197), (5410.0, 0.2246660262574118),
+            (5440.0, 0.2175852660785433), (5490.0, 0.2063294444235871),
+            (5515.0, 0.2009467418403518), (5535.0, 0.1962947443753465),
+            (5555.0, 0.192_129_603_140_449), (5625.0, 0.1771372847059336),
+            (5650.0, 0.1717237143340814), (5655.0, 0.1709675620197509),
+            (5660.0, 0.1697392404023169), (5720.0, 0.1576601889574069),
+            (5795.0, 0.143_159_763_874_207), (5805.0, 0.1413305137617879),
+            (5815.0, 0.1393860453068289), (5870.0, 0.1289347395905459),
+            (5875.0, 0.1279352498586123), (5990.0, 0.1054165247568596),
+            (6025.0, 0.0977740702110937), (6055.0, 0.0908526262627002),
+            (6070.0, 0.1546241067359042), (6075.0, 0.1534158532190984),
+            (6100.0, 0.1474494709148409), (6190.0, 0.1304545118718378),
+            (6225.0, 0.1257347370719426), (6290.0, 0.1193094914139261),
+            (6375.0, 0.1151721266035816), (6390.0, 0.1151906054625841),
+            (6410.0, 0.115_503_289_206_868), (6475.0, 0.1188455800934396),
+        ];
+
+        let smile =
+            SviSmile::calibrate(forward, expiry, &data).expect("28d calibration should succeed");
+        let rms = rms_vol_error(&smile, &data);
+        assert!(rms < 0.05, "28d RMSE {rms:.4} exceeds 0.05");
+    }
+
+    #[test]
+    fn calibrate_real_es_83d() {
+        // Source: essvi_successes.json snapshot[0] tenor[2], DTE=83.3, 38 strikes
+        let forward = 6103.9160617949;
+        let expiry = 0.228062970568104;
+        #[rustfmt::skip]
+        let data: Vec<(f64, f64)> = vec![
+            (5000.0, 0.2562297957594517), (5050.0, 0.2490618316108794),
+            (5160.0, 0.2337597518498384), (5170.0, 0.2324908560023248),
+            (5210.0, 0.2269728829263208), (5260.0, 0.2200759574087432),
+            (5290.0, 0.2160010369206193), (5325.0, 0.2113685978852301),
+            (5370.0, 0.2055824688522813), (5450.0, 0.1951151124589882),
+            (5480.0, 0.1910658140657824), (5570.0, 0.1795072032487414),
+            (5575.0, 0.1788502851813726), (5590.0, 0.1769929549249026),
+            (5600.0, 0.1756900311035595), (5640.0, 0.1706158274794452),
+            (5650.0, 0.1693022104680442), (5670.0, 0.1667850546861248),
+            (5675.0, 0.1661165625505582), (5710.0, 0.1616590548007632),
+            (5835.0, 0.1457385103525783), (5860.0, 0.1425241762807806),
+            (5885.0, 0.139_297_512_782_805), (5915.0, 0.1353827950561679),
+            (5990.0, 0.1254076875624386), (6055.0, 0.1166151961160997),
+            (6060.0, 0.1159464746590826), (6190.0, 0.1360088739957373),
+            (6225.0, 0.1321805610552402), (6240.0, 0.130_652_593_916_186),
+            (6280.0, 0.1269166651139219), (6300.0, 0.125_278_994_432_085),
+            (6350.0, 0.1217407755629008), (6370.0, 0.1204814861580182),
+            (6475.0, 0.1157617669455559), (6480.0, 0.1155635029959559),
+            (6600.0, 0.1129563774031786), (6650.0, 0.1127541347933357),
+        ];
+
+        let smile =
+            SviSmile::calibrate(forward, expiry, &data).expect("83d calibration should succeed");
+        let rms = rms_vol_error(&smile, &data);
+        assert!(rms < 0.05, "83d RMSE {rms:.4} exceeds 0.05");
+    }
+
+    #[test]
+    fn calibrate_real_data_deterministic() {
+        // SVI calibration must be deterministic: same input → same output.
+        // Uses 83d fixture (longest tenor, widest k-range).
+        let forward = 6103.9160617949;
+        let expiry = 0.228062970568104;
+        #[rustfmt::skip]
+        let data: Vec<(f64, f64)> = vec![
+            (5000.0, 0.2562297957594517), (5050.0, 0.2490618316108794),
+            (5160.0, 0.2337597518498384), (5170.0, 0.2324908560023248),
+            (5210.0, 0.2269728829263208), (5260.0, 0.2200759574087432),
+            (5290.0, 0.2160010369206193), (5325.0, 0.2113685978852301),
+            (5370.0, 0.2055824688522813), (5450.0, 0.1951151124589882),
+            (5480.0, 0.1910658140657824), (5570.0, 0.1795072032487414),
+            (5575.0, 0.1788502851813726), (5590.0, 0.1769929549249026),
+            (5600.0, 0.1756900311035595), (5640.0, 0.1706158274794452),
+            (5650.0, 0.1693022104680442), (5670.0, 0.1667850546861248),
+            (5675.0, 0.1661165625505582), (5710.0, 0.1616590548007632),
+            (5835.0, 0.1457385103525783), (5860.0, 0.1425241762807806),
+            (5885.0, 0.139_297_512_782_805), (5915.0, 0.1353827950561679),
+            (5990.0, 0.1254076875624386), (6055.0, 0.1166151961160997),
+            (6060.0, 0.1159464746590826), (6190.0, 0.1360088739957373),
+            (6225.0, 0.1321805610552402), (6240.0, 0.130_652_593_916_186),
+            (6280.0, 0.1269166651139219), (6300.0, 0.125_278_994_432_085),
+            (6350.0, 0.1217407755629008), (6370.0, 0.1204814861580182),
+            (6475.0, 0.1157617669455559), (6480.0, 0.1155635029959559),
+            (6600.0, 0.1129563774031786), (6650.0, 0.1127541347933357),
+        ];
+
+        let s1 = SviSmile::calibrate(forward, expiry, &data).unwrap();
+        let s2 = SviSmile::calibrate(forward, expiry, &data).unwrap();
+        let s3 = SviSmile::calibrate(forward, expiry, &data).unwrap();
+        assert_eq!(s1, s2, "calibrate() not deterministic (run 1 vs 2)");
+        assert_eq!(s2, s3, "calibrate() not deterministic (run 2 vs 3)");
     }
 }
