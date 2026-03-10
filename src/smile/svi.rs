@@ -483,6 +483,28 @@ impl SviSmile {
             (b_rho / b).clamp(-0.999, 0.999)
         };
 
+        if w_atm.is_some() {
+            let dk_atm = -opt_m;
+            let w_atm_fitted =
+                a + b * (rho * dk_atm + (dk_atm * dk_atm + opt_sigma * opt_sigma).sqrt());
+            let mut w_sorted = w_vals.clone();
+            w_sorted.sort_by(|x, y| x.total_cmp(y));
+            let w_median = if w_sorted.len() % 2 == 0 {
+                (w_sorted[w_sorted.len() / 2 - 1] + w_sorted[w_sorted.len() / 2]) / 2.0
+            } else {
+                w_sorted[w_sorted.len() / 2]
+            };
+            if w_median > 0.0 && w_atm_fitted / w_median > 4.0 {
+                return Err(VolSurfError::CalibrationError {
+                    message: format!(
+                        "ATM total variance {w_atm_fitted:.6} exceeds 4x median input {w_median:.6}"
+                    ),
+                    model: "SVI",
+                    rms_error: None,
+                });
+            }
+        }
+
         #[cfg(feature = "logging")]
         tracing::debug!(
             a,
