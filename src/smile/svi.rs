@@ -501,6 +501,7 @@ impl SviSmile {
             (b_rho / b).clamp(-0.999, 0.999)
         };
 
+        // One-sided data has no reliable ATM reference — skip sanity check
         if w_atm.is_some() {
             let dk_atm = -opt_m;
             let w_atm_fitted =

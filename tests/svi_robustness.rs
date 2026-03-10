@@ -57,6 +57,12 @@ fn assert_calibration_sane(
         }
         Err(VolSurfError::CalibrationError { message, .. }) => {
             println!("{label}: REJECTED  n={:3}  reason={message}", data.len());
+            assert!(
+                message.contains("Roger Lee")
+                    || message.contains("ATM total variance")
+                    || message.contains("grid search"),
+                "{label}: unexpected rejection reason: {message}"
+            );
         }
         Err(e) => panic!("{label}: unexpected error variant: {e}"),
     }
@@ -249,20 +255,5 @@ fn mar10_apr17_38dte_full_range() {
     );
 }
 
-// Roger Lee bound: rejection and boundary acceptance
-
-#[test]
-fn roger_lee_rejects_violation() {
-    // b=3.0, rho=0.5 → 3.0*(1+0.5) = 4.5 > 4
-    let r = SviSmile::new(100.0, 1.0, 0.5, 3.0, 0.5, 0.0, 0.1);
-    assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
-    let msg = r.unwrap_err().to_string();
-    assert!(msg.contains("Roger Lee"), "expected Roger Lee in: {msg}");
-}
-
-#[test]
-fn roger_lee_accepts_boundary() {
-    // b=2.5, rho=0.6 → 2.5*(1+0.6) = 4.0 exactly
-    let r = SviSmile::new(100.0, 1.0, 0.5, 2.5, 0.6, 0.0, 0.1);
-    assert!(r.is_ok());
-}
+// Roger Lee bound tests live in src/smile/svi.rs (new_rejects_roger_lee_bound,
+// new_accepts_roger_lee_boundary) — not duplicated here.
