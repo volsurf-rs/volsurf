@@ -267,6 +267,31 @@ impl SviSmile {
         let k_max = k_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let k_range = (k_max - k_min).max(0.1);
 
+        // Interpolate ATM total variance from nearest-ATM input points.
+        // Only meaningful when data brackets k=0 (both sides of ATM present).
+        // One-sided data after vol-cliff filtering produces unreliable ATM estimates.
+        let w_atm = {
+            let mut best_below = (f64::NEG_INFINITY, 0.0_f64);
+            let mut best_above = (f64::INFINITY, 0.0_f64);
+            for (&k, &w) in k_vals.iter().zip(w_vals.iter()) {
+                if k <= 0.0 && k > best_below.0 {
+                    best_below = (k, w);
+                }
+                if k >= 0.0 && k < best_above.0 {
+                    best_above = (k, w);
+                }
+            }
+            let has_both_sides = best_below.0 != f64::NEG_INFINITY && best_above.0 != f64::INFINITY;
+            if !has_both_sides {
+                None
+            } else if (best_above.0 - best_below.0).abs() < 1e-15 {
+                Some(best_below.1)
+            } else {
+                let t = (0.0 - best_below.0) / (best_above.0 - best_below.0);
+                Some(best_below.1 + t * (best_above.1 - best_below.1))
+            }
+        };
+
         // Inner linear solve: for fixed (m, sigma), solve for (a, b*rho, b)
         let inner_solve = |m: f64, sigma: f64| -> Option<(f64, f64, f64, f64)> {
             let n = k_vals.len();
@@ -297,7 +322,10 @@ impl SviSmile {
         let m_bound_lo = k_min - 1.5 * k_range;
         let m_bound_hi = k_max + 1.5 * k_range;
 
-        // Objective function: RSS with penalty for invalid params
+        // Objective: RSS + ATM penalty to prevent degenerate basin drift.
+        // λ=0.01 is sufficient: degenerate basins have ATM mismatch of 10-14×
+        // (penalty ~1e-4), dwarfing typical RSS (~1e-7). Small enough not to
+        // distort well-fitting cases where interpolation noise dominates.
         let objective = |m: f64, sigma: f64| -> f64 {
             if sigma <= 0.0 || m < m_bound_lo || m > m_bound_hi {
                 return f64::MAX;
@@ -318,7 +346,13 @@ impl SviSmile {
                     if min_var < -1e-10 {
                         return f64::MAX;
                     }
-                    rss
+                    if let Some(w_obs) = w_atm {
+                        let w_fit_atm = a + b_rho * (-m) + b * (m * m + sigma * sigma).sqrt();
+                        let atm_penalty = (w_fit_atm - w_obs).powi(2);
+                        rss + 0.01 * atm_penalty
+                    } else {
+                        rss
+                    }
                 }
             }
         };
