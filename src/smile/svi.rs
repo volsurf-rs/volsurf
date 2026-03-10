@@ -224,10 +224,22 @@ impl SviSmile {
             .collect();
         let w_vals: Vec<f64> = market_vols.iter().map(|&(_, v)| v * v * expiry).collect();
 
+        // Vega weights: n(d₁) for each point. ATM options have highest vega and
+        // naturally dominate the weighted fit, preventing degenerate basin drift.
+        // F·√T cancels across strikes so we use just the normal PDF value.
+        let sqrt_t = expiry.sqrt();
+        let sqrt_vega: Vec<f64> = market_vols
+            .iter()
+            .map(|&(strike, vol)| {
+                let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * sqrt_t);
+                ((-0.5 * d1 * d1).exp() / (2.0 * PI).sqrt()).sqrt()
+            })
+            .collect();
+
         // Pre-filter: remove vol-cliff artifacts (cabinet-level OTM quotes).
         // Sort by log-moneyness, scan for >50% vol drops between consecutive points,
         // keep the side with more points. Fallback to full data if too few survive.
-        let (k_vals, w_vals) = {
+        let (k_vals, w_vals, sqrt_vega) = {
             let vols: Vec<f64> = market_vols.iter().map(|&(_, v)| v).collect();
             let mut order: Vec<usize> = (0..k_vals.len()).collect();
             order.sort_by(|&a, &b| k_vals[a].total_cmp(&k_vals[b]));
@@ -261,12 +273,13 @@ impl SviSmile {
                 if keep.len() >= MIN_POINTS {
                     let k_f: Vec<f64> = keep.iter().map(|&i| k_vals[i]).collect();
                     let w_f: Vec<f64> = keep.iter().map(|&i| w_vals[i]).collect();
-                    (k_f, w_f)
+                    let vw_f: Vec<f64> = keep.iter().map(|&i| sqrt_vega[i]).collect();
+                    (k_f, w_f, vw_f)
                 } else {
-                    (k_vals, w_vals)
+                    (k_vals, w_vals, sqrt_vega)
                 }
             } else {
-                (k_vals, w_vals)
+                (k_vals, w_vals, sqrt_vega)
             }
         };
 
@@ -300,18 +313,21 @@ impl SviSmile {
         };
 
         // Inner linear solve: for fixed (m, sigma), solve for (a, b*rho, b)
+        // using vega-weighted least squares. Premultiplying rows by √ν_i converts
+        // to standard LS on the transformed system (Zeliade QR structure preserved).
         let inner_solve = |m: f64, sigma: f64| -> Option<(f64, f64, f64, f64)> {
             let n = k_vals.len();
             let a_mat = DMatrix::<f64>::from_fn(n, 3, |i, j| {
                 let dk = k_vals[i] - m;
-                match j {
+                let val = match j {
                     0 => 1.0,
                     1 => dk,
                     2 => (dk * dk + sigma * sigma).sqrt(),
                     _ => unreachable!(),
-                }
+                };
+                val * sqrt_vega[i]
             });
-            let b_vec = DVector::from_column_slice(&w_vals);
+            let b_vec = DVector::from_fn(n, |i, _| w_vals[i] * sqrt_vega[i]);
 
             let ata = a_mat.transpose() * &a_mat;
             let atb = a_mat.transpose() * &b_vec;
@@ -319,7 +335,7 @@ impl SviSmile {
 
             let residual = &a_mat * &x - &b_vec;
             let rss = residual.dot(&residual);
-            Some((x[0], x[1], x[2], rss)) // (a, b_rho, b, rss)
+            Some((x[0], x[1], x[2], rss))
         };
 
         // Bound m to a sensible range around the data. Without this, Nelder-Mead
@@ -329,10 +345,6 @@ impl SviSmile {
         let m_bound_lo = k_min - 1.5 * k_range;
         let m_bound_hi = k_max + 1.5 * k_range;
 
-        // Objective: RSS + ATM penalty to prevent degenerate basin drift.
-        // λ=0.01 is sufficient: degenerate basins have ATM mismatch of 10-14×
-        // (penalty ~1e-4), dwarfing typical RSS (~1e-7). Small enough not to
-        // distort well-fitting cases where interpolation noise dominates.
         let objective = |m: f64, sigma: f64| -> f64 {
             if sigma <= 0.0 || m < m_bound_lo || m > m_bound_hi {
                 return f64::MAX;
@@ -353,13 +365,7 @@ impl SviSmile {
                     if min_var < -1e-10 {
                         return f64::MAX;
                     }
-                    if let Some(w_obs) = w_atm {
-                        let w_fit_atm = a + b_rho * (-m) + b * (m * m + sigma * sigma).sqrt();
-                        let atm_penalty = (w_fit_atm - w_obs).powi(2);
-                        rss + 0.01 * atm_penalty
-                    } else {
-                        rss
-                    }
+                    rss
                 }
             }
         };

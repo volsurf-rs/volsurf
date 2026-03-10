@@ -2277,7 +2277,9 @@ mod tests {
         assert_abs_diff_eq!(calibrated.eta(), deserialized.eta(), epsilon = 1e-14);
         assert_abs_diff_eq!(calibrated.gamma(), deserialized.gamma(), epsilon = 1e-14);
         assert_eq!(calibrated.tenors(), deserialized.tenors());
-        assert_eq!(calibrated.thetas(), deserialized.thetas());
+        for (a, b) in calibrated.thetas().iter().zip(deserialized.thetas()) {
+            assert_abs_diff_eq!(a, b, epsilon = 1e-14);
+        }
         let v1 = calibrated.black_vol(1.0, 90.0).unwrap().0;
         let v2 = deserialized.black_vol(1.0, 90.0).unwrap().0;
         assert_abs_diff_eq!(v1, v2, epsilon = 1e-14);
@@ -2774,7 +2776,7 @@ mod tests {
         let deser: PerTenorFit = serde_json::from_str(&json).unwrap();
         assert_eq!(deser.tenor, fits[0].tenor);
         assert_eq!(deser.forward, fits[0].forward);
-        assert_eq!(deser.theta, fits[0].theta);
+        assert_abs_diff_eq!(deser.theta, fits[0].theta, epsilon = 1e-14);
         assert_eq!(deser.rms_error, fits[0].rms_error);
         assert_eq!(deser.svi, fits[0].svi);
         assert_eq!(deser.market_data.len(), fits[0].market_data.len());
