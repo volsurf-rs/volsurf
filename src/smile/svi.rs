@@ -361,6 +361,9 @@ impl SviSmile {
                     } else {
                         (b_rho / b_clamped).clamp(-0.999, 0.999)
                     };
+                    if b_clamped * (1.0 + rho.abs()) > 4.0 {
+                        return f64::MAX;
+                    }
                     let min_var = a + b_clamped * sigma * (1.0 - rho * rho).sqrt();
                     if min_var < -1e-10 {
                         return f64::MAX;
