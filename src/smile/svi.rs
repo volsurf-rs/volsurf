@@ -232,7 +232,9 @@ impl SviSmile {
             .iter()
             .map(|&(strike, vol)| {
                 let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * sqrt_t);
-                ((-0.5 * d1 * d1).exp() / (2.0 * PI).sqrt()).sqrt()
+                ((-0.5 * d1 * d1).exp() / (2.0 * PI).sqrt())
+                    .sqrt()
+                    .max(1e-8)
             })
             .collect();
 
@@ -377,7 +379,7 @@ impl SviSmile {
         // local minima in the 2D objective landscape (see Zeliade 2009, §3.2).
         // At least 3 starts are k_range-independent to avoid correlated basin drift.
         let mut k_sorted = k_vals.clone();
-        k_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        k_sorted.sort_by(|a, b| a.total_cmp(b));
         let k_median = k_sorted[k_sorted.len() / 2];
         let sigma_atm = w_atm
             .map(|w| w.max(0.0).sqrt().clamp(0.01, 2.0))
@@ -510,10 +512,10 @@ impl SviSmile {
             } else {
                 w_sorted[w_sorted.len() / 2]
             };
-            if w_median > 0.0 && w_atm_fitted / w_median > 4.0 {
+            if w_atm_fitted < 0.0 || (w_median > 0.0 && w_atm_fitted / w_median > 4.0) {
                 return Err(VolSurfError::CalibrationError {
                     message: format!(
-                        "ATM total variance {w_atm_fitted:.6} exceeds 4x median input {w_median:.6}"
+                        "ATM total variance {w_atm_fitted:.6} is degenerate (median input {w_median:.6})"
                     ),
                     model: "SVI",
                     rms_error: None,
@@ -1428,7 +1430,14 @@ mod tests {
                     "ATM vol {atm_vol:.4} outside [0.10, 1.0]"
                 );
             }
-            Err(VolSurfError::CalibrationError { .. }) => {}
+            Err(VolSurfError::CalibrationError { message, .. }) => {
+                assert!(
+                    message.contains("Roger Lee")
+                        || message.contains("ATM total variance")
+                        || message.contains("grid search"),
+                    "unexpected rejection reason: {message}"
+                );
+            }
             Err(e) => panic!("unexpected error variant: {e}"),
         }
     }
@@ -1467,7 +1476,14 @@ mod tests {
                     "ATM vol should be finite and positive, got {atm_vol}"
                 );
             }
-            Err(VolSurfError::CalibrationError { .. }) => {}
+            Err(VolSurfError::CalibrationError { message, .. }) => {
+                assert!(
+                    message.contains("Roger Lee")
+                        || message.contains("ATM total variance")
+                        || message.contains("grid search"),
+                    "unexpected rejection reason: {message}"
+                );
+            }
             Err(e) => panic!("unexpected error variant: {e}"),
         }
     }

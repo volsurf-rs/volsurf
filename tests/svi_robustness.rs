@@ -11,7 +11,10 @@ struct Fixture {
 }
 
 fn load_fixture(name: &str) -> Fixture {
-    let path = format!("tests/fixtures/svi_failures/{name}");
+    let path = format!(
+        "{}/tests/fixtures/svi_failures/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let data = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     serde_json::from_str(&data).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
@@ -33,17 +36,28 @@ fn assert_calibration_sane(
     label: &str,
 ) {
     if data.len() < 5 {
+        println!("{label}: skipped (only {} points)", data.len());
         return;
     }
     match SviSmile::calibrate(forward, expiry, data) {
         Ok(smile) => {
             let atm = SmileSection::vol(&smile, forward).unwrap().0;
+            let ratio = atm / expected_atm;
+            println!(
+                "{label}: OK  n={:3}  ATM={:.4} expected={:.4} ratio={:.3}",
+                data.len(),
+                atm,
+                expected_atm,
+                ratio
+            );
             assert!(
                 atm > expected_atm * 0.5 && atm < expected_atm * 2.0,
                 "{label}: ATM vol {atm:.4} outside [0.5x, 2x] of expected {expected_atm:.4}"
             );
         }
-        Err(VolSurfError::CalibrationError { .. }) => {}
+        Err(VolSurfError::CalibrationError { message, .. }) => {
+            println!("{label}: REJECTED  n={:3}  reason={message}", data.len());
+        }
         Err(e) => panic!("{label}: unexpected error variant: {e}"),
     }
 }

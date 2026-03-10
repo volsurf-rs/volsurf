@@ -2663,7 +2663,15 @@ mod tests {
                     );
                 }
             }
-            Err(crate::VolSurfError::CalibrationError { .. }) => {}
+            Err(crate::VolSurfError::CalibrationError { message, .. }) => {
+                assert!(
+                    message.contains("Roger Lee")
+                        || message.contains("ATM total variance")
+                        || message.contains("grid search")
+                        || message.contains("SVI"),
+                    "unexpected rejection reason: {message}"
+                );
+            }
             Err(e) => panic!("unexpected error variant: {e}"),
         }
     }
