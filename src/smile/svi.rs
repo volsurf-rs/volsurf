@@ -360,8 +360,12 @@ impl SviSmile {
         // Multi-start grid search: 8 starts with different (m, σ) ranges to escape
         // local minima in the 2D objective landscape (see Zeliade 2009, §3.2).
         // At least 3 starts are k_range-independent to avoid correlated basin drift.
-        let k_mid = 0.5 * (k_min + k_max);
-        let sigma_atm = w_atm.map(|w| w.sqrt().clamp(0.01, 2.0)).unwrap_or(0.2);
+        let mut k_sorted = k_vals.clone();
+        k_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let k_median = k_sorted[k_sorted.len() / 2];
+        let sigma_atm = w_atm
+            .map(|w| w.max(0.0).sqrt().clamp(0.01, 2.0))
+            .unwrap_or(0.2);
         let starts: [(f64, f64, f64, f64); 8] = [
             // Start 0: original wide range (k_range-dependent)
             (
@@ -393,8 +397,8 @@ impl SviSmile {
                 0.02,
                 (k_range * 0.7).max(0.3),
             ),
-            // Start 5: data-median centered m, tight σ for short tenors
-            (k_mid - 0.1, k_mid + 0.1, 0.003, 0.15),
+            // Start 5: median-k centered m, tight σ for short tenors
+            (k_median - 0.1, k_median + 0.1, 0.003, 0.15),
             // Start 6: fixed near-ATM, very tight σ (short-dated equity)
             (-0.05, 0.05, 0.002, 0.08),
             // Start 7: fixed wide m, large σ (long-dated / high-vol regimes)
