@@ -90,6 +90,7 @@ impl SviSmile {
     /// - `b ≥ 0` (non-negative slope)
     /// - `|ρ| < 1` (strict)
     /// - `σ > 0` (positive curvature)
+    /// - `b(1 + |ρ|) ≤ 4` (Roger Lee moment bound)
     /// - `a + bσ√(1 − ρ²) ≥ 0` (non-negative minimum variance)
     ///
     /// # Errors
@@ -130,6 +131,12 @@ impl SviSmile {
         if !a.is_finite() {
             return Err(VolSurfError::InvalidInput {
                 message: format!("a must be finite, got {a}"),
+            });
+        }
+        let lee_bound = b * (1.0 + rho.abs());
+        if lee_bound > 4.0 {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("Roger Lee bound violated: b*(1+|rho|) = {lee_bound} > 4"),
             });
         }
         let min_variance = a + b * sigma * (1.0 - rho * rho).sqrt();
@@ -767,6 +774,22 @@ mod tests {
     }
 
     #[test]
+    fn new_rejects_roger_lee_bound() {
+        // b=3.0, rho=0.5 → 3.0*(1+0.5) = 4.5 > 4
+        let r = SviSmile::new(F, T, 0.5, 3.0, 0.5, M, SIGMA);
+        assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("Roger Lee"), "expected Roger Lee in: {msg}");
+    }
+
+    #[test]
+    fn new_accepts_roger_lee_boundary() {
+        // b=2.5, rho=0.6 → 2.5*(1+0.6) = 4.0 exactly — should be accepted
+        let r = SviSmile::new(F, T, 0.5, 2.5, 0.6, M, SIGMA);
+        assert!(r.is_ok());
+    }
+
+    #[test]
     fn new_allows_zero_min_variance() {
         // Exactly zero minimum variance is allowed
         let min_var = B * SIGMA * (1.0 - RHO * RHO).sqrt();
@@ -1386,17 +1409,19 @@ mod tests {
             (6025.0, 0.1879697111), (6045.0, 0.1880807256),
         ];
 
-        // Previously failed with "grid search found no valid starting point".
-        // With the vol-cliff filter, calibration succeeds by removing call-side cabinet quotes.
-        let smile = SviSmile::calibrate(forward, expiry, &data)
-            .expect("calibration should succeed with vol-cliff filter");
-
-        // One-sided fit overshoots ATM (degenerate b/rho), but should stay finite
-        let atm_vol = smile.vol(forward).unwrap().0;
-        assert!(
-            atm_vol > 0.10 && atm_vol < 1.0,
-            "ATM vol {atm_vol:.4} outside [0.10, 1.0]"
-        );
+        // One-sided data after vol-cliff filter: calibration may produce a valid
+        // (albeit imprecise) fit, or fail with Roger Lee / ATM sanity rejection.
+        match SviSmile::calibrate(forward, expiry, &data) {
+            Ok(smile) => {
+                let atm_vol = smile.vol(forward).unwrap().0;
+                assert!(
+                    atm_vol > 0.10 && atm_vol < 1.0,
+                    "ATM vol {atm_vol:.4} outside [0.10, 1.0]"
+                );
+            }
+            Err(VolSurfError::CalibrationError { .. }) => {}
+            Err(e) => panic!("unexpected error variant: {e}"),
+        }
     }
 
     #[test]
@@ -1422,16 +1447,20 @@ mod tests {
             (6025.0, 0.4777678857), (6045.0, 0.4874670663),
         ];
 
-        // Extreme case (16 DTE, non-monotonic put wing): previously failed with
-        // "grid search found no valid starting point". One-sided data after filter
-        // leaves SVI ill-conditioned, but calibration must not error.
-        let smile = SviSmile::calibrate(forward, expiry, &data)
-            .expect("calibration should succeed with vol-cliff filter");
-        let atm_vol = smile.vol(forward).unwrap().0;
-        assert!(
-            atm_vol.is_finite() && atm_vol > 0.0,
-            "ATM vol should be finite and positive, got {atm_vol}"
-        );
+        // Extreme case (16 DTE, non-monotonic put wing): one-sided data after
+        // vol-cliff filter leaves SVI ill-conditioned. May produce a degenerate
+        // fit rejected by Roger Lee bound or ATM sanity check.
+        match SviSmile::calibrate(forward, expiry, &data) {
+            Ok(smile) => {
+                let atm_vol = smile.vol(forward).unwrap().0;
+                assert!(
+                    atm_vol.is_finite() && atm_vol > 0.0,
+                    "ATM vol should be finite and positive, got {atm_vol}"
+                );
+            }
+            Err(VolSurfError::CalibrationError { .. }) => {}
+            Err(e) => panic!("unexpected error variant: {e}"),
+        }
     }
 
     // Real-data fixture tests: ES futures options from vol-arb/scripts/essvi_fixtures/essvi_successes.json.
