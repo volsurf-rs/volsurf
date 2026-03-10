@@ -357,25 +357,48 @@ impl SviSmile {
             }
         };
 
-        // Multi-start grid search: 3 starts with different (m, σ) ranges to escape
+        // Multi-start grid search: 8 starts with different (m, σ) ranges to escape
         // local minima in the 2D objective landscape (see Zeliade 2009, §3.2).
-        let starts: [(f64, f64, f64, f64); 3] = [
-            // Start 0: original range
+        // At least 3 starts are k_range-independent to avoid correlated basin drift.
+        let k_mid = 0.5 * (k_min + k_max);
+        let sigma_atm = w_atm.map(|w| w.sqrt().clamp(0.01, 2.0)).unwrap_or(0.2);
+        let starts: [(f64, f64, f64, f64); 8] = [
+            // Start 0: original wide range (k_range-dependent)
             (
                 k_min - 0.5 * k_range,
                 k_max + 0.5 * k_range,
                 0.01,
                 k_range.max(0.5),
             ),
-            // Start 1: same m, tighter σ — catches narrow-σ basins
+            // Start 1: same m, tighter σ
             (
                 k_min - 0.5 * k_range,
                 k_max + 0.5 * k_range,
                 0.005,
                 (k_range / 2.0).max(0.2),
             ),
-            // Start 2: ATM-centered m, wide σ — covers typical equity smile basin
+            // Start 2: ATM-centered, wide σ (fixed range)
             (-0.2, 0.2, 0.01, 1.0),
+            // Start 3: ATM-variance-centered — σ anchored to observed ATM level
+            (
+                -0.15,
+                0.15,
+                (sigma_atm * 0.3).max(0.005),
+                (sigma_atm * 3.0).max(0.3),
+            ),
+            // Start 4: wide m (±2× data range), moderate σ
+            (
+                k_min - k_range,
+                k_max + k_range,
+                0.02,
+                (k_range * 0.7).max(0.3),
+            ),
+            // Start 5: data-median centered m, tight σ for short tenors
+            (k_mid - 0.1, k_mid + 0.1, 0.003, 0.15),
+            // Start 6: fixed near-ATM, very tight σ (short-dated equity)
+            (-0.05, 0.05, 0.002, 0.08),
+            // Start 7: fixed wide m, large σ (long-dated / high-vol regimes)
+            (-0.5, 0.5, 0.05, 2.0),
         ];
 
         let nm_config = crate::optim::NelderMeadConfig {
