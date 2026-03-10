@@ -90,7 +90,7 @@ impl SviSmile {
     /// - `b ≥ 0` (non-negative slope)
     /// - `|ρ| < 1` (strict)
     /// - `σ > 0` (positive curvature)
-    /// - `b(1 + |ρ|) ≤ 4` (Roger Lee moment bound)
+    /// - `b(1 + |ρ|) ≤ 2` (Roger Lee moment bound)
     /// - `a + bσ√(1 − ρ²) ≥ 0` (non-negative minimum variance)
     ///
     /// # Errors
@@ -134,9 +134,9 @@ impl SviSmile {
             });
         }
         let lee_bound = b * (1.0 + rho.abs());
-        if lee_bound > 4.0 {
+        if lee_bound > 2.0 {
             return Err(VolSurfError::InvalidInput {
-                message: format!("Roger Lee bound violated: b*(1+|rho|) = {lee_bound} > 4"),
+                message: format!("Roger Lee bound violated: b*(1+|rho|) = {lee_bound} > 2"),
             });
         }
         let min_variance = a + b * sigma * (1.0 - rho * rho).sqrt();
@@ -363,7 +363,7 @@ impl SviSmile {
                     } else {
                         (b_rho / b_clamped).clamp(-0.999, 0.999)
                     };
-                    if b_clamped * (1.0 + rho.abs()) > 4.0 {
+                    if b_clamped * (1.0 + rho.abs()) > 2.0 {
                         return f64::MAX;
                     }
                     let min_var = a + b_clamped * sigma * (1.0 - rho * rho).sqrt();
@@ -787,8 +787,8 @@ mod tests {
 
     #[test]
     fn new_rejects_roger_lee_bound() {
-        // b=3.0, rho=0.5 → 3.0*(1+0.5) = 4.5 > 4
-        let r = SviSmile::new(F, T, 0.5, 3.0, 0.5, M, SIGMA);
+        // b=1.5, rho=0.5 → 1.5*(1+0.5) = 2.25 > 2
+        let r = SviSmile::new(F, T, 0.5, 1.5, 0.5, M, SIGMA);
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
         let msg = r.unwrap_err().to_string();
         assert!(msg.contains("Roger Lee"), "expected Roger Lee in: {msg}");
@@ -796,8 +796,8 @@ mod tests {
 
     #[test]
     fn new_accepts_roger_lee_boundary() {
-        // b=2.5, rho=0.6 → 2.5*(1+0.6) = 4.0 exactly — should be accepted
-        let r = SviSmile::new(F, T, 0.5, 2.5, 0.6, M, SIGMA);
+        // b=1.25, rho=0.6 → 1.25*(1+0.6) = 2.0 exactly — should be accepted
+        let r = SviSmile::new(F, T, 0.01, 1.25, 0.6, M, SIGMA);
         assert!(r.is_ok());
     }
 
@@ -1686,5 +1686,147 @@ mod tests {
 
         let rms = rms_vol_error(&smile, &data);
         assert!(rms < 0.01, "RMS vol error {rms:.4} exceeds 1% — poor fit");
+    }
+
+    #[test]
+    fn vega_weighting_improves_atm_fit() {
+        // Construct data with deep OTM noise that would pull an unweighted fit
+        // away from ATM. Vega weighting should keep ATM vol close to truth.
+        let true_smile = SviSmile::new(100.0, 0.5, 0.02, 0.3, -0.3, 0.0, 0.15).unwrap();
+        let mut data = synthetic_market_data(
+            &true_smile,
+            &[80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0],
+        );
+        // Perturb deep OTM wings with +10% vol noise
+        data[0].1 += 0.10;
+        data[1].1 += 0.08;
+        data[7].1 += 0.06;
+        data[8].1 += 0.10;
+
+        let calibrated = SviSmile::calibrate(100.0, 0.5, &data).unwrap();
+        let true_atm = true_smile.vol(100.0).unwrap().0;
+        let fit_atm = calibrated.vol(100.0).unwrap().0;
+        let atm_err = (fit_atm - true_atm).abs();
+        assert!(
+            atm_err < 0.02,
+            "ATM error {atm_err:.4} too large — vega weighting should keep ATM fit tight"
+        );
+    }
+
+    #[test]
+    fn calibrate_one_sided_data_skips_atm_sanity() {
+        // All strikes above forward — no ATM bracket → w_atm=None → sanity check skipped.
+        // Calibration should still succeed (or fail for grid reasons, not ATM sanity).
+        let forward = 100.0;
+        let expiry = 1.0;
+        let data: Vec<(f64, f64)> = (0..10)
+            .map(|i| (110.0 + 5.0 * i as f64, 0.20 + 0.005 * i as f64))
+            .collect();
+        match SviSmile::calibrate(forward, expiry, &data) {
+            Ok(smile) => {
+                let vol = smile.vol(130.0).unwrap().0;
+                assert!(vol.is_finite() && vol > 0.0);
+            }
+            Err(VolSurfError::CalibrationError { message, .. }) => {
+                assert!(
+                    !message.contains("ATM total variance"),
+                    "one-sided data should not trigger ATM sanity check: {message}"
+                );
+            }
+            Err(e) => panic!("unexpected: {e}"),
+        }
+    }
+
+    #[test]
+    fn calibrate_rejects_degenerate_atm_overshoot() {
+        // Craft data where optimal (m,sigma) would produce w_fitted(0) >> median w.
+        // Very wide strike range with tight near-ATM cluster and one distant outlier
+        // to lure the fit into overshooting ATM.
+        let forward = 100.0;
+        let expiry = 1.0;
+        let mut data: Vec<(f64, f64)> = vec![
+            (95.0, 0.22),
+            (97.0, 0.21),
+            (99.0, 0.20),
+            (100.0, 0.20),
+            (101.0, 0.20),
+        ];
+        // Add a cluster of very low-vol deep OTM points
+        for i in 0..6 {
+            data.push((150.0 + 10.0 * i as f64, 0.03));
+        }
+
+        match SviSmile::calibrate(forward, expiry, &data) {
+            Ok(smile) => {
+                // If it calibrates, ATM should still be reasonable (sanity check passed)
+                let atm = smile.vol(forward).unwrap().0;
+                assert!(
+                    atm < 0.80,
+                    "degenerate ATM {atm:.4} should be caught by sanity check"
+                );
+            }
+            Err(VolSurfError::CalibrationError { message, .. }) => {
+                // Expected: either ATM sanity or grid/Lee rejection
+                assert!(
+                    message.contains("ATM total variance")
+                        || message.contains("Roger Lee")
+                        || message.contains("grid search"),
+                    "unexpected rejection: {message}"
+                );
+            }
+            Err(e) => panic!("unexpected: {e}"),
+        }
+    }
+
+    #[test]
+    fn roger_lee_bound_prevents_calibration_to_steep_wings() {
+        // Data with extremely steep wings that would require b*(1+|rho|) > 4 to fit.
+        let forward = 100.0;
+        let expiry = 1.0;
+        let data: Vec<(f64, f64)> = vec![
+            (70.0, 0.90),
+            (80.0, 0.70),
+            (90.0, 0.50),
+            (95.0, 0.35),
+            (100.0, 0.20),
+            (105.0, 0.35),
+            (110.0, 0.50),
+            (120.0, 0.70),
+            (130.0, 0.90),
+        ];
+
+        match SviSmile::calibrate(forward, expiry, &data) {
+            Ok(smile) => {
+                // If accepted, Lee bound must hold
+                let lee = smile.b * (1.0 + smile.rho.abs());
+                assert!(
+                    lee <= 4.0,
+                    "Roger Lee violated in calibrated params: b*(1+|rho|) = {lee}"
+                );
+            }
+            Err(VolSurfError::CalibrationError { .. }) => {
+                // Also acceptable — rejected before constructing invalid params
+            }
+            Err(e) => panic!("unexpected: {e}"),
+        }
+    }
+
+    #[test]
+    fn roger_lee_boundary_exact_in_calibration() {
+        // Verify calibrate() never returns params exceeding the bound,
+        // even for data that fits well with moderate b.
+        let original = SviSmile::new(100.0, 1.0, 0.04, 0.8, -0.5, 0.0, 0.1).unwrap();
+        let strikes: Vec<f64> = (0..20).map(|i| 60.0 + 4.0 * i as f64).collect();
+        let data = synthetic_market_data(&original, &strikes);
+
+        let calibrated = SviSmile::calibrate(100.0, 1.0, &data).unwrap();
+        let lee = calibrated.b * (1.0 + calibrated.rho.abs());
+        assert!(
+            lee <= 2.0,
+            "Roger Lee bound violated: b={}, rho={}, b*(1+|rho|)={}",
+            calibrated.b,
+            calibrated.rho,
+            lee
+        );
     }
 }
