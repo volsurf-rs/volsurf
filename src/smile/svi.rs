@@ -1780,7 +1780,7 @@ mod tests {
 
     #[test]
     fn roger_lee_bound_prevents_calibration_to_steep_wings() {
-        // Data with extremely steep wings that would require b*(1+|rho|) > 4 to fit.
+        // Data with extremely steep wings that would require b*(1+|rho|) > 2 to fit.
         let forward = 100.0;
         let expiry = 1.0;
         let data: Vec<(f64, f64)> = vec![
@@ -1797,10 +1797,9 @@ mod tests {
 
         match SviSmile::calibrate(forward, expiry, &data) {
             Ok(smile) => {
-                // If accepted, Lee bound must hold
                 let lee = smile.b * (1.0 + smile.rho.abs());
                 assert!(
-                    lee <= 4.0,
+                    lee <= 2.0,
                     "Roger Lee violated in calibrated params: b*(1+|rho|) = {lee}"
                 );
             }

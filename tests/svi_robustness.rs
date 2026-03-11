@@ -255,5 +255,27 @@ fn mar10_apr17_38dte_full_range() {
     );
 }
 
+// Regression guard: the stable fixture at ±5% must always calibrate successfully.
+// This catches regressions where valid, well-behaved data starts failing.
+#[test]
+fn stable_fixture_must_succeed() {
+    let f = load_fixture("jan24_feb21_28dte_stable.json");
+    for pct in [0.05, 0.10, 0.15] {
+        let subset = filter_by_moneyness(&f.market_vols, f.forward, pct);
+        if subset.len() < 5 {
+            continue;
+        }
+        let smile = SviSmile::calibrate(f.forward, f.expiry_years, &subset)
+            .unwrap_or_else(|e| panic!("stable ±{:.0}% must succeed: {e}", pct * 100.0));
+        let atm = SmileSection::vol(&smile, f.forward).unwrap().0;
+        let ratio = atm / f.expected_atm_iv;
+        assert!(
+            ratio > 0.8 && ratio < 1.2,
+            "stable ±{:.0}%: ATM ratio {ratio:.3} outside [0.8, 1.2]",
+            pct * 100.0
+        );
+    }
+}
+
 // Roger Lee bound tests live in src/smile/svi.rs (new_rejects_roger_lee_bound,
 // new_accepts_roger_lee_boundary) — not duplicated here.
