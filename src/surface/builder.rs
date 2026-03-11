@@ -113,7 +113,7 @@ impl TryFrom<SmileModelRaw> for SmileModel {
 /// assert!(vol.0 > 0.0);
 /// # Ok::<(), volsurf::VolSurfError>(())
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SurfaceBuilder {
     spot: Option<f64>,
     rate: Option<f64>,
@@ -122,7 +122,7 @@ pub struct SurfaceBuilder {
     tenor_data: Vec<TenorData>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TenorData {
     expiry: f64,
     strikes: Vec<f64>,

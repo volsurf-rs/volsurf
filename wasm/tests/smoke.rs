@@ -320,6 +320,34 @@ fn builder_consumed_after_build() {
     assert!(builder.build().is_err());
 }
 
+#[wasm_bindgen_test]
+fn builder_recoverable_after_failed_build() {
+    let (strikes, vols) = nine_strike_smile();
+    let mut builder = WasmSurfaceBuilder::new();
+    builder.rate(0.05).unwrap();
+    builder.add_tenor(1.0, strikes, vols).unwrap();
+
+    assert!(builder.build().is_err(), "build without spot should fail");
+
+    builder.spot(100.0).unwrap();
+    let surface = builder.build().unwrap();
+    let vol = surface.black_vol(1.0, 100.0).unwrap();
+    assert!(vol > 0.0 && vol < 1.0, "vol={vol}");
+}
+
+#[wasm_bindgen_test]
+fn builder_consumed_after_successful_retry() {
+    let (strikes, vols) = nine_strike_smile();
+    let mut builder = WasmSurfaceBuilder::new();
+    builder.rate(0.05).unwrap();
+    builder.add_tenor(1.0, strikes, vols).unwrap();
+    assert!(builder.build().is_err());
+
+    builder.spot(100.0).unwrap();
+    builder.build().unwrap();
+    assert!(builder.build().is_err(), "should be consumed after success");
+}
+
 // ── Edge cases ──
 
 #[wasm_bindgen_test]
