@@ -125,12 +125,14 @@ mod tests {
         assert_abs_diff_eq!(fwd, 102.0, epsilon = 1e-14);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "tenors must not be empty")]
     fn panics_on_empty_input() {
         interpolate_theta_forward(&[], &[], &[], 0.5);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn panics_on_mismatched_lengths() {
