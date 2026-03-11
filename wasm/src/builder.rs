@@ -93,10 +93,16 @@ impl WasmSurfaceBuilder {
 
     pub fn build(&mut self) -> Result<WasmPiecewiseSurface, JsValue> {
         let b = self.inner.take().ok_or_else(consumed)?;
-        let surface = b.build().map_err(to_js_err)?;
-        Ok(WasmPiecewiseSurface {
-            inner: Arc::new(surface) as Arc<dyn VolSurface>,
-        })
+        let backup = b.clone();
+        match b.build() {
+            Ok(surface) => Ok(WasmPiecewiseSurface {
+                inner: Arc::new(surface) as Arc<dyn VolSurface>,
+            }),
+            Err(e) => {
+                self.inner = Some(backup);
+                Err(to_js_err(e))
+            }
+        }
     }
 }
 

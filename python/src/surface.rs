@@ -377,9 +377,15 @@ impl PySurfaceBuilder {
 
     fn build(&mut self) -> PyResult<PySurface> {
         let b = self.inner.take().ok_or_else(consumed)?;
-        let surface = b.build().map_err(to_py_err)?;
-        Ok(PySurface {
-            inner: Arc::new(surface) as Arc<dyn VolSurface>,
-        })
+        let backup = b.clone();
+        match b.build() {
+            Ok(surface) => Ok(PySurface {
+                inner: Arc::new(surface) as Arc<dyn VolSurface>,
+            }),
+            Err(e) => {
+                self.inner = Some(backup);
+                Err(to_py_err(e))
+            }
+        }
     }
 }

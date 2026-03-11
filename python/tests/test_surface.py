@@ -196,6 +196,28 @@ class TestSurfaceBuilder:
         with pytest.raises(RuntimeError, match="already consumed"):
             b.add_tenor_with_forward(0.5, STRIKES, VOLS, 101.0)
 
+    def test_build_recoverable_after_failure(self):
+        b = SurfaceBuilder()
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        with pytest.raises(ValueError, match="spot"):
+            b.build()
+        b.spot(100.0)
+        surface = b.build()
+        vol = surface.black_vol(0.25, 100.0)
+        assert 0.0 < vol < 1.0
+
+    def test_build_consumed_after_successful_retry(self):
+        b = SurfaceBuilder()
+        b.rate(0.05)
+        b.add_tenor(0.25, STRIKES, VOLS)
+        with pytest.raises(ValueError, match="spot"):
+            b.build()
+        b.spot(100.0)
+        b.build()
+        with pytest.raises(RuntimeError, match="already consumed"):
+            b.build()
+
 
 class TestSsviSurface:
     def test_construct(self):
