@@ -194,12 +194,6 @@ impl SviSmile {
         const MIN_POINTS: usize = 5;
         /// Grid search resolution for (m, sigma) initialization.
         const GRID_N: usize = 21;
-        /// Nelder-Mead iteration limit.
-        const NM_MAX_ITER: usize = 300;
-        /// Simplex diameter convergence threshold.
-        const NM_DIAMETER_TOL: f64 = 1e-8;
-        /// Objective value spread convergence threshold.
-        const NM_FVALUE_TOL: f64 = 1e-12;
 
         // Input validation
         validate_positive(forward, "forward")?;
@@ -423,11 +417,7 @@ impl SviSmile {
             (-0.5, 0.5, 0.05, 2.0),
         ];
 
-        let nm_config = crate::optim::NelderMeadConfig {
-            max_iter: NM_MAX_ITER,
-            diameter_tol: NM_DIAMETER_TOL,
-            fvalue_tol: NM_FVALUE_TOL,
-        };
+        let nm_config = crate::optim::NelderMeadConfig::calibration();
 
         let mut best_m = 0.0;
         let mut best_sigma = 0.1;

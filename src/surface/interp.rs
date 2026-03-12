@@ -1,3 +1,5 @@
+use crate::surface::piecewise::EXPIRY_MATCH_TOL;
+
 /// Interpolate `(θ, F)` at an arbitrary expiry from stored tenor grids.
 ///
 /// - Exact matches (within 1e-10) return stored values directly.
@@ -16,7 +18,7 @@ pub(crate) fn interpolate_theta_forward(
     let n = tenors.len();
 
     for (i, &t) in tenors.iter().enumerate() {
-        if (expiry - t).abs() < 1e-10 {
+        if (expiry - t).abs() < EXPIRY_MATCH_TOL {
             return (thetas[i], forwards[i]);
         }
     }

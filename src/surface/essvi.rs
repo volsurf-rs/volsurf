@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::ArbitrageReport;
+use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::surface::ssvi::{CALENDAR_CHECK_GRID_SIZE, SsviSlice, strike_grid};
@@ -558,9 +559,6 @@ impl EssviSurface {
     pub fn from_per_tenor(fits: &[PerTenorFit]) -> error::Result<Self> {
         const MIN_TENORS: usize = 2;
         const GRID_N: usize = 15;
-        const NM_MAX_ITER: usize = 300;
-        const NM_DIAMETER_TOL: f64 = 1e-8;
-        const NM_FVALUE_TOL: f64 = 1e-12;
         const A_SCAN_STEPS: usize = 20;
         const A_SCAN_MAX: f64 = 3.0;
 
@@ -682,11 +680,7 @@ impl EssviSurface {
         }
 
         let rho_step = (rho_hi - rho_lo) / (GRID_N as f64) * 0.5;
-        let nm_config = crate::optim::NelderMeadConfig {
-            max_iter: NM_MAX_ITER,
-            diameter_tol: NM_DIAMETER_TOL,
-            fvalue_tol: NM_FVALUE_TOL,
-        };
+        let nm_config = crate::optim::NelderMeadConfig::calibration();
         let nm_rho = crate::optim::nelder_mead_2d(
             |r0, rm| {
                 if r0.abs() >= 0.999 || rm.abs() >= 0.999 || !r0.is_finite() || !rm.is_finite() {
@@ -972,7 +966,7 @@ impl EssviSurface {
             let delta = self.a * (self.rho_m - self.rho_0) * t.powf(self.a);
             let lhs = (delta + rho * gamma_thm).abs();
 
-            if lhs > gamma_thm + 1e-10 {
+            if lhs > gamma_thm + CALENDAR_ARB_TOL {
                 violations.push(StructuralViolation {
                     tenor: self.tenors[i],
                     theta,
@@ -1039,7 +1033,7 @@ impl VolSurface for EssviSurface {
                 let k_long = (strike / self.forwards[i + 1]).ln();
                 let w_short = self.total_variance_at(self.thetas[i], k_short);
                 let w_long = self.total_variance_at(self.thetas[i + 1], k_long);
-                if w_long < w_short - 1e-10 {
+                if w_long < w_short - CALENDAR_ARB_TOL {
                     calendar_violations.push(CalendarViolation {
                         strike,
                         tenor_short: self.tenors[i],

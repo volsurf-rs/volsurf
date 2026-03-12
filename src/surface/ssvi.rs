@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
+use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::types::{Variance, Vol};
@@ -320,7 +321,7 @@ impl SsviSurface {
     /// # References
     /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
     pub fn calendar_arb_analytical(&self) -> Vec<CalendarViolation> {
-        const TOL: f64 = -1e-10;
+        const TOL: f64 = -CALENDAR_ARB_TOL;
 
         let mut violations = Vec::new();
 
@@ -407,9 +408,6 @@ impl SsviSurface {
 
         const MIN_TENORS: usize = 2;
         const GRID_N: usize = 15;
-        const NM_MAX_ITER: usize = 300;
-        const NM_DIAMETER_TOL: f64 = 1e-8;
-        const NM_FVALUE_TOL: f64 = 1e-12;
 
         // Input validation
         if tenors.len() < MIN_TENORS {
@@ -556,11 +554,7 @@ impl SsviSurface {
         let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
         let step_gamma = (gamma_hi - gamma_lo) / (GRID_N as f64) * 0.5;
 
-        let nm_config = crate::optim::NelderMeadConfig {
-            max_iter: NM_MAX_ITER,
-            diameter_tol: NM_DIAMETER_TOL,
-            fvalue_tol: NM_FVALUE_TOL,
-        };
+        let nm_config = crate::optim::NelderMeadConfig::calibration();
         let nm_result = crate::optim::nelder_mead_2d(
             objective, best_eta, best_gamma, step_eta, step_gamma, &nm_config,
         );
@@ -658,7 +652,7 @@ impl VolSurface for SsviSurface {
                 let k_long = (strike / self.forwards[i + 1]).ln();
                 let w_short = self.total_variance_at(self.thetas[i], k_short);
                 let w_long = self.total_variance_at(self.thetas[i + 1], k_long);
-                if w_long < w_short - 1e-10 {
+                if w_long < w_short - CALENDAR_ARB_TOL {
                     calendar_violations.push(CalendarViolation {
                         strike,
                         tenor_short: self.tenors[i],
