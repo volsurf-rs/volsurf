@@ -27,13 +27,11 @@ use std::fmt;
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::spline::SplineSmile;
-use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
+use crate::surface::{CALENDAR_ARB_TOL, EXPIRY_MATCH_TOL};
 use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
-
-pub(crate) const EXPIRY_MATCH_TOL: f64 = 1e-10;
 
 /// Number of strikes used when sampling smiles for interpolation.
 /// Log-spaced grid from 0.5·F to 2.0·F provides adequate density for

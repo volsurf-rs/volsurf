@@ -1,4 +1,4 @@
-use crate::surface::piecewise::EXPIRY_MATCH_TOL;
+use crate::surface::EXPIRY_MATCH_TOL;
 
 /// Interpolate `(θ, F)` at an arbitrary expiry from stored tenor grids.
 ///
