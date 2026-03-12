@@ -194,12 +194,6 @@ impl SviSmile {
         const MIN_POINTS: usize = 5;
         /// Grid search resolution for (m, sigma) initialization.
         const GRID_N: usize = 21;
-        /// Nelder-Mead iteration limit.
-        const NM_MAX_ITER: usize = 300;
-        /// Simplex diameter convergence threshold.
-        const NM_DIAMETER_TOL: f64 = 1e-8;
-        /// Objective value spread convergence threshold.
-        const NM_FVALUE_TOL: f64 = 1e-12;
 
         // Input validation
         validate_positive(forward, "forward")?;
@@ -423,11 +417,7 @@ impl SviSmile {
             (-0.5, 0.5, 0.05, 2.0),
         ];
 
-        let nm_config = crate::optim::NelderMeadConfig {
-            max_iter: NM_MAX_ITER,
-            diameter_tol: NM_DIAMETER_TOL,
-            fvalue_tol: NM_FVALUE_TOL,
-        };
+        let nm_config = crate::optim::NelderMeadConfig::calibration();
 
         let mut best_m = 0.0;
         let mut best_sigma = 0.1;
@@ -648,15 +638,12 @@ impl SmileSection for SviSmile {
         const K_MIN: f64 = -3.0;
         /// Maximum log-moneyness for arbitrage scan.
         const K_MAX: f64 = 3.0;
-        /// Tolerance for g-function negativity detection.
-        const TOL: f64 = 1e-10;
-
         let mut violations = Vec::new();
 
         for i in 0..N {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let g = self.g_function(k);
-            if g < -TOL {
+            if g < -super::BUTTERFLY_G_TOL {
                 let strike = self.forward * k.exp();
                 let d = match self.density(strike) {
                     Ok(d) => d,

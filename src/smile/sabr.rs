@@ -22,6 +22,8 @@ use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::types::Vol;
 use crate::validate::{validate_non_negative, validate_positive};
 
+const TAYLOR_Z_TOL: f64 = 1e-6;
+
 /// SABR volatility smile (Hagan et al., 2002).
 ///
 /// Models the forward price as a CEV process with stochastic volatility,
@@ -219,7 +221,7 @@ impl SabrSmile {
         } else {
             (nu / alpha) * fk_mid * ln_fk
         };
-        let z_ratio = if z.abs() < 1e-6 {
+        let z_ratio = if z.abs() < TAYLOR_Z_TOL {
             // Taylor: z/x(z) ≈ 1 − ρz/2 + (2−3ρ²)/12 · z²
             1.0 - 0.5 * rho * z + (2.0 - 3.0 * rho * rho) / 12.0 * z * z
         } else {
@@ -289,9 +291,6 @@ impl SabrSmile {
 
         const MIN_POINTS: usize = 4;
         const GRID_N: usize = 15;
-        const NM_MAX_ITER: usize = 300;
-        const NM_DIAMETER_TOL: f64 = 1e-8;
-        const NM_FVALUE_TOL: f64 = 1e-12;
         const ALPHA_MAX_ITER: usize = 50;
 
         // Input validation
@@ -432,11 +431,7 @@ impl SabrSmile {
         let step_x = (x_hi - x_lo) / (GRID_N as f64) * 0.5;
         let step_y = (y_hi - y_lo) / (GRID_N as f64) * 0.5;
 
-        let nm_config = crate::optim::NelderMeadConfig {
-            max_iter: NM_MAX_ITER,
-            diameter_tol: NM_DIAMETER_TOL,
-            fvalue_tol: NM_FVALUE_TOL,
-        };
+        let nm_config = crate::optim::NelderMeadConfig::calibration();
         let nm_result =
             crate::optim::nelder_mead_2d(objective, best_x, best_y, step_x, step_y, &nm_config);
 

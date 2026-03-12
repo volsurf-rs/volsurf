@@ -19,6 +19,8 @@ pub use sabr::SabrSmile;
 pub use spline::SplineSmile;
 pub use svi::SviSmile;
 
+pub(crate) const BUTTERFLY_G_TOL: f64 = 1e-10;
+
 use crate::error;
 use crate::implied::black::black_price;
 use crate::types::{OptionType, Variance, Vol};

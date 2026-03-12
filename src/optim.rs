@@ -10,6 +10,16 @@ pub(crate) struct NelderMeadConfig {
     pub fvalue_tol: f64,
 }
 
+impl NelderMeadConfig {
+    pub(crate) fn calibration() -> Self {
+        Self {
+            max_iter: 300,
+            diameter_tol: 1e-8,
+            fvalue_tol: 1e-12,
+        }
+    }
+}
+
 /// Result of a 2D Nelder-Mead optimization.
 pub(crate) struct NelderMeadResult {
     /// Optimal x coordinate.

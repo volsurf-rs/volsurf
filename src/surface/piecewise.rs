@@ -29,6 +29,7 @@ use crate::smile::SmileSection;
 use crate::smile::spline::SplineSmile;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
+use crate::surface::{CALENDAR_ARB_TOL, EXPIRY_MATCH_TOL};
 use crate::types::{Variance, Vol};
 use crate::validate::validate_positive;
 
@@ -144,8 +145,7 @@ impl PiecewiseSurface {
 
         // Check for exact match (within tolerance)
         for (i, &t) in self.tenors.iter().enumerate() {
-            // Tolerance for exact tenor matching.
-            if (expiry - t).abs() < 1e-10 {
+            if (expiry - t).abs() < EXPIRY_MATCH_TOL {
                 return TenorPosition::Exact(i);
             }
         }
@@ -294,8 +294,7 @@ impl VolSurface for PiecewiseSurface {
             for &k in &grid {
                 let w_short = self.smiles[i].variance(k)?;
                 let w_long = self.smiles[i + 1].variance(k)?;
-                // Tolerance for calendar spread violation detection.
-                if w_long.0 < w_short.0 - 1e-10 {
+                if w_long.0 < w_short.0 - CALENDAR_ARB_TOL {
                     calendar_violations.push(CalendarViolation {
                         strike: k,
                         tenor_short: self.tenors[i],

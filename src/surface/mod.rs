@@ -22,6 +22,9 @@ pub use essvi::{EssviSlice, EssviSurface, PerTenorFit, StructuralViolation};
 pub use piecewise::PiecewiseSurface;
 pub use ssvi::{SsviSlice, SsviSurface};
 
+pub(crate) const CALENDAR_ARB_TOL: f64 = 1e-10;
+pub(crate) const EXPIRY_MATCH_TOL: f64 = 1e-10;
+
 use crate::error;
 use crate::smile::SmileSection;
 use crate::types::{Variance, Vol};
