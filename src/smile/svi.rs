@@ -638,15 +638,12 @@ impl SmileSection for SviSmile {
         const K_MIN: f64 = -3.0;
         /// Maximum log-moneyness for arbitrage scan.
         const K_MAX: f64 = 3.0;
-        /// Tolerance for g-function negativity detection.
-        const TOL: f64 = 1e-10;
-
         let mut violations = Vec::new();
 
         for i in 0..N {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let g = self.g_function(k);
-            if g < -TOL {
+            if g < -super::BUTTERFLY_G_TOL {
                 let strike = self.forward * k.exp();
                 let d = match self.density(strike) {
                     Ok(d) => d,

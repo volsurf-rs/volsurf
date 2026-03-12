@@ -321,8 +321,6 @@ impl SsviSurface {
     /// # References
     /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
     pub fn calendar_arb_analytical(&self) -> Vec<CalendarViolation> {
-        const TOL: f64 = -CALENDAR_ARB_TOL;
-
         let mut violations = Vec::new();
 
         for i in 0..self.tenors.len().saturating_sub(1) {
@@ -331,7 +329,7 @@ impl SsviSurface {
 
             for &strike in &grid {
                 let k_short = (strike / self.forwards[i]).ln();
-                if self.dw_dtheta(self.thetas[i], k_short) < TOL {
+                if self.dw_dtheta(self.thetas[i], k_short) < -CALENDAR_ARB_TOL {
                     let k_long = (strike / self.forwards[i + 1]).ln();
                     violations.push(CalendarViolation {
                         strike,
@@ -954,15 +952,12 @@ impl SmileSection for SsviSlice {
         const K_MIN: f64 = -3.0;
         /// Maximum log-moneyness for arbitrage scan.
         const K_MAX: f64 = 3.0;
-        /// Tolerance for g-function negativity detection.
-        const TOL: f64 = 1e-10;
-
         let mut violations = Vec::new();
 
         for i in 0..N {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let g = self.g_function(k);
-            if g < -TOL {
+            if g < -crate::smile::BUTTERFLY_G_TOL {
                 let strike = self.forward * k.exp();
                 let d = match self.density(strike) {
                     Ok(d) => d,
