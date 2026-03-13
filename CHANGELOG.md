@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] "Type-Safe Inputs" - 2026-03-13
+
+### Changed
+
+- **BREAKING**: All trait method inputs now use `Strike`/`Tenor` newtypes instead of bare `f64` — `SmileSection::vol(Strike)`, `VolSurface::black_vol(Tenor, Strike)`, `LocalVol::local_vol(Tenor, Strike)`, etc.
+- Python and WASM bindings unchanged — FFI boundary wraps `f64 → Strike`/`Tenor` internally
+- Updated `types.rs` module docs to reflect input newtypes strategy
+- Extracted `impl_wasm_smile_methods!` macro to DRY SmileSection wrappers in WASM crate
+
+### Added
+
+- NaN/Infinity rejection tests for all smile models, slices, and surfaces
+
 ## [1.0.0] "Stable" - 2026-02-25
 
 ### Added
@@ -117,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/volsurf-rs/volsurf/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/volsurf-rs/volsurf/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/volsurf-rs/volsurf/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/volsurf-rs/volsurf/compare/v0.2.1...v0.3.0
