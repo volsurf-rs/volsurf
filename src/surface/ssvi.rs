@@ -718,6 +718,8 @@ pub struct SsviSlice {
     gamma: f64,
     /// ATM total variance θ = σ²_ATM · T at this tenor.
     theta: f64,
+    /// Precomputed 1 − ρ² (used in hot-path vol/density calculations).
+    one_minus_rho_sq: f64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -812,6 +814,7 @@ impl SsviSlice {
             eta,
             gamma,
             theta,
+            one_minus_rho_sq: 1.0 - rho * rho,
         })
     }
 
@@ -842,17 +845,15 @@ impl SsviSlice {
     fn total_variance(&self, k: f64) -> f64 {
         let phi = self.phi();
         let phi_k = phi * k;
-        let one_minus_rho_sq = 1.0 - self.rho * self.rho;
         (self.theta / 2.0)
-            * (1.0 + self.rho * phi_k + ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt())
+            * (1.0 + self.rho * phi_k + ((phi_k + self.rho).powi(2) + self.one_minus_rho_sq).sqrt())
     }
 
     // w'(k) = (θ/2) · [ρ·φ + φ·(φ·k + ρ) / R], R = √((φ·k + ρ)² + (1 − ρ²))
     fn w_prime(&self, k: f64) -> f64 {
         let phi = self.phi();
         let phi_k = phi * k;
-        let one_minus_rho_sq = 1.0 - self.rho * self.rho;
-        let r = ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt();
+        let r = ((phi_k + self.rho).powi(2) + self.one_minus_rho_sq).sqrt();
         (self.theta / 2.0) * (self.rho * phi + phi * (phi_k + self.rho) / r)
     }
 
@@ -860,9 +861,8 @@ impl SsviSlice {
     fn w_double_prime(&self, k: f64) -> f64 {
         let phi = self.phi();
         let phi_k = phi * k;
-        let one_minus_rho_sq = 1.0 - self.rho * self.rho;
-        let r = ((phi_k + self.rho).powi(2) + one_minus_rho_sq).sqrt();
-        (self.theta / 2.0) * phi * phi * one_minus_rho_sq / (r * r * r)
+        let r = ((phi_k + self.rho).powi(2) + self.one_minus_rho_sq).sqrt();
+        (self.theta / 2.0) * phi * phi * self.one_minus_rho_sq / (r * r * r)
     }
 
     // g(k) = (1 − k·w'/(2w))² − (w')²/4·(1/w + 1/4) + w''/2
