@@ -49,13 +49,13 @@ Production-ready volatility surface construction for equity and FX derivatives.
 
 ```toml
 [dependencies]
-volsurf = "1.0"
+volsurf = "2.0"
 ```
 
 Optional features:
 
 ```toml
-volsurf = { version = "1.0", features = ["parallel", "logging"] }
+volsurf = { version = "2.0", features = ["parallel", "logging"] }
 ```
 
 | Feature | Description |
@@ -256,7 +256,8 @@ Built with wasm-bindgen. See [`wasm/README.md`](wasm/README.md) for JavaScript A
 
 | Version | Name | Key Features |
 |---------|------|--------------|
-| **v1.0** | **Stable** | **API stability, PyO3 bindings, WASM target** |
+| **v2.0** | **Type-Safe Inputs** | **Strike/Tenor newtypes for all API inputs** |
+| v1.0 | Stable | API stability, PyO3 bindings, WASM target |
 | v0.4 | Hardening | Coverage gaps, tracing diagnostics, dead code removal |
 | v0.3 | Production Grade | eSSVI surface + calibration, parallel construction, dividend yield |
 | v0.2.1 | | Normal/Displaced IV, Dupire local vol, serde validation, CI |
