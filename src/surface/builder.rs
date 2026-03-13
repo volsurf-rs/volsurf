@@ -208,13 +208,15 @@ impl SurfaceBuilder {
 
     /// Build the volatility surface.
     ///
-    /// Computes forward prices, calibrates an SVI smile per tenor, sorts
-    /// by expiry, and assembles a [`PiecewiseSurface`].
+    /// Computes forward prices, calibrates a smile per tenor, sorts by expiry,
+    /// and assembles a [`PiecewiseSurface`]. The result is not serializable
+    /// (trait-object storage); use [`SsviSurface`] or [`EssviSurface`] when
+    /// persistence is needed.
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if required fields are missing
     /// or tenor data is invalid. Returns [`VolSurfError::CalibrationError`]
-    /// if SVI calibration fails for any tenor.
+    /// if calibration fails for any tenor.
     pub fn build(self) -> crate::error::Result<PiecewiseSurface> {
         #[cfg(feature = "logging")]
         tracing::debug!(
