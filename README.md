@@ -71,6 +71,7 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ```rust
 use volsurf::surface::{SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor};
 
 let strikes = vec![80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0];
 let vols = vec![0.28, 0.24, 0.22, 0.20, 0.22, 0.24, 0.28];
@@ -83,13 +84,14 @@ let surface = SurfaceBuilder::new()
     .build()?;
 
 // Query vol at any (expiry, strike) point
-let vol = surface.black_vol(0.5, 100.0)?;
+let vol = surface.black_vol(Tenor(0.5), Strike(100.0))?;
 ```
 
 ### Choose a smile model
 
 ```rust
 use volsurf::surface::{SurfaceBuilder, SmileModel, VolSurface};
+use volsurf::{Strike, Tenor};
 
 let surface = SurfaceBuilder::new()
     .spot(100.0)
@@ -106,6 +108,7 @@ Available models: `SmileModel::Svi` (default, 5+ strikes), `SmileModel::CubicSpl
 
 ```rust
 use volsurf::surface::{SsviSurface, VolSurface};
+use volsurf::{Strike, Tenor};
 
 let surface = SsviSurface::new(
     -0.3, 0.5, 0.5,                    // rho, eta, gamma
@@ -114,14 +117,15 @@ let surface = SsviSurface::new(
     vec![0.04, 0.08, 0.16],            // thetas (ATM total variance)
 )?;
 
-let vol = surface.black_vol(0.5, 100.0)?;
-let smile = surface.smile_at(0.5)?;
+let vol = surface.black_vol(Tenor(0.5), Strike(100.0))?;
+let smile = surface.smile_at(Tenor(0.5))?;
 ```
 
 ### Calibrate eSSVI from market data
 
 ```rust
 use volsurf::surface::{EssviSurface, VolSurface};
+use volsurf::{Strike, Tenor};
 
 // Per-tenor (strike, implied_vol) pairs
 let data_3m: Vec<(f64, f64)> = (0..10)
@@ -137,7 +141,7 @@ let surface = EssviSurface::calibrate(
     &[100.0, 100.0],    // forwards
 )?;
 
-let vol = surface.black_vol(0.5, 95.0)?;
+let vol = surface.black_vol(Tenor(0.5), Strike(95.0))?;
 ```
 
 ### Check for arbitrage
