@@ -649,3 +649,35 @@ fn essvi_from_per_tenor_json_rejects_empty() {
 fn essvi_from_per_tenor_json_rejects_invalid() {
     assert!(WasmEssviSurface::from_per_tenor_json("not json").is_err());
 }
+
+#[wasm_bindgen_test]
+fn model_sabr_rejects_negative_beta() {
+    let mut b = WasmSurfaceBuilder::new();
+    assert!(b.model_sabr(-0.1).is_err());
+}
+
+#[wasm_bindgen_test]
+fn model_sabr_rejects_beta_above_one() {
+    let mut b = WasmSurfaceBuilder::new();
+    assert!(b.model_sabr(1.1).is_err());
+}
+
+#[wasm_bindgen_test]
+fn model_sabr_rejects_nan_beta() {
+    let mut b = WasmSurfaceBuilder::new();
+    assert!(b.model_sabr(f64::NAN).is_err());
+}
+
+#[wasm_bindgen_test]
+fn model_sabr_rejects_inf_beta() {
+    let mut b = WasmSurfaceBuilder::new();
+    assert!(b.model_sabr(f64::INFINITY).is_err());
+}
+
+#[wasm_bindgen_test]
+fn model_sabr_accepts_boundary_values() {
+    let mut b0 = WasmSurfaceBuilder::new();
+    assert!(b0.model_sabr(0.0).is_ok());
+    let mut b1 = WasmSurfaceBuilder::new();
+    assert!(b1.model_sabr(1.0).is_ok());
+}

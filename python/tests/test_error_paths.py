@@ -128,3 +128,29 @@ class TestSerdeErrors:
         for cls in [SviSmile, SabrSmile, SplineSmile, SsviSurface, EssviSurface]:
             with pytest.raises(ValueError):
                 cls.from_json("{}")
+
+
+class TestSmileModelSabrBeta:
+    def test_rejects_negative_beta(self):
+        with pytest.raises(ValueError):
+            SmileModel.sabr(-0.1)
+
+    def test_rejects_beta_above_one(self):
+        with pytest.raises(ValueError):
+            SmileModel.sabr(1.1)
+
+    def test_rejects_nan_beta(self):
+        with pytest.raises(ValueError):
+            SmileModel.sabr(float("nan"))
+
+    def test_rejects_inf_beta(self):
+        with pytest.raises(ValueError):
+            SmileModel.sabr(float("inf"))
+
+    def test_accepts_beta_zero(self):
+        m = SmileModel.sabr(0.0)
+        assert m is not None
+
+    def test_accepts_beta_one(self):
+        m = SmileModel.sabr(1.0)
+        assert m is not None
