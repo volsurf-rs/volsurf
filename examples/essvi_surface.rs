@@ -216,7 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\neSSVI diverges from SSVI most at short tenors where rho(theta)");
     println!(
-        "is steeper ({:.2} vs {:.2}). They converge at T=2Y where rho -> rho_m.",
+        "is steeper ({:.2} vs {:.2}). They converge at theta_max where rho -> rho_m.",
         surface.rho(*thetas.first().unwrap()),
         surface.rho_m()
     );

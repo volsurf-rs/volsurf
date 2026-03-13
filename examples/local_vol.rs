@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arc_surface: Arc<dyn VolSurface> = Arc::new(surface);
     let dupire = DupireLocalVol::new(Arc::clone(&arc_surface));
 
-    println!("Dupire local vol from SSVI surface (default bump_size=1%)\n");
+    println!("Dupire local vol from SSVI surface (default bump_size=0.01)\n");
 
     // ---------------------------------------------------------------
     // 3. Local vol grid
