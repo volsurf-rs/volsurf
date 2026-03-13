@@ -25,7 +25,8 @@ pub enum StickyKind {
 
 /// Convert a strike to log-moneyness: k = ln(K / F).
 ///
-/// Returns `Err` if `strike` or `forward` is non-positive, NaN, or infinite.
+/// Returns `Err` if `strike` or `forward` is non-positive, NaN, or infinite,
+/// or if the result overflows to infinity.
 pub fn log_moneyness(strike: f64, forward: f64) -> error::Result<f64> {
     validate_positive(strike, "strike")?;
     validate_positive(forward, "forward")?;
@@ -40,7 +41,8 @@ pub fn log_moneyness(strike: f64, forward: f64) -> error::Result<f64> {
 
 /// Convert a strike to simple moneyness: m = K / F.
 ///
-/// Returns `Err` if `strike` or `forward` is non-positive, NaN, or infinite.
+/// Returns `Err` if `strike` or `forward` is non-positive, NaN, or infinite,
+/// or if the result overflows to infinity.
 pub fn moneyness(strike: f64, forward: f64) -> error::Result<f64> {
     validate_positive(strike, "strike")?;
     validate_positive(forward, "forward")?;
