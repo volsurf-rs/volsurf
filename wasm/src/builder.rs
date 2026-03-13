@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use volsurf::VolSurface;
 use volsurf::surface::{SmileModel, SurfaceBuilder};
+use volsurf::{Strike, Tenor};
 use wasm_bindgen::prelude::*;
 
 use crate::arbitrage::WasmSurfaceDiagnostics;
@@ -114,19 +115,23 @@ pub struct WasmPiecewiseSurface {
 #[wasm_bindgen]
 impl WasmPiecewiseSurface {
     pub fn black_vol(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
-        Ok(self.inner.black_vol(expiry, strike).map_err(to_js_err)?.0)
+        Ok(self
+            .inner
+            .black_vol(Tenor(expiry), Strike(strike))
+            .map_err(to_js_err)?
+            .0)
     }
 
     pub fn black_variance(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
         Ok(self
             .inner
-            .black_variance(expiry, strike)
+            .black_variance(Tenor(expiry), Strike(strike))
             .map_err(to_js_err)?
             .0)
     }
 
     pub fn smile_at(&self, expiry: f64) -> Result<WasmSmile, JsValue> {
-        let smile = self.inner.smile_at(expiry).map_err(to_js_err)?;
+        let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_js_err)?;
         Ok(WasmSmile::new(smile))
     }
 

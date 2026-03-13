@@ -1,3 +1,4 @@
+use volsurf::Strike;
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
 use wasm_bindgen::prelude::*;
 
@@ -51,15 +52,21 @@ impl WasmSviSmile {
     }
 
     pub fn vol(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.vol(strike).map(|v| v.0).map_err(to_js_err)
+        self.inner
+            .vol(Strike(strike))
+            .map(|v| v.0)
+            .map_err(to_js_err)
     }
 
     pub fn variance(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.variance(strike).map(|v| v.0).map_err(to_js_err)
+        self.inner
+            .variance(Strike(strike))
+            .map(|v| v.0)
+            .map_err(to_js_err)
     }
 
     pub fn density(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.density(strike).map_err(to_js_err)
+        self.inner.density(Strike(strike)).map_err(to_js_err)
     }
 
     #[wasm_bindgen(getter)]
@@ -122,15 +129,21 @@ impl WasmSabrSmile {
     }
 
     pub fn vol(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.vol(strike).map(|v| v.0).map_err(to_js_err)
+        self.inner
+            .vol(Strike(strike))
+            .map(|v| v.0)
+            .map_err(to_js_err)
     }
 
     pub fn variance(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.variance(strike).map(|v| v.0).map_err(to_js_err)
+        self.inner
+            .variance(Strike(strike))
+            .map(|v| v.0)
+            .map_err(to_js_err)
     }
 
     pub fn density(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.density(strike).map_err(to_js_err)
+        self.inner.density(Strike(strike)).map_err(to_js_err)
     }
 
     #[wasm_bindgen(getter)]
@@ -175,15 +188,21 @@ impl WasmSmile {
 #[wasm_bindgen]
 impl WasmSmile {
     pub fn vol(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.vol(strike).map(|v| v.0).map_err(to_js_err)
+        self.inner
+            .vol(Strike(strike))
+            .map(|v| v.0)
+            .map_err(to_js_err)
     }
 
     pub fn variance(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.variance(strike).map(|v| v.0).map_err(to_js_err)
+        self.inner
+            .variance(Strike(strike))
+            .map(|v| v.0)
+            .map_err(to_js_err)
     }
 
     pub fn density(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.density(strike).map_err(to_js_err)
+        self.inner.density(Strike(strike)).map_err(to_js_err)
     }
 
     #[wasm_bindgen(getter)]
