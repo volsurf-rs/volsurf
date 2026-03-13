@@ -1,6 +1,7 @@
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use volsurf::Strike;
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 
 use crate::error::to_py_err;
@@ -11,15 +12,15 @@ macro_rules! impl_smile_methods {
         #[pymethods]
         impl $name {
             fn vol(&self, strike: f64) -> PyResult<f64> {
-                Ok(self.inner.vol(strike).map_err(to_py_err)?.0)
+                Ok(self.inner.vol(Strike(strike)).map_err(to_py_err)?.0)
             }
 
             fn variance(&self, strike: f64) -> PyResult<f64> {
-                Ok(self.inner.variance(strike).map_err(to_py_err)?.0)
+                Ok(self.inner.variance(Strike(strike)).map_err(to_py_err)?.0)
             }
 
             fn density(&self, strike: f64) -> PyResult<f64> {
-                self.inner.density(strike).map_err(to_py_err)
+                self.inner.density(Strike(strike)).map_err(to_py_err)
             }
 
             #[getter]
@@ -58,7 +59,7 @@ macro_rules! impl_smile_methods {
                 let inner = &self.inner;
                 let data = py.detach(|| {
                     stk.iter()
-                        .map(|&k| inner.vol(k).map(|v| v.0))
+                        .map(|&k| inner.vol(Strike(k)).map(|v| v.0))
                         .collect::<Result<Vec<f64>, _>>()
                 });
                 Ok(data.map_err(to_py_err)?.into_pyarray(py))

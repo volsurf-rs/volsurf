@@ -5,6 +5,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use volsurf::VolSurface;
 use volsurf::surface::{EssviSurface, PerTenorFit, SsviSurface, SurfaceBuilder};
+use volsurf::{Strike, Tenor};
 
 use crate::error::to_py_err;
 use crate::types::{PySmile, PySmileModel, PySurface, PySurfaceDiagnostics};
@@ -28,7 +29,7 @@ macro_rules! impl_vol_grid {
                     let mut out = Vec::with_capacity(nexp * nstk);
                     for &t in &exp {
                         for &k in &stk {
-                            out.push(inner.black_vol(t, k)?.0);
+                            out.push(inner.black_vol(Tenor(t), Strike(k))?.0);
                         }
                     }
                     Ok::<_, volsurf::VolSurfError>(out)
@@ -65,19 +66,23 @@ impl PySsviSurface {
     }
 
     fn black_vol(&self, expiry: f64, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.black_vol(expiry, strike).map_err(to_py_err)?.0)
+        Ok(self
+            .inner
+            .black_vol(Tenor(expiry), Strike(strike))
+            .map_err(to_py_err)?
+            .0)
     }
 
     fn black_variance(&self, expiry: f64, strike: f64) -> PyResult<f64> {
         Ok(self
             .inner
-            .black_variance(expiry, strike)
+            .black_variance(Tenor(expiry), Strike(strike))
             .map_err(to_py_err)?
             .0)
     }
 
     fn smile_at(&self, expiry: f64) -> PyResult<PySmile> {
-        let smile = self.inner.smile_at(expiry).map_err(to_py_err)?;
+        let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_py_err)?;
         Ok(PySmile { inner: smile })
     }
 
@@ -202,19 +207,23 @@ impl PyEssviSurface {
     }
 
     fn black_vol(&self, expiry: f64, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.black_vol(expiry, strike).map_err(to_py_err)?.0)
+        Ok(self
+            .inner
+            .black_vol(Tenor(expiry), Strike(strike))
+            .map_err(to_py_err)?
+            .0)
     }
 
     fn black_variance(&self, expiry: f64, strike: f64) -> PyResult<f64> {
         Ok(self
             .inner
-            .black_variance(expiry, strike)
+            .black_variance(Tenor(expiry), Strike(strike))
             .map_err(to_py_err)?
             .0)
     }
 
     fn smile_at(&self, expiry: f64) -> PyResult<PySmile> {
-        let smile = self.inner.smile_at(expiry).map_err(to_py_err)?;
+        let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_py_err)?;
         Ok(PySmile { inner: smile })
     }
 

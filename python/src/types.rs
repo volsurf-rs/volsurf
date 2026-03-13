@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 use volsurf::smile::{ArbitrageReport, ButterflyViolation};
 use volsurf::surface::{CalendarViolation, SmileModel, SurfaceDiagnostics};
-use volsurf::{OptionType, SmileSection, VolSurface};
+use volsurf::{OptionType, SmileSection, Strike, Tenor, VolSurface};
 
 use crate::error::to_py_err;
 
@@ -80,15 +80,15 @@ pub struct PySmile {
 #[pymethods]
 impl PySmile {
     fn vol(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.vol(strike).map_err(to_py_err)?.0)
+        Ok(self.inner.vol(Strike(strike)).map_err(to_py_err)?.0)
     }
 
     fn variance(&self, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.variance(strike).map_err(to_py_err)?.0)
+        Ok(self.inner.variance(Strike(strike)).map_err(to_py_err)?.0)
     }
 
     fn density(&self, strike: f64) -> PyResult<f64> {
-        self.inner.density(strike).map_err(to_py_err)
+        self.inner.density(Strike(strike)).map_err(to_py_err)
     }
 
     #[getter]
@@ -115,7 +115,7 @@ impl PySmile {
         let inner = &self.inner;
         let data = py.detach(|| {
             stk.iter()
-                .map(|&k| inner.vol(k).map(|v| v.0))
+                .map(|&k| inner.vol(Strike(k)).map(|v| v.0))
                 .collect::<Result<Vec<f64>, _>>()
         });
         Ok(data.map_err(to_py_err)?.into_pyarray(py))
@@ -131,19 +131,23 @@ pub struct PySurface {
 #[pymethods]
 impl PySurface {
     fn black_vol(&self, expiry: f64, strike: f64) -> PyResult<f64> {
-        Ok(self.inner.black_vol(expiry, strike).map_err(to_py_err)?.0)
+        Ok(self
+            .inner
+            .black_vol(Tenor(expiry), Strike(strike))
+            .map_err(to_py_err)?
+            .0)
     }
 
     fn black_variance(&self, expiry: f64, strike: f64) -> PyResult<f64> {
         Ok(self
             .inner
-            .black_variance(expiry, strike)
+            .black_variance(Tenor(expiry), Strike(strike))
             .map_err(to_py_err)?
             .0)
     }
 
     fn smile_at(&self, expiry: f64) -> PyResult<PySmile> {
-        let smile = self.inner.smile_at(expiry).map_err(to_py_err)?;
+        let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_py_err)?;
         Ok(PySmile { inner: smile })
     }
 
@@ -166,7 +170,7 @@ impl PySurface {
             let mut out = Vec::with_capacity(nexp * nstk);
             for &t in &exp {
                 for &k in &stk {
-                    out.push(inner.black_vol(t, k)?.0);
+                    out.push(inner.black_vol(Tenor(t), Strike(k))?.0);
                 }
             }
             Ok::<_, volsurf::VolSurfError>(out)
