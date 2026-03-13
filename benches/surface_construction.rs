@@ -3,6 +3,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
 use volsurf::surface::{EssviSurface, SmileModel, SsviSurface, SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor};
 
 /// Generate synthetic SVI market data (strike, vol) pairs for benchmarking.
 fn generate_market_data(forward: f64, expiry: f64, n_strikes: usize) -> Vec<(f64, f64)> {
@@ -13,7 +14,7 @@ fn generate_market_data(forward: f64, expiry: f64, n_strikes: usize) -> Vec<(f64
     (0..n_strikes)
         .map(|i| {
             let k = k_min + (k_max - k_min) * (i as f64 / (n_strikes - 1) as f64);
-            let v = svi.vol(k).expect("SVI vol should succeed").0;
+            let v = svi.vol(Strike(k)).expect("SVI vol should succeed").0;
             (k, v)
         })
         .collect()
@@ -28,7 +29,7 @@ fn generate_sabr_market_data(forward: f64, expiry: f64, n_strikes: usize) -> Vec
     (0..n_strikes)
         .map(|i| {
             let k = k_min + (k_max - k_min) * (i as f64 / (n_strikes - 1) as f64);
-            let v = sabr.vol(k).expect("SABR vol should succeed").0;
+            let v = sabr.vol(Strike(k)).expect("SABR vol should succeed").0;
             (k, v)
         })
         .collect()
@@ -121,7 +122,7 @@ fn calibration_benchmarks(c: &mut Criterion) {
                 .map(|i| {
                     let k = k_min + (k_max - k_min) * (i as f64 / 9.0);
                     let v = ssvi_source
-                        .black_vol(t, k)
+                        .black_vol(Tenor(t), Strike(k))
                         .expect("SSVI vol should succeed")
                         .0;
                     (k, v)
@@ -164,7 +165,7 @@ fn calibration_benchmarks(c: &mut Criterion) {
                 .map(|i| {
                     let k = k_min + (k_max - k_min) * (i as f64 / 9.0);
                     let v = essvi_source
-                        .black_vol(t, k)
+                        .black_vol(Tenor(t), Strike(k))
                         .expect("eSSVI vol should succeed")
                         .0;
                     (k, v)
@@ -205,7 +206,7 @@ fn calibration_benchmarks(c: &mut Criterion) {
                 .map(|i| {
                     let k = k_min + (k_max - k_min) * (i as f64 / 9.0);
                     let v = flat_rho_source
-                        .black_vol(t, k)
+                        .black_vol(Tenor(t), Strike(k))
                         .expect("eSSVI vol should succeed")
                         .0;
                     (k, v)
