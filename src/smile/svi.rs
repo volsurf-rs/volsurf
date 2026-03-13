@@ -884,6 +884,28 @@ mod tests {
     }
 
     #[test]
+    fn vol_rejects_nan_strike() {
+        let smile = make_smile();
+        assert!(matches!(
+            smile.vol(Strike(f64::NAN)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn vol_rejects_inf_strike() {
+        let smile = make_smile();
+        assert!(matches!(
+            smile.vol(Strike(f64::INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            smile.vol(Strike(f64::NEG_INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
     fn variance_consistent_with_vol() {
         let smile = make_smile();
         let vol = smile.vol(Strike(100.0)).unwrap();
@@ -973,6 +995,24 @@ mod tests {
         let smile = make_arb_free_smile();
         assert!(matches!(
             smile.density(Strike(0.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn density_rejects_nan_strike() {
+        let smile = make_arb_free_smile();
+        assert!(matches!(
+            smile.density(Strike(f64::NAN)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn density_rejects_inf_strike() {
+        let smile = make_arb_free_smile();
+        assert!(matches!(
+            smile.density(Strike(f64::INFINITY)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }

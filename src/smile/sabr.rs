@@ -1043,6 +1043,19 @@ mod tests {
     }
 
     #[test]
+    fn vol_rejects_inf_strike() {
+        let s = make_equity_smile();
+        assert!(matches!(
+            s.vol(Strike(f64::INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            s.vol(Strike(f64::NEG_INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
     fn vol_variance_consistency() {
         // variance() = vol()² * T (from SmileSection default impl)
         let s = make_equity_smile();

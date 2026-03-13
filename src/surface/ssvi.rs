@@ -1936,6 +1936,27 @@ mod tests {
     }
 
     #[test]
+    fn black_vol_rejects_nan_inputs() {
+        let s = equity_surface();
+        assert!(s.black_vol(Tenor(f64::NAN), Strike(100.0)).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::NAN)).is_err());
+        assert!(s.black_variance(Tenor(f64::NAN), Strike(100.0)).is_err());
+    }
+
+    #[test]
+    fn black_vol_rejects_inf_inputs() {
+        let s = equity_surface();
+        assert!(s.black_vol(Tenor(f64::INFINITY), Strike(100.0)).is_err());
+        assert!(
+            s.black_vol(Tenor(f64::NEG_INFINITY), Strike(100.0))
+                .is_err()
+        );
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::INFINITY)).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::NEG_INFINITY)).is_err());
+        assert!(s.smile_at(Tenor(f64::INFINITY)).is_err());
+    }
+
+    #[test]
     fn smile_at_returns_working_section() {
         let s = equity_surface();
         let smile = s.smile_at(Tenor(1.0)).unwrap();
@@ -2275,6 +2296,21 @@ mod tests {
         assert!(s.vol(Strike(-100.0)).is_err());
         assert!(s.variance(Strike(0.0)).is_err());
         assert!(s.variance(Strike(-100.0)).is_err());
+    }
+
+    #[test]
+    fn slice_vol_rejects_nan_strike() {
+        let s = equity_slice();
+        assert!(s.vol(Strike(f64::NAN)).is_err());
+        assert!(s.variance(Strike(f64::NAN)).is_err());
+    }
+
+    #[test]
+    fn slice_vol_rejects_inf_strike() {
+        let s = equity_slice();
+        assert!(s.vol(Strike(f64::INFINITY)).is_err());
+        assert!(s.vol(Strike(f64::NEG_INFINITY)).is_err());
+        assert!(s.variance(Strike(f64::INFINITY)).is_err());
     }
 
     #[test]

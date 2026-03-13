@@ -1153,6 +1153,22 @@ mod tests {
     }
 
     #[test]
+    fn vol_rejects_nan_strike() {
+        let s = equity_slice();
+        assert!(s.vol(Strike(f64::NAN)).is_err());
+        assert!(s.variance(Strike(f64::NAN)).is_err());
+    }
+
+    #[test]
+    fn vol_rejects_inf_strike() {
+        let s = equity_slice();
+        assert!(s.vol(Strike(f64::INFINITY)).is_err());
+        assert!(s.vol(Strike(f64::NEG_INFINITY)).is_err());
+        assert!(s.variance(Strike(f64::INFINITY)).is_err());
+        assert!(s.variance(Strike(f64::NEG_INFINITY)).is_err());
+    }
+
+    #[test]
     fn skew_direction() {
         let s = equity_slice();
         let vol_put = s.vol(Strike(80.0)).unwrap().0;
@@ -1911,6 +1927,27 @@ mod tests {
         assert!(s.black_vol(Tenor(1.0), Strike(0.0)).is_err());
         assert!(s.black_vol(Tenor(1.0), Strike(-100.0)).is_err());
         assert!(s.black_variance(Tenor(1.0), Strike(0.0)).is_err());
+    }
+
+    #[test]
+    fn surface_rejects_nan_inputs() {
+        let s = equity_surface();
+        assert!(s.black_vol(Tenor(f64::NAN), Strike(100.0)).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::NAN)).is_err());
+        assert!(s.black_variance(Tenor(f64::NAN), Strike(100.0)).is_err());
+    }
+
+    #[test]
+    fn surface_rejects_inf_inputs() {
+        let s = equity_surface();
+        assert!(s.black_vol(Tenor(f64::INFINITY), Strike(100.0)).is_err());
+        assert!(
+            s.black_vol(Tenor(f64::NEG_INFINITY), Strike(100.0))
+                .is_err()
+        );
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::INFINITY)).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::NEG_INFINITY)).is_err());
+        assert!(s.smile_at(Tenor(f64::INFINITY)).is_err());
     }
 
     #[test]

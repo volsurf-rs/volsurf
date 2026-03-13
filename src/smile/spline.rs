@@ -648,6 +648,19 @@ mod tests {
     }
 
     #[test]
+    fn vol_rejects_inf_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.vol(Strike(f64::INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            smile.vol(Strike(f64::NEG_INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
     fn vol_rejects_negative_strike() {
         let smile = make_flat_smile();
         assert!(matches!(
