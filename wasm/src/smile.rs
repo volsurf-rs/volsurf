@@ -5,6 +5,48 @@ use wasm_bindgen::prelude::*;
 use crate::arbitrage::WasmArbitrageReport;
 use crate::error::to_js_err;
 
+macro_rules! impl_wasm_smile_methods {
+    ($name:ident) => {
+        #[wasm_bindgen]
+        impl $name {
+            pub fn vol(&self, strike: f64) -> Result<f64, JsValue> {
+                self.inner
+                    .vol(Strike(strike))
+                    .map(|v| v.0)
+                    .map_err(to_js_err)
+            }
+
+            pub fn variance(&self, strike: f64) -> Result<f64, JsValue> {
+                self.inner
+                    .variance(Strike(strike))
+                    .map(|v| v.0)
+                    .map_err(to_js_err)
+            }
+
+            pub fn density(&self, strike: f64) -> Result<f64, JsValue> {
+                self.inner.density(Strike(strike)).map_err(to_js_err)
+            }
+
+            #[wasm_bindgen(getter)]
+            pub fn forward(&self) -> f64 {
+                self.inner.forward()
+            }
+
+            #[wasm_bindgen(getter)]
+            pub fn expiry(&self) -> f64 {
+                self.inner.expiry()
+            }
+
+            pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
+                self.inner
+                    .is_arbitrage_free()
+                    .map(WasmArbitrageReport::from)
+                    .map_err(to_js_err)
+            }
+        }
+    };
+}
+
 fn pairs_from_flat(flat: &[f64]) -> Result<Vec<(f64, f64)>, JsValue> {
     if !flat.len().is_multiple_of(2) {
         return Err(JsValue::from_str(
@@ -51,41 +93,6 @@ impl WasmSviSmile {
         Ok(Self { inner })
     }
 
-    pub fn vol(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner
-            .vol(Strike(strike))
-            .map(|v| v.0)
-            .map_err(to_js_err)
-    }
-
-    pub fn variance(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner
-            .variance(Strike(strike))
-            .map(|v| v.0)
-            .map_err(to_js_err)
-    }
-
-    pub fn density(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.density(Strike(strike)).map_err(to_js_err)
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn forward(&self) -> f64 {
-        self.inner.forward()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn expiry(&self) -> f64 {
-        self.inner.expiry()
-    }
-
-    pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
-        self.inner
-            .is_arbitrage_free()
-            .map(WasmArbitrageReport::from)
-            .map_err(to_js_err)
-    }
-
     pub fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -96,6 +103,8 @@ impl WasmSviSmile {
         Ok(Self { inner })
     }
 }
+
+impl_wasm_smile_methods!(WasmSviSmile);
 
 #[wasm_bindgen]
 pub struct WasmSabrSmile {
@@ -128,41 +137,6 @@ impl WasmSabrSmile {
         Ok(Self { inner })
     }
 
-    pub fn vol(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner
-            .vol(Strike(strike))
-            .map(|v| v.0)
-            .map_err(to_js_err)
-    }
-
-    pub fn variance(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner
-            .variance(Strike(strike))
-            .map(|v| v.0)
-            .map_err(to_js_err)
-    }
-
-    pub fn density(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.density(Strike(strike)).map_err(to_js_err)
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn forward(&self) -> f64 {
-        self.inner.forward()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn expiry(&self) -> f64 {
-        self.inner.expiry()
-    }
-
-    pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
-        self.inner
-            .is_arbitrage_free()
-            .map(WasmArbitrageReport::from)
-            .map_err(to_js_err)
-    }
-
     pub fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -173,6 +147,8 @@ impl WasmSabrSmile {
         Ok(Self { inner })
     }
 }
+
+impl_wasm_smile_methods!(WasmSabrSmile);
 
 #[wasm_bindgen]
 pub struct WasmSmile {
@@ -185,40 +161,4 @@ impl WasmSmile {
     }
 }
 
-#[wasm_bindgen]
-impl WasmSmile {
-    pub fn vol(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner
-            .vol(Strike(strike))
-            .map(|v| v.0)
-            .map_err(to_js_err)
-    }
-
-    pub fn variance(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner
-            .variance(Strike(strike))
-            .map(|v| v.0)
-            .map_err(to_js_err)
-    }
-
-    pub fn density(&self, strike: f64) -> Result<f64, JsValue> {
-        self.inner.density(Strike(strike)).map_err(to_js_err)
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn forward(&self) -> f64 {
-        self.inner.forward()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn expiry(&self) -> f64 {
-        self.inner.expiry()
-    }
-
-    pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
-        self.inner
-            .is_arbitrage_free()
-            .map(WasmArbitrageReport::from)
-            .map_err(to_js_err)
-    }
-}
+impl_wasm_smile_methods!(WasmSmile);
