@@ -29,7 +29,13 @@ pub enum StickyKind {
 pub fn log_moneyness(strike: f64, forward: f64) -> error::Result<f64> {
     validate_positive(strike, "strike")?;
     validate_positive(forward, "forward")?;
-    Ok((strike / forward).ln())
+    let result = (strike / forward).ln();
+    if !result.is_finite() {
+        return Err(error::VolSurfError::NumericalError {
+            message: format!("log-moneyness overflow: strike={strike}, forward={forward}"),
+        });
+    }
+    Ok(result)
 }
 
 /// Convert a strike to simple moneyness: m = K / F.
@@ -38,7 +44,13 @@ pub fn log_moneyness(strike: f64, forward: f64) -> error::Result<f64> {
 pub fn moneyness(strike: f64, forward: f64) -> error::Result<f64> {
     validate_positive(strike, "strike")?;
     validate_positive(forward, "forward")?;
-    Ok(strike / forward)
+    let result = strike / forward;
+    if !result.is_finite() {
+        return Err(error::VolSurfError::NumericalError {
+            message: format!("moneyness overflow: strike={strike}, forward={forward}"),
+        });
+    }
+    Ok(result)
 }
 
 /// Compute forward price from spot: F = S · exp((r − q) · T).
@@ -400,10 +412,16 @@ mod tests {
 
     #[test]
     fn moneyness_extreme_ratio_overflows() {
-        // Both inputs valid (positive, finite), but ratio overflows to Inf.
-        // Documents current behavior: input guards don't catch output overflow.
-        let m = moneyness(100.0, f64::MIN_POSITIVE).unwrap();
-        assert!(m.is_infinite());
+        use crate::error::VolSurfError;
+        let err = moneyness(100.0, f64::MIN_POSITIVE).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
+    }
+
+    #[test]
+    fn log_moneyness_extreme_ratio_overflows() {
+        use crate::error::VolSurfError;
+        let err = log_moneyness(100.0, f64::MIN_POSITIVE).unwrap_err();
+        assert!(matches!(err, VolSurfError::NumericalError { .. }));
     }
 
     #[test]
