@@ -4,9 +4,9 @@
 //! testing fixed examples. They help catch edge cases and ensure robustness.
 
 use proptest::prelude::*;
-use volsurf::conventions;
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use volsurf::surface::{PiecewiseSurface, SsviSurface, SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor, conventions};
 
 // --- Property Test 1: SVI vol non-negativity ---
 
@@ -34,7 +34,7 @@ proptest! {
         if let Ok(smile) = smile_result {
             for strike in 80..=120 {
                 let k = strike as f64;
-                let vol = smile.vol(k).unwrap();
+                let vol = smile.vol(Strike(k)).unwrap();
                 prop_assert!(
                     vol.0 >= 0.0,
                     "vol should be non-negative, got {} at strike {}",
@@ -71,8 +71,8 @@ proptest! {
         let smile = smile_result.unwrap();
 
         for strike in [80.0, 90.0, 100.0, 110.0, 120.0] {
-            let vol = smile.vol(strike).unwrap();
-            let var = smile.variance(strike).unwrap();
+            let vol = smile.vol(Strike(strike)).unwrap();
+            let var = smile.variance(Strike(strike)).unwrap();
             let expected_var = vol.0 * vol.0 * expiry;
 
             prop_assert!(
@@ -111,7 +111,7 @@ proptest! {
             .unwrap();
 
         for (strike, expected_var) in strikes.iter().zip(variances.iter()) {
-            let var = smile.variance(*strike).unwrap();
+            let var = smile.variance(Strike(*strike)).unwrap();
             prop_assert!(
                 (var.0 - expected_var).abs() < 1e-12,
                 "spline should pass through knot at K={}, got var={} vs expected={}",
@@ -153,8 +153,8 @@ proptest! {
 
         // Query at the exact tenor for various strikes
         for strike in [80.0, 90.0, 100.0, 110.0, 120.0] {
-            let vol_from_surface = surface.black_vol(expiry, strike).unwrap();
-            let vol_from_smile = smile.vol(strike).unwrap();
+            let vol_from_surface = surface.black_vol(Tenor(expiry), Strike(strike)).unwrap();
+            let vol_from_smile = smile.vol(Strike(strike)).unwrap();
 
             prop_assert!(
                 (vol_from_surface.0 - vol_from_smile.0).abs() < 1e-10,
@@ -193,7 +193,7 @@ proptest! {
 
         for strike in 80..=120 {
             let k = strike as f64;
-            if let Ok(v) = sabr.vol(k) {
+            if let Ok(v) = sabr.vol(Strike(k)) {
                 prop_assert!(
                     v.0 >= 0.0,
                     "SABR vol should be non-negative, got {} at strike {}",
@@ -246,7 +246,7 @@ proptest! {
 
         for i in 0..=n_steps {
             let k = k_lo + i as f64 * dk;
-            match sabr.density(k) {
+            match sabr.density(Strike(k)) {
                 Ok(d) => {
                     let weight = if i == 0 || i == n_steps { 0.5 } else { 1.0 };
                     integral += weight * d * dk;
@@ -293,7 +293,7 @@ proptest! {
 
         for strike in (60..=140).step_by(10) {
             let k = strike as f64;
-            let var = surface.black_variance(0.25, k).unwrap();
+            let var = surface.black_variance(Tenor(0.25), Strike(k)).unwrap();
             prop_assert!(
                 var.0 > 0.0,
                 "SSVI variance should be positive, got {} at strike {}",
@@ -334,8 +334,8 @@ proptest! {
 
         for strike in (70..=130).step_by(10) {
             let k = strike as f64;
-            let var_short = surface.black_variance(0.25, k).unwrap();
-            let var_long = surface.black_variance(1.0, k).unwrap();
+            let var_short = surface.black_variance(Tenor(0.25), Strike(k)).unwrap();
+            let var_long = surface.black_variance(Tenor(1.0), Strike(k)).unwrap();
             prop_assert!(
                 var_long.0 >= var_short.0,
                 "variance at T=1.0 ({}) should be >= variance at T=0.25 ({}) at strike {}",
@@ -413,7 +413,7 @@ proptest! {
         let surface = build_result.unwrap();
 
         for (i, &k) in strikes.iter().enumerate() {
-            let queried = surface.black_vol(expiry, k).unwrap();
+            let queried = surface.black_vol(Tenor(expiry), Strike(k)).unwrap();
             prop_assert!(
                 (queried.0 - vols[i]).abs() < 0.02,
                 "round-trip vol at K={} should be within 0.02, got {} vs input {}",

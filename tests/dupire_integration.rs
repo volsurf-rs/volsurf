@@ -11,6 +11,7 @@ use volsurf::local_vol::{DupireLocalVol, LocalVol};
 use volsurf::smile::SmileSection;
 use volsurf::smile::spline::SplineSmile;
 use volsurf::surface::{PiecewiseSurface, SsviSurface, VolSurface};
+use volsurf::{Strike, Tenor};
 
 fn ssvi_test_surface() -> Arc<dyn VolSurface> {
     Arc::new(
@@ -40,7 +41,7 @@ fn ssvi_local_vol_grid_positive() {
     for &t in &tenors {
         for &k in &strikes {
             let v = dupire
-                .local_vol(t, k)
+                .local_vol(Tenor(t), Strike(k))
                 .unwrap_or_else(|e| panic!("failed at T={t}, K={k}: {e}"));
             assert!(v.0 > 0.0, "non-positive at T={t}, K={k}: {}", v.0);
             assert!(v.0.is_finite(), "non-finite at T={t}, K={k}: {}", v.0);
@@ -81,7 +82,7 @@ fn calendar_violation_returns_error() {
     let dupire = DupireLocalVol::new(surface);
 
     // At the midpoint, total variance is decreasing → negative dw/dT
-    let result = dupire.local_vol(0.5, 100.0);
+    let result = dupire.local_vol(Tenor(0.5), Strike(100.0));
     assert!(
         result.is_err(),
         "expected error for calendar violation, got {:?}",
@@ -103,7 +104,7 @@ fn deep_otm_no_panic() {
     let dupire = DupireLocalVol::new(surface);
 
     for &k in &[50.0, 200.0] {
-        if let Ok(v) = dupire.local_vol(0.5, k) {
+        if let Ok(v) = dupire.local_vol(Tenor(0.5), Strike(k)) {
             assert!(v.0.is_finite(), "non-finite at K={k}: {}", v.0);
         }
     }
@@ -138,9 +139,9 @@ fn bump_size_convergence() {
     let mut err_fine = 0.0;
 
     for &(t, k) in &points {
-        let v_ref = reference.local_vol(t, k).unwrap().0;
-        let v_coarse = coarse.local_vol(t, k).unwrap().0;
-        let v_fine = fine.local_vol(t, k).unwrap().0;
+        let v_ref = reference.local_vol(Tenor(t), Strike(k)).unwrap().0;
+        let v_coarse = coarse.local_vol(Tenor(t), Strike(k)).unwrap().0;
+        let v_fine = fine.local_vol(Tenor(t), Strike(k)).unwrap().0;
         err_coarse += (v_coarse - v_ref).abs();
         err_fine += (v_fine - v_ref).abs();
     }
@@ -172,7 +173,7 @@ fn thread_safe_local_vol() {
             let d = Arc::clone(&dupire);
             std::thread::spawn(move || {
                 let k = 90.0 + 10.0 * i as f64;
-                d.local_vol(0.5, k).unwrap()
+                d.local_vol(Tenor(0.5), Strike(k)).unwrap()
             })
         })
         .collect();

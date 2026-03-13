@@ -30,7 +30,7 @@ use crate::smile::spline::SplineSmile;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::surface::{CALENDAR_ARB_TOL, EXPIRY_MATCH_TOL};
-use crate::types::{Variance, Vol};
+use crate::types::{Strike, Tenor, Variance, Vol};
 use crate::validate::validate_positive;
 
 /// Number of strikes used when sampling smiles for interpolation.
@@ -175,36 +175,36 @@ enum TenorPosition {
 }
 
 impl VolSurface for PiecewiseSurface {
-    fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
-        validate_positive(expiry, "expiry")?;
+    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
+        validate_positive(expiry.0, "expiry")?;
         let var = self.black_variance(expiry, strike)?;
-        Ok(Vol((var.0 / expiry).sqrt()))
+        Ok(Vol((var.0 / expiry.0).sqrt()))
     }
 
-    fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
-        validate_positive(expiry, "expiry")?;
-        validate_positive(strike, "strike")?;
+    fn black_variance(&self, expiry: Tenor, strike: Strike) -> error::Result<Variance> {
+        validate_positive(expiry.0, "expiry")?;
+        validate_positive(strike.0, "strike")?;
 
-        match self.locate_tenor(expiry) {
+        match self.locate_tenor(expiry.0) {
             TenorPosition::Exact(i) => self.smiles[i].variance(strike),
 
             TenorPosition::Before => {
                 // Flat vol extrapolation: w(T, K) = w(T1, K) · T/T1
                 let w1 = self.smiles[0].variance(strike)?;
-                Ok(Variance(w1.0 * expiry / self.tenors[0]))
+                Ok(Variance(w1.0 * expiry.0 / self.tenors[0]))
             }
 
             TenorPosition::After => {
                 // Flat vol extrapolation: w(T, K) = w(Tn, K) · T/Tn
                 let n = self.tenors.len();
                 let wn = self.smiles[n - 1].variance(strike)?;
-                Ok(Variance(wn.0 * expiry / self.tenors[n - 1]))
+                Ok(Variance(wn.0 * expiry.0 / self.tenors[n - 1]))
             }
 
             TenorPosition::Between(i, j) => {
                 let t1 = self.tenors[i];
                 let t2 = self.tenors[j];
-                let alpha = (expiry - t1) / (t2 - t1);
+                let alpha = (expiry.0 - t1) / (t2 - t1);
                 let w1 = self.smiles[i].variance(strike)?;
                 let w2 = self.smiles[j].variance(strike)?;
                 Ok(Variance((1.0 - alpha) * w1.0 + alpha * w2.0))
@@ -212,17 +212,17 @@ impl VolSurface for PiecewiseSurface {
         }
     }
 
-    fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
-        validate_positive(expiry, "expiry")?;
+    fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {
+        validate_positive(expiry.0, "expiry")?;
 
         // Determine the forward and strike grid for the interpolated smile
-        let (forward, strikes, variances) = match self.locate_tenor(expiry) {
+        let (forward, strikes, variances) = match self.locate_tenor(expiry.0) {
             TenorPosition::Exact(i) => {
                 let fwd = self.smiles[i].forward();
                 let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
                 let vars: error::Result<Vec<f64>> = grid
                     .iter()
-                    .map(|&k| self.smiles[i].variance(k).map(|v| v.0))
+                    .map(|&k| self.smiles[i].variance(Strike(k)).map(|v| v.0))
                     .collect();
                 (fwd, grid, vars?)
             }
@@ -231,10 +231,10 @@ impl VolSurface for PiecewiseSurface {
                 let fwd = self.smiles[0].forward();
                 let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
                 let t1 = self.tenors[0];
-                let scale = expiry / t1;
+                let scale = expiry.0 / t1;
                 let vars: error::Result<Vec<f64>> = grid
                     .iter()
-                    .map(|&k| self.smiles[0].variance(k).map(|v| v.0 * scale))
+                    .map(|&k| self.smiles[0].variance(Strike(k)).map(|v| v.0 * scale))
                     .collect();
                 (fwd, grid, vars?)
             }
@@ -244,10 +244,10 @@ impl VolSurface for PiecewiseSurface {
                 let fwd = self.smiles[n - 1].forward();
                 let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
                 let tn = self.tenors[n - 1];
-                let scale = expiry / tn;
+                let scale = expiry.0 / tn;
                 let vars: error::Result<Vec<f64>> = grid
                     .iter()
-                    .map(|&k| self.smiles[n - 1].variance(k).map(|v| v.0 * scale))
+                    .map(|&k| self.smiles[n - 1].variance(Strike(k)).map(|v| v.0 * scale))
                     .collect();
                 (fwd, grid, vars?)
             }
@@ -257,14 +257,14 @@ impl VolSurface for PiecewiseSurface {
                 let f2 = self.smiles[j].forward();
                 let t1 = self.tenors[i];
                 let t2 = self.tenors[j];
-                let alpha = (expiry - t1) / (t2 - t1);
+                let alpha = (expiry.0 - t1) / (t2 - t1);
                 let fwd = (f1.ln() * (1.0 - alpha) + f2.ln() * alpha).exp();
                 let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
                 let vars: error::Result<Vec<f64>> = grid
                     .iter()
                     .map(|&k| {
-                        let w1 = self.smiles[i].variance(k)?.0;
-                        let w2 = self.smiles[j].variance(k)?.0;
+                        let w1 = self.smiles[i].variance(Strike(k))?.0;
+                        let w2 = self.smiles[j].variance(Strike(k))?.0;
                         Ok((1.0 - alpha) * w1 + alpha * w2)
                     })
                     .collect();
@@ -272,7 +272,7 @@ impl VolSurface for PiecewiseSurface {
             }
         };
 
-        let spline = SplineSmile::new(forward, expiry, strikes, variances)?;
+        let spline = SplineSmile::new(forward, expiry.0, strikes, variances)?;
         Ok(Box::new(spline))
     }
 
@@ -292,8 +292,8 @@ impl VolSurface for PiecewiseSurface {
             let grid = Self::strike_grid(fwd_avg, CALENDAR_CHECK_GRID_SIZE);
 
             for &k in &grid {
-                let w_short = self.smiles[i].variance(k)?;
-                let w_long = self.smiles[i + 1].variance(k)?;
+                let w_short = self.smiles[i].variance(Strike(k))?;
+                let w_long = self.smiles[i + 1].variance(Strike(k))?;
                 if w_long.0 < w_short.0 - CALENDAR_ARB_TOL {
                     calendar_violations.push(CalendarViolation {
                         strike: k,
@@ -320,6 +320,7 @@ impl VolSurface for PiecewiseSurface {
 mod tests {
     use super::*;
     use crate::smile::spline::SplineSmile;
+    use crate::types::{Strike, Tenor};
     use approx::assert_abs_diff_eq;
 
     /// Helper: create a flat-vol SplineSmile at a given tenor.
@@ -406,11 +407,11 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![0.25, 1.0], vec![s1, s2]).unwrap();
 
         // Query at T=0.25 should return 20% vol
-        let vol = surface.black_vol(0.25, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(0.25), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(vol.0, 0.20, epsilon = 1e-10);
 
         // Query at T=1.0 should return 25% vol
-        let vol = surface.black_vol(1.0, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(1.0), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(vol.0, 0.25, epsilon = 1e-10);
     }
 
@@ -429,7 +430,7 @@ mod tests {
         let w2 = vol2 * vol2 * t2; // 0.09
         let w_mid = 0.5 * w1 + 0.5 * w2; // 0.055
 
-        let var = surface.black_variance(t_mid, 100.0).unwrap();
+        let var = surface.black_variance(Tenor(t_mid), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(var.0, w_mid, epsilon = 1e-10);
     }
 
@@ -441,8 +442,8 @@ mod tests {
 
         for t in [0.1, 0.25, 0.5, 0.75, 1.0, 1.5] {
             for k in [80.0, 100.0, 120.0] {
-                let vol = surface.black_vol(t, k).unwrap();
-                let var = surface.black_variance(t, k).unwrap();
+                let vol = surface.black_vol(Tenor(t), Strike(k)).unwrap();
+                let var = surface.black_variance(Tenor(t), Strike(k)).unwrap();
                 assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-12);
             }
         }
@@ -458,7 +459,7 @@ mod tests {
         // At T=0.25 (before first tenor), flat vol extrapolation:
         // w(0.25, K) = w(0.5, K) * 0.25/0.5 = sigma^2 * 0.5 * 0.5 = sigma^2 * 0.25
         let query_t = 0.25;
-        let v = surface.black_vol(query_t, 100.0).unwrap();
+        let v = surface.black_vol(Tenor(query_t), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-10);
     }
 
@@ -470,7 +471,7 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
 
         // At T=2.0 (after last tenor), flat vol extrapolation
-        let v = surface.black_vol(2.0, 100.0).unwrap();
+        let v = surface.black_vol(Tenor(2.0), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-10);
     }
 
@@ -479,8 +480,8 @@ mod tests {
         let s1 = flat_smile(100.0, 1.0, 0.20);
         let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
 
-        let smile = surface.smile_at(1.0).unwrap();
-        let vol = smile.vol(100.0).unwrap();
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
+        let vol = smile.vol(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(vol.0, 0.20, epsilon = 1e-4);
         assert_abs_diff_eq!(smile.expiry(), 1.0, epsilon = 1e-14);
     }
@@ -491,11 +492,11 @@ mod tests {
         let s2 = flat_smile(100.0, 1.0, 0.30);
         let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
 
-        let smile = surface.smile_at(0.75).unwrap();
+        let smile = surface.smile_at(Tenor(0.75)).unwrap();
         assert_abs_diff_eq!(smile.expiry(), 0.75, epsilon = 1e-14);
 
         // Check that the interpolated variance is between the two smiles
-        let var = smile.variance(100.0).unwrap();
+        let var = smile.variance(Strike(100.0)).unwrap();
         let w1 = 0.20 * 0.20 * 0.5;
         let w2 = 0.30 * 0.30 * 1.0;
         let w_expected = 0.5 * w1 + 0.5 * w2;
@@ -508,11 +509,11 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
 
         assert!(matches!(
-            surface.smile_at(0.0),
+            surface.smile_at(Tenor(0.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
         assert!(matches!(
-            surface.smile_at(-1.0),
+            surface.smile_at(Tenor(-1.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -553,7 +554,7 @@ mod tests {
         let s1 = flat_smile(100.0, 1.0, 0.20);
         let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
         assert!(matches!(
-            surface.black_vol(0.0, 100.0),
+            surface.black_vol(Tenor(0.0), Strike(100.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -563,7 +564,7 @@ mod tests {
         let s1 = flat_smile(100.0, 1.0, 0.20);
         let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
         assert!(matches!(
-            surface.black_variance(-0.5, 100.0),
+            surface.black_variance(Tenor(-0.5), Strike(100.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -608,7 +609,7 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
 
         // Query before the only tenor — flat vol extrapolation
-        let v = surface.black_vol(0.1, 100.0).unwrap();
+        let v = surface.black_vol(Tenor(0.1), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-10);
     }
 
@@ -620,7 +621,7 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
 
         // Query after the only tenor — flat vol extrapolation
-        let v = surface.black_vol(2.0, 100.0).unwrap();
+        let v = surface.black_vol(Tenor(2.0), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-10);
     }
 
@@ -631,9 +632,9 @@ mod tests {
         let s1 = flat_smile(100.0, t1, vol);
         let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
 
-        let smile = surface.smile_at(0.5).unwrap();
+        let smile = surface.smile_at(Tenor(0.5)).unwrap();
         assert_abs_diff_eq!(smile.expiry(), 0.5, epsilon = 1e-14);
-        let v = smile.vol(100.0).unwrap();
+        let v = smile.vol(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-4);
     }
 
@@ -644,9 +645,9 @@ mod tests {
         let s1 = flat_smile(100.0, t1, vol);
         let surface = PiecewiseSurface::new(vec![t1], vec![s1]).unwrap();
 
-        let smile = surface.smile_at(2.0).unwrap();
+        let smile = surface.smile_at(Tenor(2.0)).unwrap();
         assert_abs_diff_eq!(smile.expiry(), 2.0, epsilon = 1e-14);
-        let v = smile.vol(100.0).unwrap();
+        let v = smile.vol(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(v.0, vol, epsilon = 1e-4);
     }
 
@@ -659,7 +660,9 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![0.25, 1.0], vec![s1, s2]).unwrap();
 
         // Query at T = 0.25 + 1e-11 (within 1e-10 tolerance) — should match exactly
-        let vol = surface.black_vol(0.25 + 1e-11, 100.0).unwrap();
+        let vol = surface
+            .black_vol(Tenor(0.25 + 1e-11), Strike(100.0))
+            .unwrap();
         assert_abs_diff_eq!(vol.0, 0.20, epsilon = 1e-10);
     }
 
@@ -670,7 +673,9 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![0.25, 1.0], vec![s1, s2]).unwrap();
 
         // Query at T = 0.25 + 1e-8 (outside 1e-10 tolerance) — should interpolate
-        let vol = surface.black_vol(0.25 + 1e-8, 100.0).unwrap();
+        let vol = surface
+            .black_vol(Tenor(0.25 + 1e-8), Strike(100.0))
+            .unwrap();
         // This is very close to T=0.25, so vol should still be very close to 0.20
         // but technically goes through the interpolation path
         assert!(vol.0 > 0.0);
@@ -690,14 +695,14 @@ mod tests {
         let w1 = 0.18 * 0.18 * 0.25;
         let w2 = 0.20 * 0.20 * 0.5;
         let expected = 0.5 * w1 + 0.5 * w2;
-        let var = surface.black_variance(0.375, 100.0).unwrap();
+        let var = surface.black_variance(Tenor(0.375), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(var.0, expected, epsilon = 1e-10);
 
         // Between second and third tenor (T=0.75, alpha=0.5)
         let w2b = 0.20 * 0.20 * 0.5;
         let w3 = 0.25 * 0.25 * 1.0;
         let expected2 = 0.5 * w2b + 0.5 * w3;
-        let var2 = surface.black_variance(0.75, 100.0).unwrap();
+        let var2 = surface.black_variance(Tenor(0.75), Strike(100.0)).unwrap();
         assert_abs_diff_eq!(var2.0, expected2, epsilon = 1e-10);
     }
 
@@ -708,7 +713,7 @@ mod tests {
         let s2 = flat_smile(400.0, 1.0, 0.20);
         let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
 
-        let smile = surface.smile_at(0.75).unwrap();
+        let smile = surface.smile_at(Tenor(0.75)).unwrap();
         let expected_fwd = (100.0_f64.ln() * 0.5 + 400.0_f64.ln() * 0.5).exp();
         assert_abs_diff_eq!(smile.forward(), expected_fwd, epsilon = 1e-10);
         assert_abs_diff_eq!(expected_fwd, 200.0, epsilon = 1e-10);
@@ -721,10 +726,10 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
 
         let t = 0.75;
-        let smile = surface.smile_at(t).unwrap();
+        let smile = surface.smile_at(Tenor(t)).unwrap();
         for &k in &[95.0, 100.0, 105.0] {
-            let from_smile = smile.variance(k).unwrap().0;
-            let from_surface = surface.black_variance(t, k).unwrap().0;
+            let from_smile = smile.variance(Strike(k)).unwrap().0;
+            let from_surface = surface.black_variance(Tenor(t), Strike(k)).unwrap().0;
             assert_abs_diff_eq!(from_smile, from_surface, epsilon = 1e-3);
         }
     }
@@ -737,7 +742,7 @@ mod tests {
         for &bad_strike in &[0.0, -100.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert!(
                 matches!(
-                    surface.black_variance(0.5, bad_strike),
+                    surface.black_variance(Tenor(0.5), Strike(bad_strike)),
                     Err(VolSurfError::InvalidInput { .. })
                 ),
                 "should reject strike={bad_strike}"

@@ -10,6 +10,7 @@
 //! Run with: `cargo run --example basic_surface`
 
 use volsurf::surface::{SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
@@ -61,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for &t in &query_tenors {
         print!("{t:>8.2}");
         for &k in &query_strikes {
-            let vol = surface.black_vol(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
             print!("{:>10.2}%", vol.0 * 100.0);
         }
         println!();
@@ -74,8 +75,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Vol/Variance consistency check ---\n");
     let t = 0.5;
     let k = 100.0;
-    let vol = surface.black_vol(t, k)?;
-    let var = surface.black_variance(t, k)?;
+    let vol = surface.black_vol(Tenor(t), Strike(k))?;
+    let var = surface.black_variance(Tenor(t), Strike(k))?;
     println!("At T={t}, K={k}:");
     println!("  vol      = {:.6}", vol.0);
     println!("  variance = {:.6}", var.0);
@@ -87,12 +88,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
 
     println!("\n--- Smile section at T=0.75 (interpolated) ---\n");
-    let smile = surface.smile_at(0.75)?;
+    let smile = surface.smile_at(Tenor(0.75))?;
     println!("Forward: {:.2}", smile.forward());
     println!("Expiry:  {:.2}", smile.expiry());
     for &k in &query_strikes {
-        let v = smile.vol(k)?;
-        let d = smile.density(k)?;
+        let v = smile.vol(Strike(k))?;
+        let d = smile.density(Strike(k))?;
         println!("  K={k:>6.0}  vol={:.4}  density={:.6}", v.0, d);
     }
 

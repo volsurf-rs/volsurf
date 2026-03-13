@@ -11,6 +11,7 @@
 //! Run with: `cargo run --example ssvi_surface`
 
 use volsurf::surface::{SsviSurface, SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
@@ -62,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for &t in &query_tenors {
         print!("{t:>8.2}");
         for &k in &query_strikes {
-            let vol = surface.black_vol(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
             print!("{:>8.2}%", vol.0 * 100.0);
         }
         println!();
@@ -75,8 +76,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Vol/Variance consistency ---\n");
     let t = 0.5;
     let k = 100.0;
-    let vol = surface.black_vol(t, k)?;
-    let var = surface.black_variance(t, k)?;
+    let vol = surface.black_vol(Tenor(t), Strike(k))?;
+    let var = surface.black_variance(Tenor(t), Strike(k))?;
     println!(
         "At T={t}, K={k}: vol={:.6}, var={:.6}, vol^2*T={:.6}",
         vol.0,
@@ -91,9 +92,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Smile sections ---\n");
 
     for &t in &[0.25, 1.0, 2.0] {
-        let smile = surface.smile_at(t)?;
-        let atm_vol = smile.vol(smile.forward())?;
-        let density = smile.density(smile.forward())?;
+        let smile = surface.smile_at(Tenor(t))?;
+        let atm_vol = smile.vol(Strike(smile.forward()))?;
+        let density = smile.density(Strike(smile.forward()))?;
         println!(
             "T={t:.2}: forward={:.2}, ATM vol={:.4}%, density={:.6}",
             smile.forward(),
@@ -103,11 +104,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Interpolated tenor (not in original data)
-    let smile_075 = surface.smile_at(0.75)?;
+    let smile_075 = surface.smile_at(Tenor(0.75))?;
     println!(
         "\nInterpolated T=0.75: forward={:.2}, ATM vol={:.4}%",
         smile_075.forward(),
-        smile_075.vol(smile_075.forward())?.0 * 100.0
+        smile_075.vol(Strike(smile_075.forward()))?.0 * 100.0
     );
 
     // ---------------------------------------------------------------
@@ -147,7 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|&t| {
             cal_strikes
                 .iter()
-                .map(|&k| Ok((k, surface.black_vol(t, k)?.0)))
+                .map(|&k| Ok((k, surface.black_vol(Tenor(t), Strike(k))?.0)))
                 .collect::<Result<Vec<_>, volsurf::VolSurfError>>()
         })
         .collect::<Result<_, _>>()?;
@@ -171,8 +172,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut max_err: f64 = 0.0;
     for &t in &tenors {
         for &k in &cal_strikes {
-            let orig = surface.black_vol(t, k)?.0;
-            let cal = calibrated.black_vol(t, k)?.0;
+            let orig = surface.black_vol(Tenor(t), Strike(k))?.0;
+            let cal = calibrated.black_vol(Tenor(t), Strike(k))?.0;
             max_err = max_err.max((orig - cal).abs());
         }
     }
@@ -191,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for &t in &tenors {
         let vols: Vec<f64> = strikes_7
             .iter()
-            .map(|&k| surface.black_vol(t, k).unwrap().0)
+            .map(|&k| surface.black_vol(Tenor(t), Strike(k)).unwrap().0)
             .collect();
         builder = builder.add_tenor(t, &strikes_7, &vols);
     }
@@ -206,8 +207,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for &t in &[0.25, 1.0, 2.0] {
         for &k in &[90.0, 100.0, 110.0] {
-            let ssvi_vol = surface.black_vol(t, k)?.0;
-            let pw_vol = piecewise.black_vol(t, k)?.0;
+            let ssvi_vol = surface.black_vol(Tenor(t), Strike(k))?.0;
+            let pw_vol = piecewise.black_vol(Tenor(t), Strike(k))?.0;
             let diff_bp = (ssvi_vol - pw_vol) * 10_000.0;
             println!(
                 "{t:.2},{k:.0} {:>9.4}% {:>9.4}% {:>9.1}",

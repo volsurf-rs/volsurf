@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use volsurf::smile::SviSmile;
-use volsurf::{SmileSection, VolSurfError};
+use volsurf::{SmileSection, Strike, VolSurfError};
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -41,7 +41,7 @@ fn assert_calibration_sane(
     }
     match SviSmile::calibrate(forward, expiry, data) {
         Ok(smile) => {
-            let atm = SmileSection::vol(&smile, forward).unwrap().0;
+            let atm = SmileSection::vol(&smile, Strike(forward)).unwrap().0;
             let ratio = atm / expected_atm;
             println!(
                 "{label}: OK  n={:3}  ATM={:.4} expected={:.4} ratio={:.3}",
@@ -267,7 +267,7 @@ fn stable_fixture_must_succeed() {
         }
         let smile = SviSmile::calibrate(f.forward, f.expiry_years, &subset)
             .unwrap_or_else(|e| panic!("stable ±{:.0}% must succeed: {e}", pct * 100.0));
-        let atm = SmileSection::vol(&smile, f.forward).unwrap().0;
+        let atm = SmileSection::vol(&smile, Strike(f.forward)).unwrap().0;
         let ratio = atm / f.expected_atm_iv;
         assert!(
             ratio > 0.8 && ratio < 1.2,

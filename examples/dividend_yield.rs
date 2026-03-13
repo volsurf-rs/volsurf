@@ -17,6 +17,7 @@
 //!
 //! Run with: cargo run --example dividend_yield
 
+use volsurf::Tenor;
 use volsurf::surface::{SmileModel, SurfaceBuilder, VolSurface};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -121,9 +122,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "-".repeat(58));
 
     for &(t, fwd_mkt) in forwards {
-        let f1 = surface_rate_only.smile_at(t)?.forward();
-        let f2 = surface_with_q.smile_at(t)?.forward();
-        let f3 = surface_pcp.smile_at(t)?.forward();
+        let f1 = surface_rate_only.smile_at(Tenor(t))?.forward();
+        let f2 = surface_with_q.smile_at(Tenor(t))?.forward();
+        let f3 = surface_pcp.smile_at(Tenor(t))?.forward();
         let err1 = f1 - fwd_mkt;
         let err2 = f2 - fwd_mkt;
         let err3 = f3 - fwd_mkt;

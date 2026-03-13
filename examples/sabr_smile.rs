@@ -11,6 +11,7 @@
 
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
 use volsurf::surface::{SmileModel, SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
@@ -46,8 +47,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let strikes = [70.0, 80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0, 130.0];
     for &k in &strikes {
-        let vol = smile.vol(k)?;
-        let dens = smile.density(k)?;
+        let vol = smile.vol(Strike(k))?;
+        let dens = smile.density(Strike(k))?;
         println!("{k:>8.0} {:>9.4}% {dens:>12.6}", vol.0 * 100.0);
     }
 
@@ -72,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generate synthetic market data from the known smile
     let market_vols: Vec<(f64, f64)> = strikes
         .iter()
-        .map(|&k| Ok((k, smile.vol(k)?.0)))
+        .map(|&k| Ok((k, smile.vol(Strike(k))?.0)))
         .collect::<Result<_, volsurf::VolSurfError>>()?;
 
     // Calibrate with beta=1.0 (same as original)
@@ -94,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compare vols
     let mut max_err: f64 = 0.0;
     for &(k, orig_vol) in &market_vols {
-        let cal_vol = calibrated.vol(k)?.0;
+        let cal_vol = calibrated.vol(Strike(k))?.0;
         max_err = max_err.max((orig_vol - cal_vol).abs());
     }
     println!("Max vol error: {max_err:.2e}");
@@ -114,8 +115,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "-".repeat(42));
 
     for &(k, _) in &market_vols {
-        let sabr_vol = smile.vol(k)?.0;
-        let svi_vol = svi.vol(k)?.0;
+        let sabr_vol = smile.vol(Strike(k))?.0;
+        let svi_vol = svi.vol(Strike(k))?.0;
         let diff_bp = (sabr_vol - svi_vol) * 10_000.0;
         println!(
             "{k:>8.0} {:>9.4}% {:>9.4}% {:>9.1}",
@@ -141,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|&k| {
             SabrSmile::new(forward, 0.25, 0.3, 1.0, -0.3, 0.4)
                 .unwrap()
-                .vol(k)
+                .vol(Strike(k))
                 .unwrap()
                 .0
         })
@@ -152,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|&k| {
             SabrSmile::new(forward, 1.0, 0.25, 1.0, -0.25, 0.35)
                 .unwrap()
-                .vol(k)
+                .vol(Strike(k))
                 .unwrap()
                 .0
         })
@@ -163,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|&k| {
             SabrSmile::new(forward, 2.0, 0.22, 1.0, -0.20, 0.30)
                 .unwrap()
-                .vol(k)
+                .vol(Strike(k))
                 .unwrap()
                 .0
         })
@@ -191,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for &t in &[0.25, 0.50, 1.00, 1.50, 2.00] {
         print!("{t:>8.2}");
         for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
-            let vol = surface.black_vol(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
             print!("{:>10.2}%", vol.0 * 100.0);
         }
         println!();
