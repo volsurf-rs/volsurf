@@ -13,7 +13,7 @@ pub type Result<T> = std::result::Result<T, VolSurfError>;
 ///
 /// This enum is `#[non_exhaustive]`: new variants may be added in minor
 /// releases. Match statements should include a wildcard arm.
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, PartialEq, Error)]
 #[non_exhaustive]
 pub enum VolSurfError {
     /// Smile or surface calibration failed to converge.
@@ -125,5 +125,34 @@ mod tests {
     fn error_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<VolSurfError>();
+    }
+
+    #[test]
+    fn error_clone_equals_original() {
+        let err = VolSurfError::CalibrationError {
+            message: "convergence failed".into(),
+            model: "SVI",
+            rms_error: Some(0.05),
+        };
+        let cloned = err.clone();
+        assert_eq!(err, cloned);
+    }
+
+    #[test]
+    fn error_different_variants_not_equal() {
+        let cal = VolSurfError::CalibrationError {
+            message: "fail".into(),
+            model: "SVI",
+            rms_error: None,
+        };
+        let inv = VolSurfError::InvalidInput {
+            message: "fail".into(),
+        };
+        let num = VolSurfError::NumericalError {
+            message: "fail".into(),
+        };
+        assert_ne!(cal, inv);
+        assert_ne!(inv, num);
+        assert_ne!(cal, num);
     }
 }
