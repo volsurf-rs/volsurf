@@ -513,14 +513,19 @@ impl SmileSection for SabrSmile {
         self.expiry
     }
 
+    /// Check butterfly arbitrage by scanning risk-neutral density.
+    ///
+    /// Evaluates density on a grid of 200 points over k ∈ \[−2, 2\].
+    /// The range is narrower than SVI's \[−3, 3\] because the Hagan
+    /// approximation breaks down in deep wings; points where `density()`
+    /// returns `Err` are skipped rather than flagged.
+    ///
+    /// # Reference
+    /// Hagan et al. (2002), "Managing Smile Risk".
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        // Scan density over log-moneyness grid. The Hagan approximation
-        // has limited validity in deep wings, so use a moderate range and
-        // skip points where the approximation breaks down.
         const N: usize = 200;
-        const K_MIN: f64 = -2.0; // log-moneyness bounds
+        const K_MIN: f64 = -2.0;
         const K_MAX: f64 = 2.0;
-        const TOL: f64 = 1e-8;
 
         let mut violations = Vec::new();
         for i in 0..N {
@@ -530,7 +535,7 @@ impl SmileSection for SabrSmile {
                 Ok(d) => d,
                 Err(_) => continue, // Hagan breakdown in wings
             };
-            if d < -TOL {
+            if d < -super::DENSITY_NEG_TOL {
                 violations.push(ButterflyViolation {
                     strike,
                     density: d,
