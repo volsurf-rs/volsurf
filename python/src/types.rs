@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 use volsurf::smile::{ArbitrageReport, ButterflyViolation};
@@ -57,10 +58,15 @@ impl PySmileModel {
     }
 
     #[classmethod]
-    fn sabr(_cls: &Bound<'_, PyType>, beta: f64) -> Self {
-        Self {
-            inner: SmileModel::Sabr { beta },
+    fn sabr(_cls: &Bound<'_, PyType>, beta: f64) -> PyResult<Self> {
+        if !beta.is_finite() || !(0.0..=1.0).contains(&beta) {
+            return Err(PyValueError::new_err(format!(
+                "SABR beta must be in [0, 1] and finite, got {beta}"
+            )));
         }
+        Ok(Self {
+            inner: SmileModel::Sabr { beta },
+        })
     }
 
     fn __repr__(&self) -> String {

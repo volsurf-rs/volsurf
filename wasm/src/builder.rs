@@ -46,6 +46,11 @@ impl WasmSurfaceBuilder {
     }
 
     pub fn model_sabr(&mut self, beta: f64) -> Result<(), JsValue> {
+        if !beta.is_finite() || !(0.0..=1.0).contains(&beta) {
+            return Err(JsValue::from_str(&format!(
+                "SABR beta must be in [0, 1] and finite, got {beta}"
+            )));
+        }
         let b = self.inner.take().ok_or_else(consumed)?;
         self.inner = Some(b.model(SmileModel::Sabr { beta }));
         Ok(())
