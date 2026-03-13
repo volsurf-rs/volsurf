@@ -58,7 +58,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for &(k, market_vol) in &market_data {
         let svi_vol = svi.vol(Strike(k))?.0;
         let spline_vol = spline.vol(Strike(k))?.0;
-        println!("{k:>8.0} {market_vol:>11.4}% {svi_vol:>11.4}% {spline_vol:>11.4}%",);
+        println!(
+            "{k:>8.0} {market:>10.4}% {svi:>10.4}% {spline:>10.4}%",
+            market = market_vol * 100.0,
+            svi = svi_vol * 100.0,
+            spline = spline_vol * 100.0,
+        );
     }
 
     // Also query at off-grid strikes
@@ -67,7 +72,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for k in [75.0, 85.0, 97.5, 102.5, 115.0, 125.0] {
         let svi_vol = svi.vol(Strike(k))?.0;
         let spline_vol = spline.vol(Strike(k))?.0;
-        println!("{k:>8.1} {svi_vol:>11.4}% {spline_vol:>11.4}%");
+        println!(
+            "{k:>8.1} {svi:>10.4}% {spline:>10.4}%",
+            svi = svi_vol * 100.0,
+            spline = spline_vol * 100.0,
+        );
     }
 
     // ---------------------------------------------------------------
