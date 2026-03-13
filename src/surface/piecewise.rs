@@ -67,7 +67,8 @@ const CALENDAR_CHECK_GRID_SIZE: usize = 41;
 ///
 /// This type does **not** implement `Serialize`/`Deserialize` because it
 /// stores `dyn SmileSection` trait objects. If you need to persist a
-/// calibrated surface, use [`SsviSurface`] or [`EssviSurface`] instead.
+/// calibrated surface, use [`SsviSurface`](super::SsviSurface) or
+/// [`EssviSurface`](super::EssviSurface) instead.
 pub struct PiecewiseSurface {
     /// Sorted tenors (time to expiry in years).
     tenors: Vec<f64>,

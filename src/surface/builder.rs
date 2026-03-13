@@ -210,7 +210,8 @@ impl SurfaceBuilder {
     ///
     /// Computes forward prices, calibrates a smile per tenor, sorts by expiry,
     /// and assembles a [`PiecewiseSurface`]. The result is not serializable
-    /// (trait-object storage); use [`SsviSurface`] or [`EssviSurface`] when
+    /// (trait-object storage); use [`SsviSurface`](super::SsviSurface) or
+    /// [`EssviSurface`](super::EssviSurface) when
     /// persistence is needed.
     ///
     /// # Errors
