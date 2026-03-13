@@ -8,10 +8,10 @@ use std::sync::Arc;
 use std::thread;
 
 use approx::assert_abs_diff_eq;
-use volsurf::VolSurfError;
 use volsurf::smile::spline::SplineSmile;
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
 use volsurf::surface::{PiecewiseSurface, SmileModel, SsviSurface, SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor, VolSurfError};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,7 +33,7 @@ fn svi_market_data(p: &SviParams, strikes: &[f64]) -> Vec<(f64, f64)> {
     let smile = SviSmile::new(p.forward, p.expiry, p.a, p.b, p.rho, p.m, p.sigma).unwrap();
     strikes
         .iter()
-        .map(|&k| (k, smile.vol(k).unwrap().0))
+        .map(|&k| (k, smile.vol(Strike(k)).unwrap().0))
         .collect()
 }
 
@@ -122,7 +122,7 @@ fn svi_calibration_round_trip() -> Result<(), Box<dyn std::error::Error>> {
 
     let market_data: Vec<(f64, f64)> = strikes
         .iter()
-        .map(|&k| (k, original.vol(k).unwrap().0))
+        .map(|&k| (k, original.vol(Strike(k)).unwrap().0))
         .collect();
 
     let calibrated = SviSmile::calibrate(forward, expiry, &market_data)?;
@@ -130,8 +130,8 @@ fn svi_calibration_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     // Compute RMS error in vol points
     let mut sum_sq = 0.0;
     for &k in &strikes {
-        let orig_vol = original.vol(k)?.0;
-        let calib_vol = calibrated.vol(k)?.0;
+        let orig_vol = original.vol(Strike(k))?.0;
+        let calib_vol = calibrated.vol(Strike(k))?.0;
         let diff = orig_vol - calib_vol;
         sum_sq += diff * diff;
     }
@@ -154,14 +154,14 @@ fn svi_calibration_round_trip_symmetric() -> Result<(), Box<dyn std::error::Erro
     let original = SviSmile::new(forward, expiry, a, b, rho, m, sigma)?;
     let market_data: Vec<(f64, f64)> = strikes
         .iter()
-        .map(|&k| (k, original.vol(k).unwrap().0))
+        .map(|&k| (k, original.vol(Strike(k)).unwrap().0))
         .collect();
 
     let calibrated = SviSmile::calibrate(forward, expiry, &market_data)?;
 
     let mut sum_sq = 0.0;
     for &k in &strikes {
-        let diff = original.vol(k)?.0 - calibrated.vol(k)?.0;
+        let diff = original.vol(Strike(k))?.0 - calibrated.vol(Strike(k))?.0;
         sum_sq += diff * diff;
     }
     let rms = (sum_sq / strikes.len() as f64).sqrt();
@@ -183,7 +183,7 @@ fn three_tenor_surface_build_and_query() -> Result<(), Box<dyn std::error::Error
 
     // Query at exact tenors — should return reasonable vols
     for t in [0.25, 0.50, 1.00] {
-        let vol = surface.black_vol(t, 100.0)?;
+        let vol = surface.black_vol(Tenor(t), Strike(100.0))?;
         assert!(
             vol.0 > 0.10 && vol.0 < 0.50,
             "ATM vol at T={t} = {:.4}, out of range",
@@ -192,7 +192,7 @@ fn three_tenor_surface_build_and_query() -> Result<(), Box<dyn std::error::Error
     }
 
     // Query between tenors
-    let vol_mid = surface.black_vol(0.375, 100.0)?;
+    let vol_mid = surface.black_vol(Tenor(0.375), Strike(100.0))?;
     assert!(
         vol_mid.0 > 0.10 && vol_mid.0 < 0.50,
         "Interpolated ATM vol = {:.4}, out of range",
@@ -208,8 +208,8 @@ fn three_tenor_vol_variance_consistency() -> Result<(), Box<dyn std::error::Erro
 
     for t in [0.25, 0.375, 0.50, 0.75, 1.00] {
         for k in [80.0, 90.0, 100.0, 110.0, 120.0] {
-            let vol = surface.black_vol(t, k)?;
-            let var = surface.black_variance(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
+            let var = surface.black_variance(Tenor(t), Strike(k))?;
             assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
         }
     }
@@ -222,11 +222,11 @@ fn three_tenor_smile_at_returns_queryable_section() -> Result<(), Box<dyn std::e
     let surface = build_3_tenor_surface();
 
     for t in [0.25, 0.50, 0.75, 1.00] {
-        let smile = surface.smile_at(t)?;
+        let smile = surface.smile_at(Tenor(t))?;
         assert_abs_diff_eq!(smile.expiry(), t, epsilon = 1e-14);
         assert!(smile.forward() > 0.0);
 
-        let vol = smile.vol(100.0)?;
+        let vol = smile.vol(Strike(100.0))?;
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
     }
 
@@ -247,7 +247,7 @@ fn spx_like_surface_no_nan_no_negative_vol() -> Result<(), Box<dyn std::error::E
 
     for &t in &tenors {
         for &k in &strikes {
-            let vol = surface.black_vol(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
             assert!(
                 vol.0.is_finite() && vol.0 > 0.0,
                 "vol({t}, {k}) = {:.6} is invalid",
@@ -268,7 +268,7 @@ fn variance_monotone_in_time_for_arb_free_surface() -> Result<(), Box<dyn std::e
     for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
         let mut prev_var = 0.0_f64;
         for &t in &tenors {
-            let var = surface.black_variance(t, k)?.0;
+            let var = surface.black_variance(Tenor(t), Strike(k))?.0;
             assert!(
                 var >= prev_var - 1e-10,
                 "Calendar violation at K={k}: w({t}) = {var:.6} < w(prev) = {prev_var:.6}"
@@ -433,13 +433,13 @@ fn concurrent_surface_queries() -> Result<(), Box<dyn std::error::Error>> {
             thread::spawn(move || -> volsurf::Result<()> {
                 let strike = 80.0 + i as f64 * 5.0;
                 for &t in &[0.25, 0.50, 0.75, 1.00] {
-                    let vol = s.black_vol(t, strike)?;
+                    let vol = s.black_vol(Tenor(t), Strike(strike))?;
                     assert!(
                         vol.0 > 0.0 && vol.0 < 2.0,
                         "vol({t}, {strike}) = {:.4} out of range",
                         vol.0
                     );
-                    let var = s.black_variance(t, strike)?;
+                    let var = s.black_variance(Tenor(t), Strike(strike))?;
                     assert!(var.0 > 0.0 && var.0.is_finite());
                 }
                 Ok(())
@@ -463,8 +463,8 @@ fn concurrent_smile_at_queries() -> Result<(), Box<dyn std::error::Error>> {
             let s = Arc::clone(&surface);
             thread::spawn(move || -> volsurf::Result<()> {
                 let t = 0.25 + i as f64 * 0.25;
-                let smile = s.smile_at(t)?;
-                let vol = smile.vol(100.0)?;
+                let smile = s.smile_at(Tenor(t))?;
+                let vol = smile.vol(Strike(100.0))?;
                 assert!(vol.0 > 0.0);
                 Ok(())
             })
@@ -529,7 +529,7 @@ fn cubic_spline_surface_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
 
     // Query at exact tenors
     for t in [0.25, 1.0] {
-        let vol = surface.black_vol(t, 100.0)?;
+        let vol = surface.black_vol(Tenor(t), Strike(100.0))?;
         assert!(
             vol.0 > 0.10 && vol.0 < 0.50,
             "ATM vol at T={t} = {:.4}, out of range",
@@ -538,7 +538,7 @@ fn cubic_spline_surface_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Interpolated tenor
-    let vol_mid = surface.black_vol(0.5, 100.0)?;
+    let vol_mid = surface.black_vol(Tenor(0.5), Strike(100.0))?;
     assert!(
         vol_mid.0 > 0.10 && vol_mid.0 < 0.50,
         "Interpolated ATM vol = {:.4}, out of range",
@@ -548,20 +548,20 @@ fn cubic_spline_surface_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
     // Vol/variance consistency
     for t in [0.25, 0.5, 1.0] {
         for k in [80.0, 100.0, 120.0] {
-            let vol = surface.black_vol(t, k)?;
-            let var = surface.black_variance(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
+            let var = surface.black_variance(Tenor(t), Strike(k))?;
             assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
         }
     }
 
     // smile_at returns a queryable section
-    let smile = surface.smile_at(0.5)?;
-    assert!(smile.vol(100.0)?.0 > 0.0);
+    let smile = surface.smile_at(Tenor(0.5))?;
+    assert!(smile.vol(Strike(100.0))?.0 > 0.0);
 
     // No NaN across grid
     for t in [0.1, 0.25, 0.5, 0.75, 1.0, 1.5] {
         for &k in &strikes_3m {
-            let vol = surface.black_vol(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
             assert!(
                 vol.0.is_finite() && vol.0 > 0.0,
                 "vol({t}, {k}) = {:.6} is invalid",
@@ -624,7 +624,7 @@ fn sabr_market_data(p: &SabrParams, strikes: &[f64]) -> Vec<(f64, f64)> {
     let smile = SabrSmile::new(p.forward, p.expiry, p.alpha, p.beta, p.rho, p.nu).unwrap();
     strikes
         .iter()
-        .map(|&k| (k, smile.vol(k).unwrap().0))
+        .map(|&k| (k, smile.vol(Strike(k)).unwrap().0))
         .collect()
 }
 
@@ -694,7 +694,7 @@ fn sabr_calibration_round_trip() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut sum_sq = 0.0;
     for &(k, v_orig) in &market_data {
-        let v_calib = calibrated.vol(k)?.0;
+        let v_calib = calibrated.vol(Strike(k))?.0;
         let diff = v_orig - v_calib;
         sum_sq += diff * diff;
     }
@@ -726,7 +726,7 @@ fn sabr_calibration_round_trip_lognormal() -> Result<(), Box<dyn std::error::Err
 
     let mut sum_sq = 0.0;
     for &(k, v_orig) in &market_data {
-        let v_calib = calibrated.vol(k)?.0;
+        let v_calib = calibrated.vol(Strike(k))?.0;
         let diff = v_orig - v_calib;
         sum_sq += diff * diff;
     }
@@ -749,7 +749,7 @@ fn sabr_surface_build_and_query() -> Result<(), Box<dyn std::error::Error>> {
 
     // Query at exact tenors — should return reasonable vols
     for t in [0.25, 0.50, 1.00] {
-        let vol = surface.black_vol(t, 100.0)?;
+        let vol = surface.black_vol(Tenor(t), Strike(100.0))?;
         assert!(
             vol.0 > 0.10 && vol.0 < 0.50,
             "SABR ATM vol at T={t} = {:.4}, out of range",
@@ -758,7 +758,7 @@ fn sabr_surface_build_and_query() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Interpolated tenor
-    let vol_mid = surface.black_vol(0.375, 100.0)?;
+    let vol_mid = surface.black_vol(Tenor(0.375), Strike(100.0))?;
     assert!(
         vol_mid.0 > 0.10 && vol_mid.0 < 0.50,
         "SABR interpolated ATM vol = {:.4}, out of range",
@@ -774,8 +774,8 @@ fn sabr_surface_vol_variance_consistency() -> Result<(), Box<dyn std::error::Err
 
     for t in [0.25, 0.375, 0.50, 0.75, 1.00] {
         for k in [80.0, 90.0, 100.0, 110.0, 120.0] {
-            let vol = surface.black_vol(t, k)?;
-            let var = surface.black_variance(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
+            let var = surface.black_variance(Tenor(t), Strike(k))?;
             assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
         }
     }
@@ -788,10 +788,10 @@ fn sabr_surface_smile_at() -> Result<(), Box<dyn std::error::Error>> {
     let surface = build_sabr_surface();
 
     for t in [0.25, 0.50, 0.75, 1.00] {
-        let smile = surface.smile_at(t)?;
+        let smile = surface.smile_at(Tenor(t))?;
         assert_abs_diff_eq!(smile.expiry(), t, epsilon = 1e-14);
         assert!(smile.forward() > 0.0);
-        let vol = smile.vol(100.0)?;
+        let vol = smile.vol(Strike(100.0))?;
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
     }
 
@@ -806,7 +806,7 @@ fn sabr_surface_no_nan_full_grid() -> Result<(), Box<dyn std::error::Error>> {
 
     for &t in &tenors {
         for &k in &strikes {
-            let vol = surface.black_vol(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
             assert!(
                 vol.0.is_finite() && vol.0 > 0.0,
                 "SABR vol({t}, {k}) = {:.6} is invalid",
@@ -840,7 +840,7 @@ fn ssvi_surface_build_and_query() -> Result<(), Box<dyn std::error::Error>> {
     let surface = build_ssvi_surface();
 
     for t in [0.25, 0.50, 1.00] {
-        let vol = surface.black_vol(t, 100.0)?;
+        let vol = surface.black_vol(Tenor(t), Strike(100.0))?;
         assert!(
             vol.0 > 0.05 && vol.0 < 0.50,
             "SSVI ATM vol at T={t} = {:.4}, out of range",
@@ -849,7 +849,7 @@ fn ssvi_surface_build_and_query() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Interpolated tenor
-    let vol_mid = surface.black_vol(0.375, 100.0)?;
+    let vol_mid = surface.black_vol(Tenor(0.375), Strike(100.0))?;
     assert!(
         vol_mid.0 > 0.05 && vol_mid.0 < 0.50,
         "SSVI interpolated ATM vol = {:.4}, out of range",
@@ -867,7 +867,7 @@ fn ssvi_surface_no_nan_full_grid() -> Result<(), Box<dyn std::error::Error>> {
 
     for &t in &tenors {
         for &k in &strikes {
-            let vol = surface.black_vol(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
             assert!(
                 vol.0.is_finite() && vol.0 > 0.0,
                 "SSVI vol({t}, {k}) = {:.6} is invalid",
@@ -889,8 +889,8 @@ fn ssvi_vol_variance_consistency() -> Result<(), Box<dyn std::error::Error>> {
 
     for t in [0.25, 0.375, 0.50, 0.75, 1.00] {
         for k in [80.0, 90.0, 100.0, 110.0, 120.0] {
-            let vol = surface.black_vol(t, k)?;
-            let var = surface.black_variance(t, k)?;
+            let vol = surface.black_vol(Tenor(t), Strike(k))?;
+            let var = surface.black_variance(Tenor(t), Strike(k))?;
             assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-10);
         }
     }
@@ -903,15 +903,15 @@ fn ssvi_smile_at_returns_working_section() -> Result<(), Box<dyn std::error::Err
     let surface = build_ssvi_surface();
 
     for t in [0.25, 0.50, 0.75, 1.00] {
-        let smile = surface.smile_at(t)?;
+        let smile = surface.smile_at(Tenor(t))?;
         assert_abs_diff_eq!(smile.expiry(), t, epsilon = 1e-14);
         assert!(smile.forward() > 0.0);
 
-        let vol = smile.vol(100.0)?;
+        let vol = smile.vol(Strike(100.0))?;
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
 
         // Verify smile and surface are consistent at this tenor
-        let surf_vol = surface.black_vol(t, 100.0)?;
+        let surf_vol = surface.black_vol(Tenor(t), Strike(100.0))?;
         assert_abs_diff_eq!(vol.0, surf_vol.0, epsilon = 1e-10);
     }
 
@@ -980,8 +980,8 @@ fn svi_vs_sabr_produce_plausible_vols() -> Result<(), Box<dyn std::error::Error>
     let sabr = SabrSmile::calibrate(forward, expiry, 0.5, &market_data)?;
 
     // Both should produce vols in the same ballpark (< 5% relative difference at ATM)
-    let svi_atm = svi.vol(forward)?.0;
-    let sabr_atm = sabr.vol(forward)?.0;
+    let svi_atm = svi.vol(Strike(forward))?.0;
+    let sabr_atm = sabr.vol(Strike(forward))?.0;
     let rel_diff = (svi_atm - sabr_atm).abs() / svi_atm;
     assert!(
         rel_diff < 0.05,
@@ -990,8 +990,8 @@ fn svi_vs_sabr_produce_plausible_vols() -> Result<(), Box<dyn std::error::Error>
 
     // Check across the strike range — both should be reasonable
     for &k in &strikes {
-        let v_svi = svi.vol(k)?.0;
-        let v_sabr = sabr.vol(k)?.0;
+        let v_svi = svi.vol(Strike(k))?.0;
+        let v_sabr = sabr.vol(Strike(k))?.0;
         assert!(v_svi > 0.0 && v_svi < 1.0);
         assert!(v_sabr > 0.0 && v_sabr < 1.0);
     }
@@ -1006,8 +1006,8 @@ fn piecewise_vs_ssvi_produce_comparable_atm_vols() -> Result<(), Box<dyn std::er
 
     // Both surfaces should produce positive, finite vols at the same tenors
     for t in [0.25, 0.50, 1.00] {
-        let v_pw = piecewise.black_vol(t, 100.0)?.0;
-        let v_ssvi = ssvi.black_vol(t, 100.0)?.0;
+        let v_pw = piecewise.black_vol(Tenor(t), Strike(100.0))?.0;
+        let v_ssvi = ssvi.black_vol(Tenor(t), Strike(100.0))?.0;
         assert!(
             v_pw > 0.0 && v_pw < 1.0,
             "PiecewiseSurface vol({t}, 100) = {v_pw:.4} out of range"
@@ -1035,9 +1035,9 @@ fn concurrent_sabr_surface_queries() -> Result<(), Box<dyn std::error::Error>> {
             thread::spawn(move || -> volsurf::Result<()> {
                 let strike = 80.0 + i as f64 * 5.0;
                 for &t in &[0.25, 0.50, 0.75, 1.00] {
-                    let vol = s.black_vol(t, strike)?;
+                    let vol = s.black_vol(Tenor(t), Strike(strike))?;
                     assert!(vol.0 > 0.0 && vol.0 < 2.0);
-                    let var = s.black_variance(t, strike)?;
+                    let var = s.black_variance(Tenor(t), Strike(strike))?;
                     assert!(var.0 > 0.0 && var.0.is_finite());
                 }
                 Ok(())
@@ -1062,12 +1062,12 @@ fn concurrent_ssvi_surface_queries() -> Result<(), Box<dyn std::error::Error>> {
             thread::spawn(move || -> volsurf::Result<()> {
                 let strike = 80.0 + i as f64 * 5.0;
                 for &t in &[0.25, 0.50, 0.75, 1.00] {
-                    let vol = s.black_vol(t, strike)?;
+                    let vol = s.black_vol(Tenor(t), Strike(strike))?;
                     assert!(vol.0 > 0.0 && vol.0 < 2.0);
                 }
                 // smile_at from thread
-                let smile = s.smile_at(0.5)?;
-                assert!(smile.vol(100.0)?.0 > 0.0);
+                let smile = s.smile_at(Tenor(0.5))?;
+                assert!(smile.vol(Strike(100.0))?.0 > 0.0);
                 Ok(())
             })
         })
@@ -1142,13 +1142,13 @@ fn surface_with_dividend_yield() -> Result<(), Box<dyn std::error::Error>> {
     let surface = builder.build()?;
 
     for &t in &tenors {
-        let smile = surface.smile_at(t)?;
+        let smile = surface.smile_at(Tenor(t))?;
         let expected_fwd = spot * ((rate - q) * t).exp();
         assert_abs_diff_eq!(smile.forward(), expected_fwd, epsilon = 0.5);
     }
 
     // Verify q > 0 gives lower forwards than q = 0
-    let smile_1y = surface.smile_at(1.0)?;
+    let smile_1y = surface.smile_at(Tenor(1.0))?;
     let fwd_no_q = spot * (rate * 1.0_f64).exp();
     assert!(smile_1y.forward() < fwd_no_q);
 
@@ -1209,15 +1209,15 @@ fn mixed_tenor_and_tenor_with_forward() -> Result<(), Box<dyn std::error::Error>
         .build()?;
 
     // 3M should use computed forward
-    let smile_3m = surface.smile_at(0.25)?;
+    let smile_3m = surface.smile_at(Tenor(0.25))?;
     assert_abs_diff_eq!(smile_3m.forward(), fwd_3m, epsilon = 0.5);
 
     // 1Y should use explicit forward, ignoring spot/rate/q
-    let smile_1y = surface.smile_at(1.0)?;
+    let smile_1y = surface.smile_at(Tenor(1.0))?;
     assert_abs_diff_eq!(smile_1y.forward(), explicit_fwd, epsilon = 0.5);
 
     // Cross-tenor query at 6M (interpolation between 3M and 1Y)
-    let vol_6m = surface.black_vol(0.5, 100.0)?;
+    let vol_6m = surface.black_vol(Tenor(0.5), Strike(100.0))?;
     assert!(vol_6m.0 > 0.05 && vol_6m.0 < 0.50);
 
     Ok(())
@@ -1253,7 +1253,7 @@ fn dividend_yield_equals_rate() -> Result<(), Box<dyn std::error::Error>> {
         .add_tenor(1.0, &ks, &vs)
         .build()?;
 
-    let smile = surface.smile_at(1.0)?;
+    let smile = surface.smile_at(Tenor(1.0))?;
     assert_abs_diff_eq!(smile.forward(), spot, epsilon = 0.5);
 
     Ok(())
@@ -1289,7 +1289,7 @@ fn dividend_yield_exceeds_rate() -> Result<(), Box<dyn std::error::Error>> {
         .add_tenor(1.0, &ks, &vs)
         .build()?;
 
-    let smile = surface.smile_at(1.0)?;
+    let smile = surface.smile_at(Tenor(1.0))?;
     assert!(smile.forward() < spot);
     assert_abs_diff_eq!(smile.forward(), fwd, epsilon = 0.5);
 

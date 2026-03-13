@@ -5,6 +5,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use volsurf::local_vol::{DupireLocalVol, LocalVol};
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 use volsurf::surface::{PiecewiseSurface, SsviSurface, SurfaceBuilder, VolSurface};
+use volsurf::{Strike, Tenor};
 
 /// Build a realistic SviSmile for benchmarking (SPX-like 3M smile).
 fn make_svi_smile() -> SviSmile {
@@ -28,7 +29,7 @@ fn make_spline_smile() -> SplineSmile {
     let mut variances = Vec::with_capacity(n);
     for i in 0..n {
         let k = k_min + (k_max - k_min) * (i as f64 / (n - 1) as f64);
-        let v = svi.vol(k).expect("SVI vol should succeed").0;
+        let v = svi.vol(Strike(k)).expect("SVI vol should succeed").0;
         strikes.push(k);
         variances.push(v * v * 0.25); // variance = vol^2 * expiry
     }
@@ -55,7 +56,7 @@ fn make_surface() -> PiecewiseSurface {
             .collect();
         let vols: Vec<f64> = strikes
             .iter()
-            .map(|&k| svi.vol(k).expect("SVI vol should succeed").0)
+            .map(|&k| svi.vol(Strike(k)).expect("SVI vol should succeed").0)
             .collect();
         builder = builder.add_tenor(t, &strikes, &vols);
     }
@@ -78,41 +79,43 @@ fn smile_benchmarks(c: &mut Criterion) {
     // SVI vol query — pure arithmetic, target < 100ns
     let svi = make_svi_smile();
     group.bench_function("svi_vol_query", |b| {
-        b.iter(|| svi.vol(black_box(100.0)).unwrap());
+        b.iter(|| svi.vol(Strike(black_box(100.0))).unwrap());
     });
 
     // Spline vol query — binary search + cubic eval, target < 100ns
     let spline = make_spline_smile();
     group.bench_function("spline_vol_query", |b| {
-        b.iter(|| spline.vol(black_box(100.0)).unwrap());
+        b.iter(|| spline.vol(Strike(black_box(100.0))).unwrap());
     });
 
     // SABR vol query — Hagan formula with transcendentals, target < 100ns
     let sabr = make_sabr_smile();
     group.bench_function("sabr_vol_query", |b| {
-        b.iter(|| sabr.vol(black_box(100.0)).unwrap());
+        b.iter(|| sabr.vol(Strike(black_box(100.0))).unwrap());
     });
 
     // SABR density — Breeden-Litzenberger via finite differences
     group.bench_function("sabr_density", |b| {
-        b.iter(|| sabr.density(black_box(100.0)).unwrap());
+        b.iter(|| sabr.density(Strike(black_box(100.0))).unwrap());
     });
 
     // SVI density — Breeden-Litzenberger via finite differences
     group.bench_function("svi_density", |b| {
-        b.iter(|| svi.density(black_box(100.0)).unwrap());
+        b.iter(|| svi.density(Strike(black_box(100.0))).unwrap());
     });
 
     // Spline density — Breeden-Litzenberger via finite differences
     group.bench_function("spline_density", |b| {
-        b.iter(|| spline.density(black_box(100.0)).unwrap());
+        b.iter(|| spline.density(Strike(black_box(100.0))).unwrap());
     });
 
     // SSVI slice vol query via smile_at() — target < 100ns
     let ssvi = make_ssvi_surface();
-    let slice = ssvi.smile_at(0.25).expect("SSVI smile_at should succeed");
+    let slice = ssvi
+        .smile_at(Tenor(0.25))
+        .expect("SSVI smile_at should succeed");
     group.bench_function("ssvi_slice_vol_query", |b| {
-        b.iter(|| slice.vol(black_box(100.0)).unwrap());
+        b.iter(|| slice.vol(Strike(black_box(100.0))).unwrap());
     });
 
     group.finish();
@@ -126,7 +129,7 @@ fn surface_benchmarks(c: &mut Criterion) {
     group.bench_function("piecewise_vol_query", |b| {
         b.iter(|| {
             surface
-                .black_vol(black_box(0.375), black_box(105.0))
+                .black_vol(Tenor(black_box(0.375)), Strike(black_box(105.0)))
                 .unwrap()
         });
     });
@@ -134,15 +137,18 @@ fn surface_benchmarks(c: &mut Criterion) {
     // SSVI surface vol query — target < 100ns
     let ssvi = make_ssvi_surface();
     group.bench_function("ssvi_vol_query", |b| {
-        b.iter(|| ssvi.black_vol(black_box(0.375), black_box(105.0)).unwrap());
+        b.iter(|| {
+            ssvi.black_vol(Tenor(black_box(0.375)), Strike(black_box(105.0)))
+                .unwrap()
+        });
     });
 
     // --- smile_at construction ---
     group.bench_function("piecewise_smile_at", |b| {
-        b.iter(|| surface.smile_at(black_box(0.375)).unwrap());
+        b.iter(|| surface.smile_at(Tenor(black_box(0.375))).unwrap());
     });
     group.bench_function("ssvi_smile_at", |b| {
-        b.iter(|| ssvi.smile_at(black_box(0.375)).unwrap());
+        b.iter(|| ssvi.smile_at(Tenor(black_box(0.375))).unwrap());
     });
 
     // --- diagnostics ---
@@ -170,7 +176,7 @@ fn local_vol_benchmarks(c: &mut Criterion) {
     group.bench_function("dupire_single_query", |b| {
         b.iter(|| {
             dupire
-                .local_vol(black_box(0.375), black_box(105.0))
+                .local_vol(Tenor(black_box(0.375)), Strike(black_box(105.0)))
                 .unwrap()
         });
     });
@@ -182,7 +188,7 @@ fn local_vol_benchmarks(c: &mut Criterion) {
         b.iter(|| {
             for &t in black_box(&expiries) {
                 for &k in black_box(&strikes) {
-                    let _ = dupire.local_vol(t, k).unwrap();
+                    let _ = dupire.local_vol(Tenor(t), Strike(k)).unwrap();
                 }
             }
         });
@@ -195,7 +201,7 @@ fn local_vol_benchmarks(c: &mut Criterion) {
     group.bench_function("dupire_fine_bump", |b| {
         b.iter(|| {
             dupire_fine
-                .local_vol(black_box(0.375), black_box(105.0))
+                .local_vol(Tenor(black_box(0.375)), Strike(black_box(105.0)))
                 .unwrap()
         });
     });

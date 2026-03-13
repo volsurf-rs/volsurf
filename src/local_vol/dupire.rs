@@ -18,7 +18,7 @@ use std::sync::Arc;
 use crate::conventions::log_moneyness;
 use crate::error::{self, VolSurfError};
 use crate::surface::VolSurface;
-use crate::types::Vol;
+use crate::types::{Strike, Tenor, Vol};
 use crate::validate::validate_positive;
 
 use super::LocalVol;
@@ -70,51 +70,53 @@ impl LocalVol for DupireLocalVol {
     /// The time derivative is taken at constant log-moneyness y = ln(K/F),
     /// adjusting the strike at each bumped tenor to account for the
     /// changing forward.
-    fn local_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
-        validate_positive(expiry, "expiry")?;
-        validate_positive(strike, "strike")?;
+    fn local_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
+        validate_positive(expiry.0, "expiry")?;
+        validate_positive(strike.0, "strike")?;
 
         let h = self.bump_size;
+        let t = expiry.0;
+        let k = strike.0;
 
         let smile = self.surface.smile_at(expiry)?;
         let fwd = smile.forward();
-        let y = log_moneyness(strike, fwd)?;
+        let y = log_moneyness(k, fwd)?;
 
         let w = self.surface.black_variance(expiry, strike)?.0;
         if w <= 0.0 {
             return Err(VolSurfError::NumericalError {
-                message: format!("non-positive total variance {w} at T={expiry}, K={strike}"),
+                message: format!("non-positive total variance {w} at T={t}, K={k}"),
             });
         }
 
         // Strike-space derivatives at fixed T (central differences in log-moneyness)
         let k_up = fwd * (y + h).exp();
         let k_dn = fwd * (y - h).exp();
-        let w_up = self.surface.black_variance(expiry, k_up)?.0;
-        let w_dn = self.surface.black_variance(expiry, k_dn)?.0;
+        let w_up = self.surface.black_variance(expiry, Strike(k_up))?.0;
+        let w_dn = self.surface.black_variance(expiry, Strike(k_dn))?.0;
 
         let dw_dy = (w_up - w_dn) / (2.0 * h);
         let d2w_dy2 = (w_up - 2.0 * w + w_dn) / (h * h);
 
         // Time derivative at constant y (forward adjustment at bumped tenors)
-        let dw_dt = if expiry > 2.0 * h {
-            let smile_up = self.surface.smile_at(expiry + h)?;
-            let smile_dn = self.surface.smile_at(expiry - h)?;
+        let dw_dt = if t > 2.0 * h {
+            let smile_up = self.surface.smile_at(Tenor(t + h))?;
+            let smile_dn = self.surface.smile_at(Tenor(t - h))?;
             let w_t_up = self
                 .surface
-                .black_variance(expiry + h, smile_up.forward() * y.exp())?
+                .black_variance(Tenor(t + h), Strike(smile_up.forward() * y.exp()))?
                 .0;
             let w_t_dn = self
                 .surface
-                .black_variance(expiry - h, smile_dn.forward() * y.exp())?
+                .black_variance(Tenor(t - h), Strike(smile_dn.forward() * y.exp()))?
                 .0;
             (w_t_up - w_t_dn) / (2.0 * h)
         } else {
             // Forward difference for short expiry where T - h would be non-positive
-            let smile_up = self.surface.smile_at(expiry + h)?;
+            let smile_up = self.surface.smile_at(Tenor(t + h))?;
             let w_t_up = self
                 .surface
-                .black_variance(expiry + h, smile_up.forward() * y.exp())?
+                .black_variance(Tenor(t + h), Strike(smile_up.forward() * y.exp()))?
                 .0;
             (w_t_up - w) / h
         };
@@ -127,7 +129,7 @@ impl LocalVol for DupireLocalVol {
         if denom <= 0.0 {
             return Err(VolSurfError::NumericalError {
                 message: format!(
-                    "non-positive denominator {denom} at T={expiry}, K={strike} \
+                    "non-positive denominator {denom} at T={t}, K={k} \
                      (butterfly arbitrage)"
                 ),
             });
@@ -137,7 +139,7 @@ impl LocalVol for DupireLocalVol {
         if v_local < 0.0 {
             return Err(VolSurfError::NumericalError {
                 message: format!(
-                    "negative local variance {v_local} at T={expiry}, K={strike} \
+                    "negative local variance {v_local} at T={t}, K={k} \
                      (calendar arbitrage)"
                 ),
             });
@@ -153,19 +155,19 @@ mod tests {
     use crate::smile::SmileSection;
     use crate::smile::arbitrage::ArbitrageReport;
     use crate::surface::arbitrage::SurfaceDiagnostics;
-    use crate::types::Variance;
+    use crate::types::{Strike, Tenor, Variance};
 
     #[derive(Debug)]
     struct StubSurface;
 
     impl VolSurface for StubSurface {
-        fn black_vol(&self, _: f64, _: f64) -> error::Result<Vol> {
+        fn black_vol(&self, _: Tenor, _: Strike) -> error::Result<Vol> {
             Ok(Vol(0.2))
         }
-        fn black_variance(&self, _: f64, _: f64) -> error::Result<Variance> {
+        fn black_variance(&self, _: Tenor, _: Strike) -> error::Result<Variance> {
             Ok(Variance(0.04))
         }
-        fn smile_at(&self, _: f64) -> error::Result<Box<dyn SmileSection>> {
+        fn smile_at(&self, _: Tenor) -> error::Result<Box<dyn SmileSection>> {
             unimplemented!()
         }
         fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
@@ -192,10 +194,10 @@ mod tests {
     }
 
     impl SmileSection for FlatSmile {
-        fn vol(&self, _: f64) -> error::Result<Vol> {
+        fn vol(&self, _: Strike) -> error::Result<Vol> {
             Ok(Vol(self.sigma))
         }
-        fn variance(&self, _: f64) -> error::Result<Variance> {
+        fn variance(&self, _: Strike) -> error::Result<Variance> {
             Ok(Variance(self.sigma * self.sigma * self.expiry))
         }
         fn forward(&self) -> f64 {
@@ -204,7 +206,7 @@ mod tests {
         fn expiry(&self) -> f64 {
             self.expiry
         }
-        fn density(&self, _: f64) -> error::Result<f64> {
+        fn density(&self, _: Strike) -> error::Result<f64> {
             unimplemented!()
         }
         fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
@@ -213,17 +215,17 @@ mod tests {
     }
 
     impl VolSurface for FlatVolSurface {
-        fn black_vol(&self, _: f64, _: f64) -> error::Result<Vol> {
+        fn black_vol(&self, _: Tenor, _: Strike) -> error::Result<Vol> {
             Ok(Vol(self.sigma))
         }
-        fn black_variance(&self, expiry: f64, _: f64) -> error::Result<Variance> {
-            Ok(Variance(self.sigma * self.sigma * expiry))
+        fn black_variance(&self, expiry: Tenor, _: Strike) -> error::Result<Variance> {
+            Ok(Variance(self.sigma * self.sigma * expiry.0))
         }
-        fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
+        fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {
             Ok(Box::new(FlatSmile {
                 sigma: self.sigma,
                 fwd: self.fwd,
-                expiry,
+                expiry: expiry.0,
             }))
         }
         fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
@@ -297,28 +299,28 @@ mod tests {
         let lv = DupireLocalVol::new(flat_surface(sigma));
 
         // ATM
-        let v = lv.local_vol(0.5, 100.0).unwrap();
+        let v = lv.local_vol(Tenor(0.5), Strike(100.0)).unwrap();
         assert!((v.0 - sigma).abs() < 1e-10, "ATM: got {}", v.0);
 
         // OTM
-        let v = lv.local_vol(1.0, 120.0).unwrap();
+        let v = lv.local_vol(Tenor(1.0), Strike(120.0)).unwrap();
         assert!((v.0 - sigma).abs() < 1e-10, "OTM: got {}", v.0);
 
         // ITM
-        let v = lv.local_vol(0.25, 80.0).unwrap();
+        let v = lv.local_vol(Tenor(0.25), Strike(80.0)).unwrap();
         assert!((v.0 - sigma).abs() < 1e-10, "ITM: got {}", v.0);
     }
 
     #[test]
     fn rejects_zero_expiry() {
         let lv = DupireLocalVol::new(flat_surface(0.2));
-        assert!(lv.local_vol(0.0, 100.0).is_err());
+        assert!(lv.local_vol(Tenor(0.0), Strike(100.0)).is_err());
     }
 
     #[test]
     fn rejects_zero_strike() {
         let lv = DupireLocalVol::new(flat_surface(0.2));
-        assert!(lv.local_vol(0.5, 0.0).is_err());
+        assert!(lv.local_vol(Tenor(0.5), Strike(0.0)).is_err());
     }
 
     // Gatheral (1.10) at y=0: denominator simplifies because (y/w)*dw_dy = 0
@@ -341,7 +343,7 @@ mod tests {
         let surface = Arc::new(PiecewiseSurface::new(vec![t1, t2], vec![s1, s2]).unwrap());
 
         let dupire = DupireLocalVol::new(surface);
-        let v = dupire.local_vol(1.0, 100.0).unwrap();
+        let v = dupire.local_vol(Tenor(1.0), Strike(100.0)).unwrap();
 
         // Analytical at ATM (y=0, m=0):
         // w = 0.5*(a1 + b*sigma) + 0.5*(a2 + b*sigma)
@@ -390,7 +392,7 @@ mod tests {
         let k = 110.0_f64;
         let y = (k / fwd).ln();
         let dupire = DupireLocalVol::new(surface);
-        let v = dupire.local_vol(1.0, k).unwrap();
+        let v = dupire.local_vol(Tenor(1.0), Strike(k)).unwrap();
 
         // SVI analytical derivatives at y = ln(110/100) ≈ 0.09531
         let dk = y - m;
@@ -432,10 +434,10 @@ mod tests {
         struct ZeroFwdSmile;
 
         impl SmileSection for ZeroFwdSmile {
-            fn vol(&self, _: f64) -> error::Result<Vol> {
+            fn vol(&self, _: Strike) -> error::Result<Vol> {
                 Ok(Vol(0.2))
             }
-            fn variance(&self, _: f64) -> error::Result<Variance> {
+            fn variance(&self, _: Strike) -> error::Result<Variance> {
                 Ok(Variance(0.01))
             }
             fn forward(&self) -> f64 {
@@ -444,7 +446,7 @@ mod tests {
             fn expiry(&self) -> f64 {
                 0.5
             }
-            fn density(&self, _: f64) -> error::Result<f64> {
+            fn density(&self, _: Strike) -> error::Result<f64> {
                 unimplemented!()
             }
             fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
@@ -453,13 +455,13 @@ mod tests {
         }
 
         impl VolSurface for ZeroFwdSurface {
-            fn black_vol(&self, _: f64, _: f64) -> error::Result<Vol> {
+            fn black_vol(&self, _: Tenor, _: Strike) -> error::Result<Vol> {
                 Ok(Vol(0.2))
             }
-            fn black_variance(&self, _: f64, _: f64) -> error::Result<Variance> {
+            fn black_variance(&self, _: Tenor, _: Strike) -> error::Result<Variance> {
                 Ok(Variance(0.01))
             }
-            fn smile_at(&self, _: f64) -> error::Result<Box<dyn SmileSection>> {
+            fn smile_at(&self, _: Tenor) -> error::Result<Box<dyn SmileSection>> {
                 Ok(Box::new(ZeroFwdSmile))
             }
             fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
@@ -468,7 +470,7 @@ mod tests {
         }
 
         let dupire = DupireLocalVol::new(Arc::new(ZeroFwdSurface));
-        let err = dupire.local_vol(0.5, 100.0).unwrap_err();
+        let err = dupire.local_vol(Tenor(0.5), Strike(100.0)).unwrap_err();
         assert!(
             matches!(err, VolSurfError::InvalidInput { .. }),
             "expected InvalidInput from log_moneyness, got {err:?}"
@@ -480,7 +482,7 @@ mod tests {
         // T=0.015 < 2*h (h=0.01), uses forward difference path
         let sigma = 0.20;
         let lv = DupireLocalVol::new(flat_surface(sigma));
-        let v = lv.local_vol(0.015, 100.0).unwrap();
+        let v = lv.local_vol(Tenor(0.015), Strike(100.0)).unwrap();
         assert!((v.0 - sigma).abs() < 1e-10, "short T: got {}", v.0);
     }
 }

@@ -7,6 +7,7 @@
 //!
 //! Run with: `cargo run --example smile_models`
 
+use volsurf::Strike;
 use volsurf::smile::{SmileSection, SplineSmile, SviSmile};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -55,8 +56,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "-".repeat(48));
 
     for &(k, market_vol) in &market_data {
-        let svi_vol = svi.vol(k)?.0;
-        let spline_vol = spline.vol(k)?.0;
+        let svi_vol = svi.vol(Strike(k))?.0;
+        let spline_vol = spline.vol(Strike(k))?.0;
         println!("{k:>8.0} {market_vol:>11.4}% {svi_vol:>11.4}% {spline_vol:>11.4}%",);
     }
 
@@ -64,8 +65,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n{:>8} {:>12} {:>12}", "Strike", "SVI", "Spline");
     println!("{}", "-".repeat(35));
     for k in [75.0, 85.0, 97.5, 102.5, 115.0, 125.0] {
-        let svi_vol = svi.vol(k)?.0;
-        let spline_vol = spline.vol(k)?.0;
+        let svi_vol = svi.vol(Strike(k))?.0;
+        let spline_vol = spline.vol(Strike(k))?.0;
         println!("{k:>8.1} {svi_vol:>11.4}% {spline_vol:>11.4}%");
     }
 
@@ -92,8 +93,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
 
     println!("\n--- Risk-neutral density at ATM ---\n");
-    let svi_d = svi.density(100.0)?;
-    let spline_d = spline.density(100.0)?;
+    let svi_d = svi.density(Strike(100.0))?;
+    let spline_d = spline.density(Strike(100.0))?;
     println!("SVI density:    {svi_d:.6}");
     println!("Spline density: {spline_d:.6}");
 

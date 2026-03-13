@@ -27,7 +27,7 @@ pub(crate) const EXPIRY_MATCH_TOL: f64 = 1e-10;
 
 use crate::error;
 use crate::smile::SmileSection;
-use crate::types::{Variance, Vol};
+use crate::types::{Strike, Tenor, Variance, Vol};
 
 /// A full volatility surface: (expiry, strike) → vol.
 ///
@@ -46,6 +46,7 @@ use crate::types::{Variance, Vol};
 ///
 /// ```
 /// use volsurf::surface::{SsviSurface, VolSurface};
+/// use volsurf::types::{Strike, Tenor};
 ///
 /// let surface = SsviSurface::new(
 ///     -0.3, 0.5, 0.5,
@@ -54,14 +55,14 @@ use crate::types::{Variance, Vol};
 ///     vec![0.04, 0.08, 0.16],
 /// )?;
 ///
-/// let vol = surface.black_vol(0.5, 100.0)?;
+/// let vol = surface.black_vol(Tenor(0.5), Strike(100.0))?;
 /// assert!(vol.0 > 0.0);
 ///
-/// let var = surface.black_variance(0.5, 100.0)?;
+/// let var = surface.black_variance(Tenor(0.5), Strike(100.0))?;
 /// assert!((var.0 - vol.0 * vol.0 * 0.5).abs() < 1e-12);
 ///
-/// let smile = surface.smile_at(0.5)?;
-/// assert!(smile.vol(100.0)?.0 > 0.0);
+/// let smile = surface.smile_at(Tenor(0.5))?;
+/// assert!(smile.vol(Strike(100.0))?.0 > 0.0);
 /// # Ok::<(), volsurf::VolSurfError>(())
 /// ```
 pub trait VolSurface: Send + Sync + std::fmt::Debug {
@@ -71,13 +72,13 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// which also maps (T, K) → σ but means the instantaneous diffusion
     /// coefficient. [`SmileSection::vol`] omits the prefix because there is
     /// no ambiguity at the single-tenor level.
-    fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol>;
+    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol>;
 
     /// Black total variance σ²(T, K) · T.
     ///
     /// Cross-tenor interpolation is performed in variance space because
     /// total variance must be non-decreasing in time for no-arbitrage.
-    fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance>;
+    fn black_variance(&self, expiry: Tenor, strike: Strike) -> error::Result<Variance>;
 
     /// A smile section at the given expiry.
     ///
@@ -86,7 +87,7 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// there is no stored object to borrow. A reference return would require
     /// interior mutability. The heap allocation is acceptable: `smile_at()`
     /// is called once per tenor setup, not per option.
-    fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>>;
+    fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>>;
 
     /// Surface-level arbitrage diagnostics (butterfly + calendar).
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics>;

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
-use crate::types::Vol;
+use crate::types::{Strike, Vol};
 use crate::validate::{validate_non_negative, validate_positive};
 
 const TAYLOR_Z_TOL: f64 = 1e-6;
@@ -65,9 +65,10 @@ const TAYLOR_Z_TOL: f64 = 1e-6;
 ///
 /// ```
 /// use volsurf::smile::{SabrSmile, SmileSection};
+/// use volsurf::types::Strike;
 ///
 /// let smile = SabrSmile::new(100.0, 1.0, 0.3, 1.0, -0.3, 0.4)?;
-/// let vol = smile.vol(100.0)?; // ATM vol
+/// let vol = smile.vol(Strike(100.0))?; // ATM vol
 /// assert!(vol.0 > 0.0);
 /// # Ok::<(), volsurf::VolSurfError>(())
 /// ```
@@ -264,13 +265,14 @@ impl SabrSmile {
     ///
     /// ```
     /// use volsurf::smile::{SabrSmile, SmileSection};
+    /// use volsurf::types::Strike;
     ///
     /// let market_vols = vec![
     ///     (80.0, 0.28), (90.0, 0.24), (100.0, 0.20),
     ///     (110.0, 0.22), (120.0, 0.26),
     /// ];
     /// let smile = SabrSmile::calibrate(100.0, 1.0, 0.5, &market_vols)?;
-    /// let vol = smile.vol(100.0)?;
+    /// let vol = smile.vol(Strike(100.0))?;
     /// assert!((vol.0 - 0.20).abs() < 0.01);
     /// # Ok::<(), volsurf::VolSurfError>(())
     /// ```
@@ -489,9 +491,9 @@ fn interpolate_atm_vol(forward: f64, market_vols: &[(f64, f64)]) -> f64 {
 }
 
 impl SmileSection for SabrSmile {
-    fn vol(&self, strike: f64) -> error::Result<Vol> {
-        validate_positive(strike, "strike")?;
-        let sigma = self.hagan_implied_vol(strike);
+    fn vol(&self, strike: Strike) -> error::Result<Vol> {
+        validate_positive(strike.0, "strike")?;
+        let sigma = self.hagan_implied_vol(strike.0);
         if sigma < 0.0 || !sigma.is_finite() {
             return Err(VolSurfError::NumericalError {
                 message: format!(
@@ -524,7 +526,7 @@ impl SmileSection for SabrSmile {
         for i in 0..N {
             let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
             let strike = self.forward * k.exp();
-            let d = match self.density(strike) {
+            let d = match self.density(Strike(strike)) {
                 Ok(d) => d,
                 Err(_) => continue, // Hagan breakdown in wings
             };
@@ -848,7 +850,7 @@ mod tests {
     #[test]
     fn vol_atm_returns_positive() {
         let s = make_equity_smile();
-        let v = s.vol(F).unwrap();
+        let v = s.vol(Strike(F)).unwrap();
         assert!(v.0 > 0.0, "ATM vol should be positive, got {}", v.0);
     }
 
@@ -863,7 +865,7 @@ mod tests {
                 + T * (omb * omb / 24.0 * EQ_ALPHA * EQ_ALPHA / (f_omb * f_omb)
                     + 0.25 * RHO * BETA * NU * EQ_ALPHA / f_omb
                     + (2.0 - 3.0 * RHO * RHO) / 24.0 * NU * NU));
-        let actual = s.vol(F).unwrap().0;
+        let actual = s.vol(Strike(F)).unwrap().0;
         assert!(
             (actual - expected).abs() < 1e-14,
             "ATM vol mismatch: expected {expected}, got {actual}"
@@ -873,14 +875,14 @@ mod tests {
     #[test]
     fn vol_otm_call() {
         let s = make_equity_smile();
-        let v = s.vol(120.0).unwrap();
+        let v = s.vol(Strike(120.0)).unwrap();
         assert!(v.0 > 0.0, "OTM call vol should be positive");
     }
 
     #[test]
     fn vol_itm_call() {
         let s = make_equity_smile();
-        let v = s.vol(80.0).unwrap();
+        let v = s.vol(Strike(80.0)).unwrap();
         assert!(v.0 > 0.0, "ITM call vol should be positive");
     }
 
@@ -890,10 +892,10 @@ mod tests {
         // is continuous through K = F. Verify the second-order finite difference
         // is bounded (C² smoothness ⇒ no discontinuity or kink at ATM).
         let s = make_equity_smile();
-        let v_atm = s.vol(F).unwrap().0;
+        let v_atm = s.vol(Strike(F)).unwrap().0;
         for &h in &[1.0, 0.1, 0.01] {
-            let v_above = s.vol(F + h).unwrap().0;
-            let v_below = s.vol(F - h).unwrap().0;
+            let v_above = s.vol(Strike(F + h)).unwrap().0;
+            let v_below = s.vol(Strike(F - h)).unwrap().0;
             let curvature = (v_above + v_below - 2.0 * v_atm) / (h * h);
             // Bounded curvature ⇒ no discontinuity
             assert!(
@@ -905,9 +907,9 @@ mod tests {
         // z = (ν/α) * fk_mid * ln(F/K). At the boundary |z|=1e-6, the Taylor
         // and exact formulas agree to ~1e-13, so no switching discontinuity.
         let z_boundary_k = F * (-5e-7_f64).exp(); // z ≈ 1e-6
-        let v1 = s.vol(z_boundary_k).unwrap().0;
-        let v2 = s.vol(z_boundary_k * 0.999).unwrap().0;
-        let v3 = s.vol(z_boundary_k * 1.001).unwrap().0;
+        let v1 = s.vol(Strike(z_boundary_k)).unwrap().0;
+        let v2 = s.vol(Strike(z_boundary_k * 0.999)).unwrap().0;
+        let v3 = s.vol(Strike(z_boundary_k * 1.001)).unwrap().0;
         let curvature = (v2 + v3 - 2.0 * v1) / ((z_boundary_k * 0.001).powi(2));
         assert!(
             curvature.abs() < 100.0,
@@ -920,7 +922,7 @@ mod tests {
         // beta=0: normal SABR, ATM vol ≈ alpha/F
         let alpha = 10.0; // gives ~10% vol with F=100
         let s = SabrSmile::new(F, T, alpha, 0.0, RHO, NU).unwrap();
-        let v = s.vol(F).unwrap().0;
+        let v = s.vol(Strike(F)).unwrap().0;
         let expected_approx = alpha / F; // 0.10
         // Should be close to alpha/F (within the correction term)
         assert!(
@@ -928,8 +930,8 @@ mod tests {
             "Normal SABR ATM vol ≈ α/F = {expected_approx}, got {v}"
         );
         // OTM should also work
-        assert!(s.vol(110.0).unwrap().0 > 0.0);
-        assert!(s.vol(90.0).unwrap().0 > 0.0);
+        assert!(s.vol(Strike(110.0)).unwrap().0 > 0.0);
+        assert!(s.vol(Strike(90.0)).unwrap().0 > 0.0);
     }
 
     #[test]
@@ -937,7 +939,7 @@ mod tests {
         // beta=1: lognormal SABR, ATM vol ≈ alpha
         let alpha = 0.20;
         let s = SabrSmile::new(F, T, alpha, 1.0, RHO, NU).unwrap();
-        let v = s.vol(F).unwrap().0;
+        let v = s.vol(Strike(F)).unwrap().0;
         // σ_ATM = α * [1 + T*(¼ρνα + (2-3ρ²)/24*ν²)]
         let expected = alpha
             * (1.0 + T * (0.25 * RHO * NU * alpha + (2.0 - 3.0 * RHO * RHO) / 24.0 * NU * NU));
@@ -951,7 +953,7 @@ mod tests {
     fn vol_nu_zero_cev_limit() {
         // nu=0: z/x(z) = 1, no vol-of-vol terms
         let s = SabrSmile::new(F, T, EQ_ALPHA, BETA, RHO, 0.0).unwrap();
-        let v_atm = s.vol(F).unwrap().0;
+        let v_atm = s.vol(Strike(F)).unwrap().0;
         let omb = 1.0 - BETA;
         let f_omb = F.powf(omb);
         // Only the (1-β)²/24 * α²/F^(2(1-β)) term survives
@@ -968,9 +970,9 @@ mod tests {
         // beta=1, nu=0: pure lognormal, constant vol = alpha for all strikes
         let alpha = 0.20;
         let s = SabrSmile::new(F, T, alpha, 1.0, 0.0, 0.0).unwrap();
-        let v_atm = s.vol(F).unwrap().0;
-        let v_otm = s.vol(120.0).unwrap().0;
-        let v_itm = s.vol(80.0).unwrap().0;
+        let v_atm = s.vol(Strike(F)).unwrap().0;
+        let v_otm = s.vol(Strike(120.0)).unwrap().0;
+        let v_itm = s.vol(Strike(80.0)).unwrap().0;
         assert!(
             (v_atm - alpha).abs() < 1e-14,
             "β=1,ν=0 ATM should be α={alpha}, got {v_atm}"
@@ -991,8 +993,8 @@ mod tests {
         let alpha = 0.20;
         let s = SabrSmile::new(F, T, alpha, 1.0, 0.0, NU).unwrap();
         let ratio = 1.2;
-        let v_up = s.vol(F * ratio).unwrap().0;
-        let v_down = s.vol(F / ratio).unwrap().0;
+        let v_up = s.vol(Strike(F * ratio)).unwrap().0;
+        let v_down = s.vol(Strike(F / ratio)).unwrap().0;
         // With beta=1 and rho=0, the smile is exactly symmetric in ln(K/F)
         assert!(
             (v_up - v_down).abs() < 1e-12,
@@ -1005,8 +1007,8 @@ mod tests {
     fn vol_negative_rho_skew() {
         // Negative rho: vol(K<F) > vol(K>F) (equity skew)
         let s = SabrSmile::new(F, T, EQ_ALPHA, BETA, -0.5, NU).unwrap();
-        let v_low = s.vol(80.0).unwrap().0;
-        let v_high = s.vol(120.0).unwrap().0;
+        let v_low = s.vol(Strike(80.0)).unwrap().0;
+        let v_high = s.vol(Strike(120.0)).unwrap().0;
         assert!(
             v_low > v_high,
             "Negative rho should produce downward skew: vol(80)={v_low} should > vol(120)={v_high}"
@@ -1016,14 +1018,17 @@ mod tests {
     #[test]
     fn vol_rejects_zero_strike() {
         let s = make_equity_smile();
-        assert!(matches!(s.vol(0.0), Err(VolSurfError::InvalidInput { .. })));
+        assert!(matches!(
+            s.vol(Strike(0.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
     }
 
     #[test]
     fn vol_rejects_negative_strike() {
         let s = make_equity_smile();
         assert!(matches!(
-            s.vol(-10.0),
+            s.vol(Strike(-10.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -1032,7 +1037,20 @@ mod tests {
     fn vol_rejects_nan_strike() {
         let s = make_equity_smile();
         assert!(matches!(
-            s.vol(f64::NAN),
+            s.vol(Strike(f64::NAN)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn vol_rejects_inf_strike() {
+        let s = make_equity_smile();
+        assert!(matches!(
+            s.vol(Strike(f64::INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            s.vol(Strike(f64::NEG_INFINITY)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -1042,8 +1060,8 @@ mod tests {
         // variance() = vol()² * T (from SmileSection default impl)
         let s = make_equity_smile();
         let strike = 110.0;
-        let v = s.vol(strike).unwrap().0;
-        let var = s.variance(strike).unwrap().0;
+        let v = s.vol(Strike(strike)).unwrap().0;
+        let var = s.variance(Strike(strike)).unwrap().0;
         let expected_var = v * v * T;
         assert!(
             (var - expected_var).abs() < 1e-14,
@@ -1061,8 +1079,8 @@ mod tests {
         // z = (nu/alpha) * fk_mid * ln(F/K)
         // For small z, K must be very close to F
         let k_offset = 1e-4;
-        let v1 = s.vol(F + k_offset).unwrap().0;
-        let v2 = s.vol(F + k_offset * 1.01).unwrap().0;
+        let v1 = s.vol(Strike(F + k_offset)).unwrap().0;
+        let v2 = s.vol(Strike(F + k_offset * 1.01)).unwrap().0;
         // Should be smooth (no discontinuity)
         assert!(
             (v1 - v2).abs() < 1e-8,
@@ -1075,9 +1093,9 @@ mod tests {
         let smile = make_smile();
         let k_inside = F * (-5e-8_f64).exp();
         let k_outside = F * (-5e-5_f64).exp();
-        let v_inside = smile.vol(k_inside).unwrap().0;
-        let v_outside = smile.vol(k_outside).unwrap().0;
-        let v_atm = smile.vol(F).unwrap().0;
+        let v_inside = smile.vol(Strike(k_inside)).unwrap().0;
+        let v_outside = smile.vol(Strike(k_outside)).unwrap().0;
+        let v_atm = smile.vol(Strike(F)).unwrap().0;
         assert!(v_inside.is_finite());
         assert!(
             (v_inside - v_atm).abs() < 1e-6,
@@ -1093,7 +1111,7 @@ mod tests {
     fn vol_nu_zero_otm_strikes() {
         let smile = SabrSmile::new(F, T, ALPHA, BETA, 0.0, 0.0).unwrap();
         for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
-            let v = smile.vol(k).unwrap().0;
+            let v = smile.vol(Strike(k)).unwrap().0;
             assert!(
                 v > 0.01 && v < 1.0,
                 "nu=0 vol at K={k} should be in (0.01, 1.0), got {v}"
@@ -1106,16 +1124,16 @@ mod tests {
         // rho = ±0.999: should still produce valid vols
         let s_pos = SabrSmile::new(F, T, EQ_ALPHA, BETA, 0.999, NU).unwrap();
         let s_neg = SabrSmile::new(F, T, EQ_ALPHA, BETA, -0.999, NU).unwrap();
-        assert!(s_pos.vol(F).unwrap().0 > 0.0);
-        assert!(s_neg.vol(F).unwrap().0 > 0.0);
-        assert!(s_pos.vol(110.0).unwrap().0 > 0.0);
-        assert!(s_neg.vol(110.0).unwrap().0 > 0.0);
+        assert!(s_pos.vol(Strike(F)).unwrap().0 > 0.0);
+        assert!(s_neg.vol(Strike(F)).unwrap().0 > 0.0);
+        assert!(s_pos.vol(Strike(110.0)).unwrap().0 > 0.0);
+        assert!(s_neg.vol(Strike(110.0)).unwrap().0 > 0.0);
     }
 
     #[test]
     fn vol_short_expiry() {
         let s = SabrSmile::new(F, 0.01, EQ_ALPHA, BETA, RHO, NU).unwrap();
-        let v = s.vol(F).unwrap().0;
+        let v = s.vol(Strike(F)).unwrap().0;
         let omb = 1.0 - BETA;
         let f_omb = F.powf(omb);
         // Short expiry: correction ≈ 1, so vol ≈ α/F^(1-β)
@@ -1129,11 +1147,11 @@ mod tests {
     #[test]
     fn vol_long_expiry() {
         let s = SabrSmile::new(F, 5.0, EQ_ALPHA, BETA, RHO, NU).unwrap();
-        let v = s.vol(F).unwrap().0;
+        let v = s.vol(Strike(F)).unwrap().0;
         assert!(v > 0.0, "Long expiry vol should be positive, got {v}");
         // Longer expiry has larger correction → vol should differ from short expiry
         let s_short = SabrSmile::new(F, 0.01, EQ_ALPHA, BETA, RHO, NU).unwrap();
-        let v_short = s_short.vol(F).unwrap().0;
+        let v_short = s_short.vol(Strike(F)).unwrap().0;
         assert!(
             (v - v_short).abs() > 0.001,
             "Long vs short expiry ATM vol should differ"
@@ -1146,7 +1164,7 @@ mod tests {
     fn vol_negative_correction_clamped_t20() {
         let s = SabrSmile::new(100.0, 20.0, 0.3, 0.5, -0.95, 1.5).unwrap();
         for &k in &[80.0, 100.0, 120.0] {
-            let v = s.vol(k);
+            let v = s.vol(Strike(k));
             assert!(v.is_ok(), "T=20, K={k}: should not return NumericalError");
             let vol = v.unwrap().0;
             assert!(vol > 0.0, "T=20, K={k}: vol must be positive");
@@ -1160,7 +1178,7 @@ mod tests {
     #[test]
     fn vol_negative_correction_clamped_t10() {
         let s = SabrSmile::new(100.0, 10.0, 0.3, 0.5, -0.95, 1.5).unwrap();
-        let v = s.vol(100.0).unwrap().0;
+        let v = s.vol(Strike(100.0)).unwrap().0;
         assert!(v > 0.0, "T=10, ATM vol must be positive, got {v}");
         assert!(v.is_finite(), "T=10, ATM vol must be finite");
     }
@@ -1171,8 +1189,8 @@ mod tests {
         // Vol should degrade monotonically — no discontinuity at the clamp.
         let s8 = SabrSmile::new(100.0, 8.0, 0.3, 0.5, -0.95, 1.5).unwrap();
         let s12 = SabrSmile::new(100.0, 12.0, 0.3, 0.5, -0.95, 1.5).unwrap();
-        let v8 = s8.vol(100.0).unwrap().0;
-        let v12 = s12.vol(100.0).unwrap().0;
+        let v8 = s8.vol(Strike(100.0)).unwrap().0;
+        let v12 = s12.vol(Strike(100.0)).unwrap().0;
         assert!(
             v8 > v12,
             "vol should decrease as T increases past the boundary"
@@ -1185,7 +1203,7 @@ mod tests {
         // beta=1 (lognormal): omb=0 kills two correction terms, only (2-3ρ²)/24·ν²
         // remains. Clamp should still fire for extreme ρ and long T.
         let s = SabrSmile::new(100.0, 20.0, 0.20, 1.0, -0.95, 1.5).unwrap();
-        let v = s.vol(100.0).unwrap().0;
+        let v = s.vol(Strike(100.0)).unwrap().0;
         assert!(v > 0.0, "beta=1 clamped vol must be positive");
         assert!(v < 0.01, "beta=1 clamped vol should be near-zero, got {v}");
     }
@@ -1206,9 +1224,9 @@ mod tests {
     fn vol_general_approaches_atm() {
         // As K → F from both sides, general formula should approach ATM formula
         let s = make_equity_smile();
-        let v_atm = s.vol(F).unwrap().0;
+        let v_atm = s.vol(Strike(F)).unwrap().0;
         for &eps in &[1e-3, 1e-4, 1e-5, 1e-6] {
-            let v = s.vol(F + eps).unwrap().0;
+            let v = s.vol(Strike(F + eps)).unwrap().0;
             let diff = (v - v_atm).abs();
             assert!(
                 diff < eps * 10.0, // vol difference should be proportional to eps
@@ -1237,7 +1255,7 @@ mod tests {
             1.0 + T * (0.25 * rho * nu * alpha + (2.0 - 3.0 * rho * rho) / 24.0 * nu * nu);
         let expected = alpha * z_ratio * correction;
 
-        let actual = s.vol(k).unwrap().0;
+        let actual = s.vol(Strike(k)).unwrap().0;
         let rel_err = (actual - expected).abs() / expected;
         assert!(
             rel_err < 1e-12,
@@ -1270,7 +1288,7 @@ mod tests {
                 + (2.0 - 3.0 * RHO * RHO) / 24.0 * NU * NU);
         let expected = (EQ_ALPHA / denom) * z_ratio * correction;
 
-        let actual = s.vol(k).unwrap().0;
+        let actual = s.vol(Strike(k)).unwrap().0;
         let rel_err = (actual - expected).abs() / expected;
         assert!(
             rel_err < 1e-14,
@@ -1283,7 +1301,7 @@ mod tests {
         let s = make_equity_smile();
         let strikes = [60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0];
         for &k in &strikes {
-            let v = s.vol(k).unwrap().0;
+            let v = s.vol(Strike(k)).unwrap().0;
             assert!(
                 v > 0.01 && v < 2.0,
                 "Vol at K={k} should be reasonable, got {v}"
@@ -1295,8 +1313,8 @@ mod tests {
     fn vol_deep_otm_positive() {
         // Deep OTM strikes should still give positive vol (for reasonable params)
         let s = make_equity_smile();
-        assert!(s.vol(50.0).unwrap().0 > 0.0);
-        assert!(s.vol(200.0).unwrap().0 > 0.0);
+        assert!(s.vol(Strike(50.0)).unwrap().0 > 0.0);
+        assert!(s.vol(Strike(200.0)).unwrap().0 > 0.0);
     }
 
     // ========================================================================
@@ -1307,7 +1325,7 @@ mod tests {
     fn density_positive_for_typical_params() {
         let s = make_equity_smile();
         for &k in &[80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0] {
-            let d = s.density(k).unwrap();
+            let d = s.density(Strike(k)).unwrap();
             assert!(d > 0.0, "density should be positive at K={k}, got {d}");
         }
     }
@@ -1325,7 +1343,7 @@ mod tests {
         for i in 0..=n {
             let k = k_min + i as f64 * dk;
             let strike = s.forward() * k.exp();
-            let q = s.density(strike).unwrap();
+            let q = s.density(Strike(strike)).unwrap();
             let weight = if i == 0 || i == n { 0.5 } else { 1.0 };
             // Change of variable: dK = K dk
             integral += weight * q * strike * dk;
@@ -1340,9 +1358,9 @@ mod tests {
     fn density_peaks_near_forward() {
         // The density peak should be near the forward price
         let s = make_equity_smile();
-        let d_atm = s.density(F).unwrap();
-        let d_far_otm = s.density(200.0).unwrap();
-        let d_far_itm = s.density(50.0).unwrap();
+        let d_atm = s.density(Strike(F)).unwrap();
+        let d_far_otm = s.density(Strike(200.0)).unwrap();
+        let d_far_itm = s.density(Strike(50.0)).unwrap();
         assert!(
             d_atm > d_far_otm,
             "density at ATM ({d_atm}) should exceed far OTM ({d_far_otm})"
@@ -1357,8 +1375,8 @@ mod tests {
     fn variance_equals_vol_squared_times_t() {
         let s = make_equity_smile();
         for &k in &[80.0, 100.0, 120.0] {
-            let v = s.vol(k).unwrap().0;
-            let var = s.variance(k).unwrap().0;
+            let v = s.vol(Strike(k)).unwrap().0;
+            let var = s.variance(Strike(k)).unwrap().0;
             let expected = v * v * T;
             assert!(
                 (var - expected).abs() < 1e-14,
@@ -1451,7 +1469,7 @@ mod tests {
     fn sabr_as_trait_object() {
         let s = make_equity_smile();
         let boxed: Box<dyn SmileSection> = Box::new(s);
-        let v = boxed.vol(F).unwrap();
+        let v = boxed.vol(Strike(F)).unwrap();
         assert!(v.0 > 0.0);
         let report = boxed.is_arbitrage_free().unwrap();
         assert!(report.is_free);
@@ -1465,7 +1483,7 @@ mod tests {
     fn sabr_synthetic_data(smile: &SabrSmile, strikes: &[f64]) -> Vec<(f64, f64)> {
         strikes
             .iter()
-            .map(|&k| (k, smile.vol(k).unwrap().0))
+            .map(|&k| (k, smile.vol(Strike(k)).unwrap().0))
             .collect()
     }
 
@@ -1473,8 +1491,8 @@ mod tests {
     fn vol_rms(original: &SabrSmile, calibrated: &SabrSmile, strikes: &[f64]) -> f64 {
         let mut sum_sq = 0.0;
         for &k in strikes {
-            let v_orig = original.vol(k).unwrap().0;
-            let v_cal = calibrated.vol(k).unwrap().0;
+            let v_orig = original.vol(Strike(k)).unwrap().0;
+            let v_cal = calibrated.vol(Strike(k)).unwrap().0;
             sum_sq += (v_orig - v_cal).powi(2);
         }
         (sum_sq / strikes.len() as f64).sqrt()
@@ -1765,7 +1783,7 @@ mod tests {
     fn hagan_equity_k60() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 60.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(60.0).unwrap().0;
+        let actual = s.vol(Strike(60.0)).unwrap().0;
         let eps = expected * 1e-12;
         assert!(
             (actual - expected).abs() < eps,
@@ -1779,7 +1797,7 @@ mod tests {
     fn hagan_equity_k70() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 70.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(70.0).unwrap().0;
+        let actual = s.vol(Strike(70.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=70: expected {expected:.15e}, got {actual:.15e}"
@@ -1791,7 +1809,7 @@ mod tests {
     fn hagan_equity_k80() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 80.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(80.0).unwrap().0;
+        let actual = s.vol(Strike(80.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=80: expected {expected:.15e}, got {actual:.15e}"
@@ -1803,7 +1821,7 @@ mod tests {
     fn hagan_equity_k90() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 90.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(90.0).unwrap().0;
+        let actual = s.vol(Strike(90.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=90: expected {expected:.15e}, got {actual:.15e}"
@@ -1815,7 +1833,7 @@ mod tests {
     fn hagan_equity_k95() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 95.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(95.0).unwrap().0;
+        let actual = s.vol(Strike(95.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=95: expected {expected:.15e}, got {actual:.15e}"
@@ -1836,7 +1854,7 @@ mod tests {
                     * (omb * omb / 24.0 * 4.0 / (f_omb * f_omb)
                         + 0.25 * (-0.3) * 0.5 * 0.4 * 2.0 / f_omb
                         + (2.0 - 3.0 * 0.09) / 24.0 * 0.16));
-        let actual = s.vol(100.0).unwrap().0;
+        let actual = s.vol(Strike(100.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "ATM: expected {expected:.15e}, got {actual:.15e}"
@@ -1848,7 +1866,7 @@ mod tests {
     fn hagan_equity_k105() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 105.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(105.0).unwrap().0;
+        let actual = s.vol(Strike(105.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=105: expected {expected:.15e}, got {actual:.15e}"
@@ -1860,7 +1878,7 @@ mod tests {
     fn hagan_equity_k110() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 110.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(110.0).unwrap().0;
+        let actual = s.vol(Strike(110.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=110: expected {expected:.15e}, got {actual:.15e}"
@@ -1872,7 +1890,7 @@ mod tests {
     fn hagan_equity_k120() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 120.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(120.0).unwrap().0;
+        let actual = s.vol(Strike(120.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=120: expected {expected:.15e}, got {actual:.15e}"
@@ -1884,7 +1902,7 @@ mod tests {
     fn hagan_equity_k130() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 130.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(130.0).unwrap().0;
+        let actual = s.vol(Strike(130.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=130: expected {expected:.15e}, got {actual:.15e}"
@@ -1896,7 +1914,7 @@ mod tests {
     fn hagan_equity_k140() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
         let expected = hagan_reference(100.0, 140.0, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual = s.vol(140.0).unwrap().0;
+        let actual = s.vol(Strike(140.0)).unwrap().0;
         assert!(
             (actual - expected).abs() < expected * 1e-12,
             "K=140: expected {expected:.15e}, got {actual:.15e}"
@@ -1918,7 +1936,7 @@ mod tests {
 
         for &k in &[0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09] {
             let expected = hagan_reference(f, k, t, alpha, 0.0, rho, nu);
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             let eps = expected.abs() * 1e-12;
             assert!(
                 (actual - expected).abs() < eps.max(1e-15),
@@ -1943,7 +1961,7 @@ mod tests {
 
         for &k in &[60.0, 80.0, 90.0, 100.0, 110.0, 120.0, 140.0] {
             let expected = hagan_reference(f, k, t, alpha, 1.0, rho, nu);
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             let eps = expected * 1e-12;
             assert!(
                 (actual - expected).abs() < eps,
@@ -1963,7 +1981,7 @@ mod tests {
         // Cross-validate against independent reference
         for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
             let expected = hagan_reference(100.0, k, 1.0, 2.0, 0.5, -0.3, nu_tiny);
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             let eps = expected * 1e-12;
             assert!(
                 (actual - expected).abs() < eps.max(1e-15),
@@ -1979,7 +1997,7 @@ mod tests {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.0).unwrap();
         for &k in &[80.0, 100.0, 120.0] {
             let expected = hagan_reference(100.0, k, 1.0, 2.0, 0.5, -0.3, 0.0);
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             assert!(
                 (actual - expected).abs() < expected * 1e-12,
                 "ν=0, K={k}: expected {expected:.15e}, got {actual:.15e}"
@@ -1995,7 +2013,7 @@ mod tests {
         let s = SabrSmile::new(100.0, t, 2.0, 0.5, -0.3, 0.4).unwrap();
         for &k in &[90.0, 95.0, 100.0, 105.0, 110.0] {
             let expected = hagan_reference(100.0, k, t, 2.0, 0.5, -0.3, 0.4);
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             let eps = expected * 1e-12;
             assert!(
                 (actual - expected).abs() < eps,
@@ -2012,7 +2030,7 @@ mod tests {
         let s = SabrSmile::new(100.0, t, 2.0, 0.5, -0.3, 0.4).unwrap();
         for &k in &[70.0, 85.0, 100.0, 115.0, 130.0] {
             let expected = hagan_reference(100.0, k, t, 2.0, 0.5, -0.3, 0.4);
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             let eps = expected * 1e-12;
             assert!(
                 (actual - expected).abs() < eps,
@@ -2027,12 +2045,12 @@ mod tests {
     #[test]
     fn hagan_atm_continuity_approach() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.3, 0.4).unwrap();
-        let vol_atm = s.vol(100.0).unwrap().0;
+        let vol_atm = s.vol(Strike(100.0)).unwrap().0;
 
         // Approach from below and above
         for &delta in &[1e-3, 1e-5, 1e-7, 1e-9] {
-            let v_below = s.vol(100.0 - delta).unwrap().0;
-            let v_above = s.vol(100.0 + delta).unwrap().0;
+            let v_below = s.vol(Strike(100.0 - delta)).unwrap().0;
+            let v_above = s.vol(Strike(100.0 + delta)).unwrap().0;
             assert!(
                 (v_below - vol_atm).abs() < delta * 0.1,
                 "δ={delta}: vol(F-δ)={v_below} should approach vol(F)={vol_atm}"
@@ -2053,7 +2071,7 @@ mod tests {
         // Deep OTM put
         let k_low = 10.0; // K/F = 0.1
         let expected_low = hagan_reference(100.0, k_low, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual_low = s.vol(k_low).unwrap().0;
+        let actual_low = s.vol(Strike(k_low)).unwrap().0;
         assert!(
             (actual_low - expected_low).abs() < expected_low * 1e-12,
             "K=10: expected {expected_low:.15e}, got {actual_low:.15e}"
@@ -2062,7 +2080,7 @@ mod tests {
         // Deep OTM call
         let k_high = 500.0; // K/F = 5
         let expected_high = hagan_reference(100.0, k_high, 1.0, 2.0, 0.5, -0.3, 0.4);
-        let actual_high = s.vol(k_high).unwrap().0;
+        let actual_high = s.vol(Strike(k_high)).unwrap().0;
         assert!(
             (actual_high - expected_high).abs() < expected_high * 1e-12,
             "K=500: expected {expected_high:.15e}, got {actual_high:.15e}"
@@ -2082,7 +2100,7 @@ mod tests {
 
         for &k in &[35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0] {
             let expected = hagan_reference(f, k, t, alpha, 0.5, rho, nu);
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             let eps = expected * 1e-12;
             assert!(
                 (actual - expected).abs() < eps,
@@ -2106,7 +2124,7 @@ mod tests {
         let offsets = [-1e-5, -1e-6, -1e-7, 0.0, 1e-7, 1e-6, 1e-5];
         let vols: Vec<f64> = offsets
             .iter()
-            .map(|&dk| s.vol(k_base + dk).unwrap().0)
+            .map(|&dk| s.vol(Strike(k_base + dk)).unwrap().0)
             .collect();
 
         // All vols should be within 1e-10 of each other (smooth transition)
@@ -2127,9 +2145,9 @@ mod tests {
     #[test]
     fn hagan_skew_direction_negative_rho() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, -0.5, 0.4).unwrap();
-        let v_low = s.vol(80.0).unwrap().0;
-        let v_atm = s.vol(100.0).unwrap().0;
-        let v_high = s.vol(120.0).unwrap().0;
+        let v_low = s.vol(Strike(80.0)).unwrap().0;
+        let v_atm = s.vol(Strike(100.0)).unwrap().0;
+        let v_high = s.vol(Strike(120.0)).unwrap().0;
         assert!(
             v_low > v_atm,
             "ρ<0: vol(K<F)={v_low} should > vol(ATM)={v_atm}"
@@ -2144,8 +2162,8 @@ mod tests {
     #[test]
     fn hagan_skew_direction_positive_rho() {
         let s = SabrSmile::new(100.0, 1.0, 2.0, 0.5, 0.5, 0.4).unwrap();
-        let v_low = s.vol(80.0).unwrap().0;
-        let v_high = s.vol(120.0).unwrap().0;
+        let v_low = s.vol(Strike(80.0)).unwrap().0;
+        let v_high = s.vol(Strike(120.0)).unwrap().0;
         // Positive rho: OTM calls have higher vol than OTM puts (reversed skew)
         assert!(
             v_high > v_low,
@@ -2178,7 +2196,7 @@ mod tests {
         // RMS against noisy data (fitted noise is absorbed)
         let rms: f64 = (noisy_data
             .iter()
-            .map(|&(k, v)| (calibrated.vol(k).unwrap().0 - v).powi(2))
+            .map(|&(k, v)| (calibrated.vol(Strike(k)).unwrap().0 - v).powi(2))
             .sum::<f64>()
             / noisy_data.len() as f64)
             .sqrt();
@@ -2208,7 +2226,7 @@ mod tests {
         let calibrated = SabrSmile::calibrate(100.0, 1.0, 1.0, &noisy_data).unwrap();
         let rms: f64 = (noisy_data
             .iter()
-            .map(|&(k, v)| (calibrated.vol(k).unwrap().0 - v).powi(2))
+            .map(|&(k, v)| (calibrated.vol(Strike(k)).unwrap().0 - v).powi(2))
             .sum::<f64>()
             / noisy_data.len() as f64)
             .sqrt();
@@ -2225,7 +2243,7 @@ mod tests {
         let alpha = 0.25;
         let s = SabrSmile::new(100.0, 1.0, alpha, 1.0, 0.0, 0.0).unwrap();
         for &k in &[50.0, 75.0, 100.0, 125.0, 150.0] {
-            let actual = s.vol(k).unwrap().0;
+            let actual = s.vol(Strike(k)).unwrap().0;
             assert!(
                 (actual - alpha).abs() < 1e-10,
                 "Pure lognormal K={k}: expected α={alpha}, got {actual}"
@@ -2241,7 +2259,7 @@ mod tests {
         let beta = 0.5;
         let s = SabrSmile::new(100.0, 1.0, alpha, beta, 0.0, 0.0).unwrap();
         let expected_atm = alpha / 100.0_f64.powf(1.0 - beta);
-        let actual = s.vol(100.0).unwrap().0;
+        let actual = s.vol(Strike(100.0)).unwrap().0;
         // Only correction term is (1-β)²/24 * α²/F^(2(1-β))
         let correction = 1.0 + 0.25 / 24.0 * alpha * alpha / (100.0_f64.powf(1.0 - beta)).powi(2);
         let expected_corrected = expected_atm * correction;

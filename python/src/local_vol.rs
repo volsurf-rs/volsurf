@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 use volsurf::local_vol::{DupireLocalVol, LocalVol};
+use volsurf::{Strike, Tenor};
 
 use crate::error::to_py_err;
 use crate::types::PySurface;
@@ -23,7 +24,7 @@ impl PyDupireLocalVol {
 
     fn local_vol(&self, expiry: f64, strike: f64) -> PyResult<f64> {
         self.inner
-            .local_vol(expiry, strike)
+            .local_vol(Tenor(expiry), Strike(strike))
             .map_err(to_py_err)
             .map(|v| v.0)
     }

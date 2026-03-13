@@ -23,7 +23,7 @@ pub(crate) const BUTTERFLY_G_TOL: f64 = 1e-10;
 
 use crate::error;
 use crate::implied::black::black_price;
-use crate::types::{OptionType, Variance, Vol};
+use crate::types::{OptionType, Strike, Variance, Vol};
 use crate::validate::validate_positive;
 
 /// A single-tenor volatility smile.
@@ -53,14 +53,15 @@ use crate::validate::validate_positive;
 ///
 /// ```
 /// use volsurf::smile::{SabrSmile, SmileSection};
+/// use volsurf::types::Strike;
 ///
 /// // Create a concrete smile and use it through the trait interface
 /// let smile = SabrSmile::new(100.0, 1.0, 0.3, 1.0, -0.3, 0.4)?;
 ///
-/// let vol = smile.vol(100.0)?;
+/// let vol = smile.vol(Strike(100.0))?;
 /// assert!(vol.0 > 0.0);
 ///
-/// let var = smile.variance(100.0)?;
+/// let var = smile.variance(Strike(100.0))?;
 /// assert!((var.0 - vol.0 * vol.0 * smile.expiry()).abs() < 1e-12);
 ///
 /// let report = smile.is_arbitrage_free()?;
@@ -69,13 +70,13 @@ use crate::validate::validate_positive;
 /// ```
 pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// Implied Black volatility σ at the given strike.
-    fn vol(&self, strike: f64) -> error::Result<Vol>;
+    fn vol(&self, strike: Strike) -> error::Result<Vol>;
 
     /// Total Black variance σ²T at the given strike.
     ///
     /// Default implementation derives from [`vol`](SmileSection::vol):
     /// `variance(K) = vol(K)² × expiry`.
-    fn variance(&self, strike: f64) -> error::Result<Variance> {
+    fn variance(&self, strike: Strike) -> error::Result<Variance> {
         let v = self.vol(strike)?;
         Ok(Variance(v.0 * v.0 * self.expiry()))
     }
@@ -87,16 +88,16 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     ///
     /// Models with analytical density (e.g., SVI via the g-function) should
     /// override this for better accuracy and performance.
-    fn density(&self, strike: f64) -> error::Result<f64> {
-        validate_positive(strike, "strike")?;
+    fn density(&self, strike: Strike) -> error::Result<f64> {
+        validate_positive(strike.0, "strike")?;
         // Relative perturbation for central finite difference
-        let h = strike * 1e-4;
-        let k_lo = strike - h;
-        let k_hi = strike + h;
+        let h = strike.0 * 1e-4;
+        let k_lo = strike.0 - h;
+        let k_hi = strike.0 + h;
 
-        let v_lo = self.vol(k_lo)?;
+        let v_lo = self.vol(Strike(k_lo))?;
         let v_mid = self.vol(strike)?;
-        let v_hi = self.vol(k_hi)?;
+        let v_hi = self.vol(Strike(k_hi))?;
 
         let c_lo = black_price(
             self.forward(),
@@ -107,7 +108,7 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
         )?;
         let c_mid = black_price(
             self.forward(),
-            strike,
+            strike.0,
             v_mid.0,
             self.expiry(),
             OptionType::Call,

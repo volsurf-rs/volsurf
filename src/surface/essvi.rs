@@ -20,7 +20,7 @@ use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::surface::ssvi::{CALENDAR_CHECK_GRID_SIZE, SsviSlice, strike_grid};
-use crate::types::{Variance, Vol};
+use crate::types::{Strike, Tenor, Variance, Vol};
 use crate::validate::validate_positive;
 
 /// A structural calendar no-arb violation (Thm 4.1, Eq 4.10).
@@ -149,10 +149,10 @@ impl EssviSlice {
     ///
     /// ```
     /// use volsurf::surface::EssviSlice;
-    /// use volsurf::SmileSection;
+    /// use volsurf::{SmileSection, Strike};
     ///
     /// let slice = EssviSlice::new(100.0, 1.0, -0.3, 0.5, 0.5, 0.04)?;
-    /// let vol = slice.vol(100.0)?;
+    /// let vol = slice.vol(Strike(100.0))?;
     /// assert!((vol.0 - 0.20).abs() < 0.01);
     /// # Ok::<(), volsurf::VolSurfError>(())
     /// ```
@@ -189,15 +189,15 @@ impl EssviSlice {
 }
 
 impl SmileSection for EssviSlice {
-    fn vol(&self, strike: f64) -> error::Result<Vol> {
+    fn vol(&self, strike: Strike) -> error::Result<Vol> {
         self.0.vol(strike)
     }
 
-    fn variance(&self, strike: f64) -> error::Result<Variance> {
+    fn variance(&self, strike: Strike) -> error::Result<Variance> {
         self.0.variance(strike)
     }
 
-    fn density(&self, strike: f64) -> error::Result<f64> {
+    fn density(&self, strike: Strike) -> error::Result<f64> {
         self.0.density(strike)
     }
 
@@ -516,11 +516,11 @@ impl EssviSurface {
                     model: "eSSVI",
                     rms_error: None,
                 })?;
-            let theta = svi.variance(forwards[i])?.0;
+            let theta = svi.variance(Strike(forwards[i]))?.0;
 
             let mut sum_sq = 0.0;
             for &(strike, market_vol) in market_vols {
-                let fitted_vol = svi.vol(strike)?.0;
+                let fitted_vol = svi.vol(Strike(strike))?.0;
                 sum_sq += (fitted_vol - market_vol).powi(2);
             }
             let rms_error = (sum_sq / market_vols.len() as f64).sqrt();
@@ -980,17 +980,17 @@ impl EssviSurface {
 }
 
 impl VolSurface for EssviSurface {
-    fn black_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol> {
-        validate_positive(expiry, "expiry")?;
+    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
+        validate_positive(expiry.0, "expiry")?;
         let var = self.black_variance(expiry, strike)?;
-        Ok(Vol((var.0 / expiry).sqrt()))
+        Ok(Vol((var.0 / expiry.0).sqrt()))
     }
 
-    fn black_variance(&self, expiry: f64, strike: f64) -> error::Result<Variance> {
-        validate_positive(expiry, "expiry")?;
-        validate_positive(strike, "strike")?;
-        let (theta, forward) = self.theta_and_forward_at(expiry);
-        let k = (strike / forward).ln();
+    fn black_variance(&self, expiry: Tenor, strike: Strike) -> error::Result<Variance> {
+        validate_positive(expiry.0, "expiry")?;
+        validate_positive(strike.0, "strike")?;
+        let (theta, forward) = self.theta_and_forward_at(expiry.0);
+        let k = (strike.0 / forward).ln();
         let w = self.total_variance_at(theta, k);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
@@ -1000,11 +1000,11 @@ impl VolSurface for EssviSurface {
         Ok(Variance(w))
     }
 
-    fn smile_at(&self, expiry: f64) -> error::Result<Box<dyn SmileSection>> {
-        validate_positive(expiry, "expiry")?;
-        let (theta, forward) = self.theta_and_forward_at(expiry);
+    fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {
+        validate_positive(expiry.0, "expiry")?;
+        let (theta, forward) = self.theta_and_forward_at(expiry.0);
         let rho = self.rho(theta);
-        let slice = EssviSlice::new(forward, expiry, rho, self.eta, self.gamma, theta)?;
+        let slice = EssviSlice::new(forward, expiry.0, rho, self.eta, self.gamma, theta)?;
         Ok(Box::new(slice))
     }
 
@@ -1111,14 +1111,14 @@ mod tests {
     fn vol_atm_equals_sqrt_theta_over_t() {
         // ATM: k = 0, w(0) = theta, vol = sqrt(theta / T) = sqrt(0.16) = 0.4
         let s = equity_slice();
-        let vol = s.vol(100.0).unwrap();
+        let vol = s.vol(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(vol.0, 0.4, epsilon = 1e-10);
     }
 
     #[test]
     fn variance_atm_equals_theta() {
         let s = equity_slice();
-        let var = s.variance(100.0).unwrap();
+        let var = s.variance(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(var.0, 0.16, epsilon = 1e-14);
     }
 
@@ -1126,8 +1126,8 @@ mod tests {
     fn vol_variance_consistency() {
         let s = equity_slice();
         for &strike in &[80.0, 90.0, 100.0, 110.0, 120.0] {
-            let vol = s.vol(strike).unwrap();
-            let var = s.variance(strike).unwrap();
+            let vol = s.vol(Strike(strike)).unwrap();
+            let var = s.variance(Strike(strike)).unwrap();
             assert_abs_diff_eq!(var.0, vol.0 * vol.0 * s.expiry(), epsilon = 1e-14);
         }
     }
@@ -1138,8 +1138,8 @@ mod tests {
         let essvi = equity_slice();
         let ssvi = SsviSlice::new(100.0, 1.0, -0.3, 0.5, 0.5, 0.16).unwrap();
         for &strike in &[70.0, 85.0, 100.0, 115.0, 130.0] {
-            let v_essvi = essvi.vol(strike).unwrap().0;
-            let v_ssvi = ssvi.vol(strike).unwrap().0;
+            let v_essvi = essvi.vol(Strike(strike)).unwrap().0;
+            let v_ssvi = ssvi.vol(Strike(strike)).unwrap().0;
             assert_eq!(v_essvi.to_bits(), v_ssvi.to_bits(), "strike={strike}");
         }
     }
@@ -1147,16 +1147,32 @@ mod tests {
     #[test]
     fn vol_rejects_non_positive_strikes() {
         let s = equity_slice();
-        assert!(s.vol(0.0).is_err());
-        assert!(s.vol(-100.0).is_err());
-        assert!(s.variance(0.0).is_err());
+        assert!(s.vol(Strike(0.0)).is_err());
+        assert!(s.vol(Strike(-100.0)).is_err());
+        assert!(s.variance(Strike(0.0)).is_err());
+    }
+
+    #[test]
+    fn vol_rejects_nan_strike() {
+        let s = equity_slice();
+        assert!(s.vol(Strike(f64::NAN)).is_err());
+        assert!(s.variance(Strike(f64::NAN)).is_err());
+    }
+
+    #[test]
+    fn vol_rejects_inf_strike() {
+        let s = equity_slice();
+        assert!(s.vol(Strike(f64::INFINITY)).is_err());
+        assert!(s.vol(Strike(f64::NEG_INFINITY)).is_err());
+        assert!(s.variance(Strike(f64::INFINITY)).is_err());
+        assert!(s.variance(Strike(f64::NEG_INFINITY)).is_err());
     }
 
     #[test]
     fn skew_direction() {
         let s = equity_slice();
-        let vol_put = s.vol(80.0).unwrap().0;
-        let vol_call = s.vol(120.0).unwrap().0;
+        let vol_put = s.vol(Strike(80.0)).unwrap().0;
+        let vol_call = s.vol(Strike(120.0)).unwrap().0;
         assert!(vol_put > vol_call, "negative rho should produce put skew");
     }
 
@@ -1164,7 +1180,7 @@ mod tests {
     fn density_positive_near_atm() {
         let s = equity_slice();
         for &strike in &[90.0, 95.0, 100.0, 105.0, 110.0] {
-            let d = s.density(strike).unwrap();
+            let d = s.density(Strike(strike)).unwrap();
             assert!(d > 0.0, "density({strike}) = {d}");
         }
     }
@@ -1192,7 +1208,7 @@ mod tests {
         let report = s.is_arbitrage_free().unwrap();
         assert!(!report.butterfly_violations.is_empty());
         for v in &report.butterfly_violations {
-            let expected = s.density(v.strike).unwrap();
+            let expected = s.density(Strike(v.strike)).unwrap();
             assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
             assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
         }
@@ -1216,8 +1232,8 @@ mod tests {
         assert_eq!(s.eta(), s2.eta());
         assert_eq!(s.gamma(), s2.gamma());
         assert_abs_diff_eq!(
-            s.vol(90.0).unwrap().0,
-            s2.vol(90.0).unwrap().0,
+            s.vol(Strike(90.0)).unwrap().0,
+            s2.vol(Strike(90.0)).unwrap().0,
             epsilon = 1e-14
         );
     }
@@ -1275,7 +1291,7 @@ mod tests {
         let t = 7.0 / 365.0;
         let theta = 0.04 * t;
         let s = EssviSlice::new(100.0, t, -0.5, 0.8, 0.4, theta).unwrap();
-        let vol = s.vol(100.0).unwrap();
+        let vol = s.vol(Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 2.0);
     }
 
@@ -1283,7 +1299,7 @@ mod tests {
     fn long_expiry_slice() {
         // 5-year tenor
         let s = EssviSlice::new(100.0, 5.0, -0.2, 0.3, 0.6, 0.50).unwrap();
-        let vol = s.vol(100.0).unwrap();
+        let vol = s.vol(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(vol.0, (0.50 / 5.0_f64).sqrt(), epsilon = 1e-10);
     }
 
@@ -1812,7 +1828,7 @@ mod tests {
     fn surface_atm_variance_at_stored_tenor() {
         let s = equity_surface();
         for (i, &t) in s.tenors().iter().enumerate() {
-            let var = s.black_variance(t, s.forwards()[i]).unwrap();
+            let var = s.black_variance(Tenor(t), Strike(s.forwards()[i])).unwrap();
             assert_abs_diff_eq!(var.0, s.thetas()[i], epsilon = 1e-12);
         }
     }
@@ -1821,7 +1837,7 @@ mod tests {
     fn surface_atm_vol_at_stored_tenor() {
         let s = equity_surface();
         for (i, &t) in s.tenors().iter().enumerate() {
-            let vol = s.black_vol(t, s.forwards()[i]).unwrap();
+            let vol = s.black_vol(Tenor(t), Strike(s.forwards()[i])).unwrap();
             let expected = (s.thetas()[i] / t).sqrt();
             assert_abs_diff_eq!(vol.0, expected, epsilon = 1e-10);
         }
@@ -1832,8 +1848,8 @@ mod tests {
         let s = equity_surface();
         for &t in &[0.25, 0.5, 1.0, 2.0] {
             for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
-                let vol = s.black_vol(t, k).unwrap();
-                let var = s.black_variance(t, k).unwrap();
+                let vol = s.black_vol(Tenor(t), Strike(k)).unwrap();
+                let var = s.black_variance(Tenor(t), Strike(k)).unwrap();
                 assert_abs_diff_eq!(var.0, vol.0 * vol.0 * t, epsilon = 1e-12);
             }
         }
@@ -1844,7 +1860,7 @@ mod tests {
         let s = equity_surface();
         for &t in &[0.25, 0.5, 1.0, 2.0] {
             for &k in &[60.0, 80.0, 100.0, 120.0, 150.0] {
-                let var = s.black_variance(t, k).unwrap();
+                let var = s.black_variance(Tenor(t), Strike(k)).unwrap();
                 assert!(var.0 > 0.0, "variance should be positive at T={t}, K={k}");
             }
         }
@@ -1854,8 +1870,8 @@ mod tests {
     fn surface_skew_matches_rho_sign() {
         let s = equity_surface(); // rho < 0 everywhere
         for &t in s.tenors() {
-            let vol_put = s.black_vol(t, 80.0).unwrap().0;
-            let vol_call = s.black_vol(t, 120.0).unwrap().0;
+            let vol_put = s.black_vol(Tenor(t), Strike(80.0)).unwrap().0;
+            let vol_call = s.black_vol(Tenor(t), Strike(120.0)).unwrap().0;
             assert!(
                 vol_put > vol_call,
                 "negative rho should produce put skew at T={t}"
@@ -1867,12 +1883,12 @@ mod tests {
     fn surface_interpolation_between_tenors() {
         let s = equity_surface();
         // T=0.75 is between tenor[1]=0.5 and tenor[2]=1.0
-        let vol = s.black_vol(0.75, 100.0).unwrap();
+        let vol = s.black_vol(Tenor(0.75), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
         // variance should interpolate monotonically between neighbors
-        let var = s.black_variance(0.75, 100.0).unwrap().0;
-        let var_lo = s.black_variance(0.5, 100.0).unwrap().0;
-        let var_hi = s.black_variance(1.0, 100.0).unwrap().0;
+        let var = s.black_variance(Tenor(0.75), Strike(100.0)).unwrap().0;
+        let var_lo = s.black_variance(Tenor(0.5), Strike(100.0)).unwrap().0;
+        let var_hi = s.black_variance(Tenor(1.0), Strike(100.0)).unwrap().0;
         assert!(
             var > var_lo && var < var_hi,
             "variance should interpolate monotonically"
@@ -1883,7 +1899,7 @@ mod tests {
     fn surface_extrapolation_before_first_tenor() {
         let s = equity_surface();
         // T=0.1 < tenor[0]=0.25: flat vol extrapolation => theta = theta_0 * T/T_0
-        let var = s.black_variance(0.1, 100.0).unwrap();
+        let var = s.black_variance(Tenor(0.1), Strike(100.0)).unwrap();
         let expected_theta = 0.04 * 0.1 / 0.25;
         assert_abs_diff_eq!(var.0, expected_theta, epsilon = 1e-12);
     }
@@ -1892,7 +1908,7 @@ mod tests {
     fn surface_extrapolation_after_last_tenor() {
         let s = equity_surface();
         // T=3.0 > tenor[3]=2.0: flat vol extrapolation => theta = theta_n * T/T_n
-        let var = s.black_variance(3.0, 100.0).unwrap();
+        let var = s.black_variance(Tenor(3.0), Strike(100.0)).unwrap();
         let expected_theta = 0.32 * 3.0 / 2.0;
         assert_abs_diff_eq!(var.0, expected_theta, epsilon = 1e-12);
     }
@@ -1900,47 +1916,68 @@ mod tests {
     #[test]
     fn surface_rejects_non_positive_expiry() {
         let s = equity_surface();
-        assert!(s.black_vol(0.0, 100.0).is_err());
-        assert!(s.black_vol(-1.0, 100.0).is_err());
-        assert!(s.black_variance(0.0, 100.0).is_err());
+        assert!(s.black_vol(Tenor(0.0), Strike(100.0)).is_err());
+        assert!(s.black_vol(Tenor(-1.0), Strike(100.0)).is_err());
+        assert!(s.black_variance(Tenor(0.0), Strike(100.0)).is_err());
     }
 
     #[test]
     fn surface_rejects_non_positive_strike() {
         let s = equity_surface();
-        assert!(s.black_vol(1.0, 0.0).is_err());
-        assert!(s.black_vol(1.0, -100.0).is_err());
-        assert!(s.black_variance(1.0, 0.0).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(0.0)).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(-100.0)).is_err());
+        assert!(s.black_variance(Tenor(1.0), Strike(0.0)).is_err());
+    }
+
+    #[test]
+    fn surface_rejects_nan_inputs() {
+        let s = equity_surface();
+        assert!(s.black_vol(Tenor(f64::NAN), Strike(100.0)).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::NAN)).is_err());
+        assert!(s.black_variance(Tenor(f64::NAN), Strike(100.0)).is_err());
+    }
+
+    #[test]
+    fn surface_rejects_inf_inputs() {
+        let s = equity_surface();
+        assert!(s.black_vol(Tenor(f64::INFINITY), Strike(100.0)).is_err());
+        assert!(
+            s.black_vol(Tenor(f64::NEG_INFINITY), Strike(100.0))
+                .is_err()
+        );
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::INFINITY)).is_err());
+        assert!(s.black_vol(Tenor(1.0), Strike(f64::NEG_INFINITY)).is_err());
+        assert!(s.smile_at(Tenor(f64::INFINITY)).is_err());
     }
 
     #[test]
     fn surface_smile_at_returns_essvi_slice() {
         let s = equity_surface();
-        let smile = s.smile_at(1.0).unwrap();
+        let smile = s.smile_at(Tenor(1.0)).unwrap();
         assert_eq!(smile.forward(), 100.0);
         assert_abs_diff_eq!(smile.expiry(), 1.0, epsilon = 1e-10);
         // vol at ATM should match surface query
-        let smile_vol = smile.vol(100.0).unwrap().0;
-        let surface_vol = s.black_vol(1.0, 100.0).unwrap().0;
+        let smile_vol = smile.vol(Strike(100.0)).unwrap().0;
+        let surface_vol = s.black_vol(Tenor(1.0), Strike(100.0)).unwrap().0;
         assert_abs_diff_eq!(smile_vol, surface_vol, epsilon = 1e-14);
     }
 
     #[test]
     fn surface_smile_at_interpolated_tenor() {
         let s = equity_surface();
-        let smile = s.smile_at(0.75).unwrap();
+        let smile = s.smile_at(Tenor(0.75)).unwrap();
         assert!(smile.expiry() > 0.0);
         // vol at ATM should match the direct surface query
-        let smile_vol = smile.vol(smile.forward()).unwrap().0;
-        let surface_vol = s.black_vol(0.75, smile.forward()).unwrap().0;
+        let smile_vol = smile.vol(Strike(smile.forward())).unwrap().0;
+        let surface_vol = s.black_vol(Tenor(0.75), Strike(smile.forward())).unwrap().0;
         assert_abs_diff_eq!(smile_vol, surface_vol, epsilon = 1e-12);
     }
 
     #[test]
     fn surface_smile_at_rejects_non_positive() {
         let s = equity_surface();
-        assert!(s.smile_at(0.0).is_err());
-        assert!(s.smile_at(-1.0).is_err());
+        assert!(s.smile_at(Tenor(0.0)).is_err());
+        assert!(s.smile_at(Tenor(-1.0)).is_err());
     }
 
     #[test]
@@ -1973,11 +2010,11 @@ mod tests {
     #[test]
     fn surface_rho_differs_per_tenor_in_smile() {
         let s = equity_surface();
-        let smile_short = s.smile_at(0.25).unwrap();
-        let smile_long = s.smile_at(2.0).unwrap();
+        let smile_short = s.smile_at(Tenor(0.25)).unwrap();
+        let smile_long = s.smile_at(Tenor(2.0)).unwrap();
         // OTM put vol should differ due to different rho at each tenor
-        let vol_short = smile_short.vol(80.0).unwrap().0;
-        let vol_long = smile_long.vol(80.0).unwrap().0;
+        let vol_short = smile_short.vol(Strike(80.0)).unwrap().0;
+        let vol_long = smile_long.vol(Strike(80.0)).unwrap().0;
         // They shouldn't be identical (different rho at each theta)
         assert!(
             (vol_short - vol_long).abs() > 1e-6,
@@ -2000,8 +2037,8 @@ mod tests {
         assert_eq!(s.thetas(), s2.thetas());
         assert_eq!(s.theta_max(), s2.theta_max());
         // vol query should be identical
-        let v1 = s.black_vol(1.0, 90.0).unwrap().0;
-        let v2 = s2.black_vol(1.0, 90.0).unwrap().0;
+        let v1 = s.black_vol(Tenor(1.0), Strike(90.0)).unwrap().0;
+        let v2 = s2.black_vol(Tenor(1.0), Strike(90.0)).unwrap().0;
         assert_eq!(v1.to_bits(), v2.to_bits());
     }
 
@@ -2076,7 +2113,7 @@ mod tests {
             .map(|(&t, strikes)| {
                 strikes
                     .iter()
-                    .map(|&k| (k, surface.black_vol(t, k).unwrap().0))
+                    .map(|&k| (k, surface.black_vol(Tenor(t), Strike(k)).unwrap().0))
                     .collect()
             })
             .collect()
@@ -2091,7 +2128,7 @@ mod tests {
         let mut n_points = 0;
         for (i, &t) in tenors.iter().enumerate() {
             for &(strike, vol_obs) in &market_data[i] {
-                let vol_fit = calibrated.black_vol(t, strike).unwrap().0;
+                let vol_fit = calibrated.black_vol(Tenor(t), Strike(strike)).unwrap().0;
                 total_rss += (vol_fit - vol_obs).powi(2);
                 n_points += 1;
             }
@@ -2274,8 +2311,8 @@ mod tests {
         for (a, b) in calibrated.thetas().iter().zip(deserialized.thetas()) {
             assert_abs_diff_eq!(a, b, epsilon = 1e-14);
         }
-        let v1 = calibrated.black_vol(1.0, 90.0).unwrap().0;
-        let v2 = deserialized.black_vol(1.0, 90.0).unwrap().0;
+        let v1 = calibrated.black_vol(Tenor(1.0), Strike(90.0)).unwrap().0;
+        let v2 = deserialized.black_vol(Tenor(1.0), Strike(90.0)).unwrap().0;
         assert_abs_diff_eq!(v1, v2, epsilon = 1e-14);
     }
 
@@ -2427,7 +2464,9 @@ mod tests {
             .zip(&strikes)
             .map(|((&t, &(a, b, rho)), ks)| {
                 let svi = SviSmile::new(100.0, t, a, b, rho, 0.0, 0.1).unwrap();
-                ks.iter().map(|&k| (k, svi.vol(k).unwrap().0)).collect()
+                ks.iter()
+                    .map(|&k| (k, svi.vol(Strike(k)).unwrap().0))
+                    .collect()
             })
             .collect();
 
@@ -2650,7 +2689,7 @@ mod tests {
         match EssviSurface::calibrate(&market_data, &tenors, &forwards) {
             Ok(surface) => {
                 for (&t, &f) in tenors.iter().zip(forwards.iter()) {
-                    let vol = surface.black_vol(t, f).unwrap().0;
+                    let vol = surface.black_vol(Tenor(t), Strike(f)).unwrap().0;
                     assert!(
                         vol.is_finite() && vol > 0.0,
                         "ATM vol at T={t} should be finite and positive, got {vol}"
@@ -2727,7 +2766,7 @@ mod tests {
         assert_eq!(pruned.len(), 3);
 
         let surface = EssviSurface::from_per_tenor(&pruned).unwrap();
-        let vol = surface.black_vol(1.0, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(1.0), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 1.0, "vol {:.4} out of range", vol.0);
     }
 
@@ -2755,8 +2794,8 @@ mod tests {
 
         for &t in &[0.25, 0.5, 1.0, 2.0] {
             for &k in &[80.0, 100.0, 120.0] {
-                let v1 = one_shot.black_vol(t, k).unwrap();
-                let v2 = two_stage.black_vol(t, k).unwrap();
+                let v1 = one_shot.black_vol(Tenor(t), Strike(k)).unwrap();
+                let v2 = two_stage.black_vol(Tenor(t), Strike(k)).unwrap();
                 assert_eq!(v1.0, v2.0, "vol mismatch at t={t}, k={k}");
             }
         }

@@ -17,7 +17,7 @@ pub mod dupire;
 pub use dupire::DupireLocalVol;
 
 use crate::error;
-use crate::types::Vol;
+use crate::types::{Strike, Tenor, Vol};
 
 /// Local volatility surface: σ_loc(T, K).
 ///
@@ -27,5 +27,5 @@ use crate::types::Vol;
 /// around any `Arc<dyn VolSurface>`.
 pub trait LocalVol: Send + Sync + std::fmt::Debug {
     /// Local volatility at the given expiry and strike.
-    fn local_vol(&self, expiry: f64, strike: f64) -> error::Result<Vol>;
+    fn local_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol>;
 }

@@ -15,10 +15,10 @@
 //!
 //! ## Design
 //!
-//! - **Newtypes for outputs, bare `f64` for inputs.** [`Vol`], [`Variance`],
-//!   [`Strike`], [`Tenor`] wrap return values to prevent accidental mixing.
-//!   Inputs take raw `f64` for ergonomics — validation happens inside model
-//!   constructors and the builder.
+//! - **Newtypes for inputs and outputs.** [`Vol`], [`Variance`] wrap return
+//!   values to prevent accidental mixing. [`Strike`], [`Tenor`] wrap inputs
+//!   for compile-time parameter-swap safety — e.g.,
+//!   `black_vol(Tenor(0.5), Strike(100.0))` cannot be transposed.
 //! - **No panics.** Every fallible operation returns [`Result`]. Library code
 //!   never calls `unwrap()` or `expect()`.
 //! - **Immutable surfaces.** Once constructed, a surface cannot be modified.

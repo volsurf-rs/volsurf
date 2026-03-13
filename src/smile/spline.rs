@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
-use crate::types::{Variance, Vol};
+use crate::types::{Strike, Variance, Vol};
 use crate::validate::validate_positive;
 
 /// Coefficients for one cubic polynomial interval.
@@ -246,9 +246,9 @@ fn build_spline_coefficients(x: &[f64], y: &[f64], n: usize) -> Vec<SplineCoeff>
 }
 
 impl SmileSection for SplineSmile {
-    fn vol(&self, strike: f64) -> error::Result<Vol> {
-        validate_positive(strike, "strike")?;
-        let w = self.eval_variance(strike);
+    fn vol(&self, strike: Strike) -> error::Result<Vol> {
+        validate_positive(strike.0, "strike")?;
+        let w = self.eval_variance(strike.0);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
                 message: format!("negative interpolated variance {w} at strike {strike}"),
@@ -257,9 +257,9 @@ impl SmileSection for SplineSmile {
         Ok(Vol((w / self.expiry).sqrt()))
     }
 
-    fn variance(&self, strike: f64) -> error::Result<Variance> {
-        validate_positive(strike, "strike")?;
-        let w = self.eval_variance(strike);
+    fn variance(&self, strike: Strike) -> error::Result<Variance> {
+        validate_positive(strike.0, "strike")?;
+        let w = self.eval_variance(strike.0);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
                 message: format!("negative interpolated variance {w} at strike {strike}"),
@@ -286,7 +286,7 @@ impl SmileSection for SplineSmile {
         let mut violations = Vec::new();
         for i in 1..n_samples {
             let k = k_min + dk * (i as f64);
-            let d = self.density(k)?;
+            let d = self.density(Strike(k))?;
             // Tolerance for negative density detection.
             if d < -1e-8 {
                 violations.push(ButterflyViolation {
@@ -307,6 +307,7 @@ impl SmileSection for SplineSmile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Strike;
     use approx::assert_abs_diff_eq;
 
     /// Flat 20% vol smile for validation tests.
@@ -410,7 +411,7 @@ mod tests {
         let smile = SplineSmile::new(100.0, expiry, strikes.clone(), variances.clone()).unwrap();
 
         for (k, w) in strikes.iter().zip(variances.iter()) {
-            let vol = smile.vol(*k).unwrap();
+            let vol = smile.vol(Strike(*k)).unwrap();
             let expected = (*w / expiry).sqrt();
             assert_abs_diff_eq!(vol.0, expected, epsilon = 1e-14);
         }
@@ -423,7 +424,7 @@ mod tests {
         let smile = SplineSmile::new(100.0, 1.0, strikes.clone(), variances.clone()).unwrap();
 
         for (k, w) in strikes.iter().zip(variances.iter()) {
-            let var = smile.variance(*k).unwrap();
+            let var = smile.variance(Strike(*k)).unwrap();
             assert_abs_diff_eq!(var.0, *w, epsilon = 1e-14);
         }
     }
@@ -438,7 +439,7 @@ mod tests {
 
         let expected_vol = w.sqrt();
         for k in [75.0, 85.0, 95.0, 100.0, 105.0, 115.0, 125.0] {
-            let vol = smile.vol(k).unwrap();
+            let vol = smile.vol(Strike(k)).unwrap();
             assert_abs_diff_eq!(vol.0, expected_vol, epsilon = 1e-14);
         }
     }
@@ -452,8 +453,8 @@ mod tests {
         let smile = SplineSmile::new(100.0, expiry, strikes, variances).unwrap();
 
         for k in [82.0, 95.0, 105.0, 118.0] {
-            let vol = smile.vol(k).unwrap();
-            let var = smile.variance(k).unwrap();
+            let vol = smile.vol(Strike(k)).unwrap();
+            let var = smile.variance(Strike(k)).unwrap();
             assert_abs_diff_eq!(var.0, vol.0 * vol.0 * expiry, epsilon = 1e-14);
         }
     }
@@ -464,7 +465,7 @@ mod tests {
         let variances = vec![0.065, 0.045, 0.04, 0.045, 0.065];
         let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
 
-        let var_below = smile.variance(50.0).unwrap();
+        let var_below = smile.variance(Strike(50.0)).unwrap();
         assert_abs_diff_eq!(var_below.0, 0.065, epsilon = 1e-14);
     }
 
@@ -474,7 +475,7 @@ mod tests {
         let variances = vec![0.065, 0.045, 0.04, 0.045, 0.065];
         let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
 
-        let var_above = smile.variance(200.0).unwrap();
+        let var_above = smile.variance(Strike(200.0)).unwrap();
         assert_abs_diff_eq!(var_above.0, 0.065, epsilon = 1e-14);
     }
 
@@ -485,7 +486,7 @@ mod tests {
         let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
 
         for k in [0.01, 1.0, 50.0, 500.0, 10000.0] {
-            let vol = smile.vol(k).unwrap();
+            let vol = smile.vol(Strike(k)).unwrap();
             assert!(vol.0.is_finite(), "vol at K={k} should be finite");
         }
     }
@@ -537,7 +538,7 @@ mod tests {
         let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
 
         for k in [85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0] {
-            let d = smile.density(k).unwrap();
+            let d = smile.density(Strike(k)).unwrap();
             assert!(
                 d >= -1e-8,
                 "density at K={k} should be non-negative, got {d}"
@@ -559,7 +560,7 @@ mod tests {
         let mut integral = 0.0;
         for i in 0..n {
             let k = k_lo + dk * (i as f64 + 0.5);
-            integral += smile.density(k).unwrap() * dk;
+            integral += smile.density(Strike(k)).unwrap() * dk;
         }
         // Tolerance is generous: finite integration range + numerical density
         assert_abs_diff_eq!(integral, 1.0, epsilon = 0.10);
@@ -608,7 +609,7 @@ mod tests {
     fn zero_variance_produces_zero_vol() {
         let smile =
             SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.04, 0.0, 0.04]).unwrap();
-        let vol = smile.vol(100.0).unwrap();
+        let vol = smile.vol(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(vol.0, 0.0, epsilon = 1e-14);
     }
 
@@ -622,10 +623,10 @@ mod tests {
         let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
 
         // Check that vol changes smoothly between knots
-        let mut prev_vol = smile.vol(80.0).unwrap().0;
+        let mut prev_vol = smile.vol(Strike(80.0)).unwrap().0;
         for i in 1..=40 {
             let k = 80.0 + i as f64;
-            let vol = smile.vol(k).unwrap().0;
+            let vol = smile.vol(Strike(k)).unwrap().0;
             let change = (vol - prev_vol).abs();
             assert!(
                 change < 0.05,
@@ -641,7 +642,20 @@ mod tests {
     fn vol_rejects_nan_strike() {
         let smile = make_flat_smile();
         assert!(matches!(
-            smile.vol(f64::NAN),
+            smile.vol(Strike(f64::NAN)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn vol_rejects_inf_strike() {
+        let smile = make_flat_smile();
+        assert!(matches!(
+            smile.vol(Strike(f64::INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            smile.vol(Strike(f64::NEG_INFINITY)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -650,7 +664,7 @@ mod tests {
     fn vol_rejects_negative_strike() {
         let smile = make_flat_smile();
         assert!(matches!(
-            smile.vol(-1.0),
+            smile.vol(Strike(-1.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -659,7 +673,7 @@ mod tests {
     fn vol_rejects_zero_strike() {
         let smile = make_flat_smile();
         assert!(matches!(
-            smile.vol(0.0),
+            smile.vol(Strike(0.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -668,7 +682,7 @@ mod tests {
     fn variance_rejects_nan_strike() {
         let smile = make_flat_smile();
         assert!(matches!(
-            smile.variance(f64::NAN),
+            smile.variance(Strike(f64::NAN)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -677,7 +691,7 @@ mod tests {
     fn variance_rejects_zero_strike() {
         let smile = make_flat_smile();
         assert!(matches!(
-            smile.variance(0.0),
+            smile.variance(Strike(0.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -709,7 +723,7 @@ mod tests {
         let mut found_negative = false;
         for i in 0..400 {
             let strike = 1.01 + i as f64 * 0.01;
-            if let Err(VolSurfError::NumericalError { .. }) = smile.vol(strike) {
+            if let Err(VolSurfError::NumericalError { .. }) = smile.vol(Strike(strike)) {
                 found_negative = true;
                 break;
             }
@@ -726,7 +740,7 @@ mod tests {
         let mut found_negative = false;
         for i in 0..400 {
             let strike = 1.01 + i as f64 * 0.01;
-            if let Err(VolSurfError::NumericalError { .. }) = smile.variance(strike) {
+            if let Err(VolSurfError::NumericalError { .. }) = smile.variance(Strike(strike)) {
                 found_negative = true;
                 break;
             }
@@ -750,7 +764,7 @@ mod tests {
         let mut error_strike = None;
         for i in 0..400 {
             let strike = 1.01 + i as f64 * 0.01;
-            if smile.vol(strike).is_err() {
+            if smile.vol(Strike(strike)).is_err() {
                 error_strike = Some(strike);
                 break;
             }
@@ -758,7 +772,7 @@ mod tests {
         let strike = error_strike.expect("should find a failing strike");
 
         // density() should propagate the error from vol()
-        let density_result = smile.density(strike);
+        let density_result = smile.density(Strike(strike));
         assert!(
             density_result.is_err(),
             "density() should propagate vol() error at K={strike}"
@@ -770,7 +784,7 @@ mod tests {
         // Default density() validates strike > 0 before calling vol()
         let smile = make_flat_smile();
         assert!(matches!(
-            smile.density(0.0),
+            smile.density(Strike(0.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -779,7 +793,7 @@ mod tests {
     fn default_density_rejects_negative_strike() {
         let smile = make_flat_smile();
         assert!(matches!(
-            smile.density(-10.0),
+            smile.density(Strike(-10.0)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -795,8 +809,8 @@ mod tests {
         );
         assert_eq!(SmileSection::expiry(&smile), SmileSection::expiry(&smile2));
         for &k in &[80.0, 90.0, 100.0, 110.0, 120.0] {
-            let v1 = smile.vol(k).unwrap();
-            let v2 = smile2.vol(k).unwrap();
+            let v1 = smile.vol(Strike(k)).unwrap();
+            let v2 = smile2.vol(Strike(k)).unwrap();
             assert!((v1.0 - v2.0).abs() < 1e-15, "vol mismatch at strike {k}");
         }
     }

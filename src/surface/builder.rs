@@ -2,6 +2,7 @@
 //!
 //! ```
 //! use volsurf::surface::{SurfaceBuilder, VolSurface};
+//! use volsurf::types::{Strike, Tenor};
 //!
 //! let strikes = vec![80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0];
 //! let vols = vec![0.28, 0.24, 0.22, 0.20, 0.22, 0.24, 0.28];
@@ -14,7 +15,7 @@
 //!     .build()
 //!     .unwrap();
 //!
-//! let vol = surface.black_vol(0.5, 100.0).unwrap();
+//! let vol = surface.black_vol(Tenor(0.5), Strike(100.0)).unwrap();
 //! assert!(vol.0 > 0.0);
 //! ```
 
@@ -97,6 +98,7 @@ impl TryFrom<SmileModelRaw> for SmileModel {
 ///
 /// ```
 /// use volsurf::surface::{SurfaceBuilder, SmileModel, VolSurface};
+/// use volsurf::types::{Strike, Tenor};
 ///
 /// let strikes = vec![80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0];
 /// let vols = vec![0.28, 0.24, 0.22, 0.20, 0.22, 0.24, 0.28];
@@ -109,7 +111,7 @@ impl TryFrom<SmileModelRaw> for SmileModel {
 ///     .add_tenor(1.00, &strikes, &vols)
 ///     .build()?;
 ///
-/// let vol = surface.black_vol(0.5, 100.0)?;
+/// let vol = surface.black_vol(Tenor(0.5), Strike(100.0))?;
 /// assert!(vol.0 > 0.0);
 /// # Ok::<(), volsurf::VolSurfError>(())
 /// ```
@@ -368,6 +370,7 @@ impl Default for SurfaceBuilder {
 mod tests {
     use super::*;
     use crate::surface::VolSurface;
+    use crate::types::{Strike, Tenor};
     use approx::assert_abs_diff_eq;
 
     /// Market data: symmetric U-shaped smile with 7 strikes.
@@ -388,7 +391,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vol = surface.black_vol(0.25, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(0.25), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0, "ATM vol should be positive");
         assert!(vol.0 < 1.0, "ATM vol should be reasonable");
     }
@@ -404,15 +407,15 @@ mod tests {
             .unwrap();
 
         // Query at stored tenor
-        let vol_3m = surface.black_vol(0.25, 100.0).unwrap();
+        let vol_3m = surface.black_vol(Tenor(0.25), Strike(100.0)).unwrap();
         assert!(vol_3m.0 > 0.0);
 
         // Query between tenors
-        let vol_6m = surface.black_vol(0.5, 100.0).unwrap();
+        let vol_6m = surface.black_vol(Tenor(0.5), Strike(100.0)).unwrap();
         assert!(vol_6m.0 > 0.0);
 
         // Query at stored tenor
-        let vol_1y = surface.black_vol(1.0, 100.0).unwrap();
+        let vol_1y = surface.black_vol(Tenor(1.0), Strike(100.0)).unwrap();
         assert!(vol_1y.0 > 0.0);
     }
 
@@ -427,7 +430,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(0.5), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0);
     }
 
@@ -444,7 +447,7 @@ mod tests {
         // Multiple strikes at multiple tenors
         for t in [0.25, 0.5, 1.0] {
             for k in [80.0, 90.0, 100.0, 110.0, 120.0] {
-                let vol = surface.black_vol(t, k).unwrap();
+                let vol = surface.black_vol(Tenor(t), Strike(k)).unwrap();
                 assert!(vol.0 > 0.0, "vol({t}, {k}) should be positive");
                 assert!(vol.0 < 2.0, "vol({t}, {k}) should be reasonable");
             }
@@ -463,8 +466,8 @@ mod tests {
 
         let t = 0.5;
         let k = 100.0;
-        let vol = surface.black_vol(t, k).unwrap();
-        let var = surface.black_variance(t, k).unwrap();
+        let vol = surface.black_vol(Tenor(t), Strike(k)).unwrap();
+        let var = surface.black_variance(Tenor(t), Strike(k)).unwrap();
         assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-12);
     }
 
@@ -587,7 +590,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(0.5), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0);
         assert!(vol.0 < 1.0);
     }
@@ -760,7 +763,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(0.5), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0, "ATM vol should be positive");
         assert!(vol.0 < 1.0, "ATM vol should be reasonable");
     }
@@ -836,13 +839,13 @@ mod tests {
             .unwrap();
 
         // Query between tenors
-        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(0.5), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0);
 
         // Query at/near stored tenors
         for t in [0.25, 0.5, 1.0] {
             for k in [80.0, 100.0, 120.0] {
-                let v = surface.black_vol(t, k).unwrap();
+                let v = surface.black_vol(Tenor(t), Strike(k)).unwrap();
                 assert!(
                     v.0 > 0.0 && v.0 < 2.0,
                     "vol({t}, {k}) = {} out of range",
@@ -864,8 +867,8 @@ mod tests {
 
         let t = 0.25;
         let k = 100.0;
-        let vol = surface.black_vol(t, k).unwrap();
-        let var = surface.black_variance(t, k).unwrap();
+        let vol = surface.black_vol(Tenor(t), Strike(k)).unwrap();
+        let var = surface.black_variance(Tenor(t), Strike(k)).unwrap();
         assert_abs_diff_eq!(vol.0 * vol.0 * t, var.0, epsilon = 1e-12);
     }
 
@@ -907,7 +910,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let smile = surface.smile_at(1.0).unwrap();
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
         let expected_fwd = 100.0 * (0.03_f64).exp();
         assert_abs_diff_eq!(smile.forward(), expected_fwd, epsilon = 0.5);
     }
@@ -928,8 +931,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let fwd_no_q = surface_no_q.smile_at(1.0).unwrap().forward();
-        let fwd_q0 = surface_q0.smile_at(1.0).unwrap().forward();
+        let fwd_no_q = surface_no_q.smile_at(Tenor(1.0)).unwrap().forward();
+        let fwd_q0 = surface_q0.smile_at(Tenor(1.0)).unwrap().forward();
         assert_abs_diff_eq!(fwd_no_q, fwd_q0, epsilon = 1e-12);
     }
 
@@ -965,7 +968,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let smile = surface.smile_at(1.0).unwrap();
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
         // Should use the explicit 50.0, not 100*exp(0.05) ≈ 105.13
         assert_abs_diff_eq!(smile.forward(), explicit_fwd, epsilon = 1e-6);
     }
@@ -1010,7 +1013,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vol = surface.black_vol(0.5, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(0.5), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
     }
 
@@ -1026,10 +1029,10 @@ mod tests {
 
         for i in 1..=10 {
             let t = i as f64 * 0.25;
-            let vol = surface.black_vol(t, 100.0).unwrap();
+            let vol = surface.black_vol(Tenor(t), Strike(100.0)).unwrap();
             assert!(vol.0 > 0.0 && vol.0 < 1.0, "bad vol {vol:?} at T={t}");
         }
-        let interp = surface.black_vol(1.375, 100.0).unwrap();
+        let interp = surface.black_vol(Tenor(1.375), Strike(100.0)).unwrap();
         assert!(interp.0 > 0.0 && interp.0 < 1.0);
     }
 
@@ -1060,7 +1063,7 @@ mod tests {
             builder = builder.add_tenor(i as f64 * 0.25, &strikes, &vols);
         }
         let surface = builder.build().unwrap();
-        let vol = surface.black_vol(1.0, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(1.0), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
     }
 
@@ -1076,7 +1079,7 @@ mod tests {
             builder = builder.add_tenor(i as f64 * 0.25, &strikes, &vols);
         }
         let surface = builder.build().unwrap();
-        let vol = surface.black_vol(1.0, 100.0).unwrap();
+        let vol = surface.black_vol(Tenor(1.0), Strike(100.0)).unwrap();
         assert!(vol.0 > 0.0 && vol.0 < 1.0);
     }
 

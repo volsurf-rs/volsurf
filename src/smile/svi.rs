@@ -22,7 +22,7 @@ use nalgebra::{DMatrix, DVector};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
-use crate::types::Vol;
+use crate::types::{Strike, Vol};
 use crate::validate::validate_positive;
 
 /// SVI volatility smile with 5 parameters.
@@ -576,9 +576,9 @@ impl SviSmile {
 }
 
 impl SmileSection for SviSmile {
-    fn vol(&self, strike: f64) -> error::Result<Vol> {
-        validate_positive(strike, "strike")?;
-        let k = (strike / self.forward).ln();
+    fn vol(&self, strike: Strike) -> error::Result<Vol> {
+        validate_positive(strike.0, "strike")?;
+        let k = (strike.0 / self.forward).ln();
         let w = self.total_variance_at_k(k);
         if w < 0.0 {
             return Err(VolSurfError::NumericalError {
@@ -599,9 +599,9 @@ impl SmileSection for SviSmile {
     ///
     /// # Reference
     /// Breeden & Litzenberger (1978); Gatheral & Jacquier (2014), §4.
-    fn density(&self, strike: f64) -> error::Result<f64> {
-        validate_positive(strike, "strike")?;
-        let k = (strike / self.forward).ln();
+    fn density(&self, strike: Strike) -> error::Result<f64> {
+        validate_positive(strike.0, "strike")?;
+        let k = (strike.0 / self.forward).ln();
         let w = self.total_variance_at_k(k);
         if w <= 0.0 {
             return Err(VolSurfError::NumericalError {
@@ -612,7 +612,7 @@ impl SmileSection for SviSmile {
         let sqrt_w = w.sqrt();
         let d2 = -k / sqrt_w - sqrt_w / 2.0;
         let n_d2 = (-d2 * d2 / 2.0).exp() / (2.0 * PI).sqrt();
-        Ok(g * n_d2 / (strike * sqrt_w))
+        Ok(g * n_d2 / (strike.0 * sqrt_w))
     }
 
     fn forward(&self) -> f64 {
@@ -645,7 +645,7 @@ impl SmileSection for SviSmile {
             let g = self.g_function(k);
             if g < -super::BUTTERFLY_G_TOL {
                 let strike = self.forward * k.exp();
-                let d = match self.density(strike) {
+                let d = match self.density(Strike(strike)) {
                     Ok(d) => d,
                     Err(_) => continue,
                 };
@@ -799,7 +799,7 @@ mod tests {
     #[test]
     fn vol_atm() {
         let smile = make_smile();
-        let vol = smile.vol(F).unwrap();
+        let vol = smile.vol(Strike(F)).unwrap();
         // ATM (k=0, m=0): w = a + b*(rho*0 + sqrt(0 + sigma^2)) = a + b*sigma
         // w = 0.04 + 0.4*0.1 = 0.08, vol = sqrt(0.08/1.0) = 0.28284...
         let expected_w = A + B * SIGMA;
@@ -815,7 +815,7 @@ mod tests {
         let dk = k - M;
         let expected_w = A + B * (RHO * dk + (dk * dk + SIGMA * SIGMA).sqrt());
         let expected_vol = (expected_w / T).sqrt();
-        let vol = smile.vol(80.0).unwrap();
+        let vol = smile.vol(Strike(80.0)).unwrap();
         assert_abs_diff_eq!(vol.0, expected_vol, epsilon = 1e-14);
     }
 
@@ -827,7 +827,7 @@ mod tests {
         let dk = k - M;
         let expected_w = A + B * (RHO * dk + (dk * dk + SIGMA * SIGMA).sqrt());
         let expected_vol = (expected_w / T).sqrt();
-        let vol = smile.vol(120.0).unwrap();
+        let vol = smile.vol(Strike(120.0)).unwrap();
         assert_abs_diff_eq!(vol.0, expected_vol, epsilon = 1e-14);
     }
 
@@ -838,8 +838,8 @@ mod tests {
         let strikes = [80.0, 90.0, 95.0, 98.0];
         for &k in &strikes {
             let mirror = F * F / k; // mirror strike
-            let v1 = smile.vol(k).unwrap();
-            let v2 = smile.vol(mirror).unwrap();
+            let v1 = smile.vol(Strike(k)).unwrap();
+            let v2 = smile.vol(Strike(mirror)).unwrap();
             assert_abs_diff_eq!(v1.0, v2.0, epsilon = 1e-14);
         }
     }
@@ -847,8 +847,8 @@ mod tests {
     #[test]
     fn skew_negative_rho() {
         let smile = make_smile(); // rho = -0.4
-        let vol_low = smile.vol(80.0).unwrap();
-        let vol_high = smile.vol(120.0).unwrap();
+        let vol_low = smile.vol(Strike(80.0)).unwrap();
+        let vol_high = smile.vol(Strike(120.0)).unwrap();
         assert!(
             vol_low.0 > vol_high.0,
             "negative rho should produce higher vol for lower strikes: \
@@ -861,8 +861,8 @@ mod tests {
     #[test]
     fn skew_positive_rho() {
         let smile = SviSmile::new(F, T, A, B, 0.4, M, SIGMA).unwrap();
-        let vol_low = smile.vol(80.0).unwrap();
-        let vol_high = smile.vol(120.0).unwrap();
+        let vol_low = smile.vol(Strike(80.0)).unwrap();
+        let vol_high = smile.vol(Strike(120.0)).unwrap();
         assert!(
             vol_high.0 > vol_low.0,
             "positive rho should produce higher vol for higher strikes"
@@ -872,22 +872,44 @@ mod tests {
     #[test]
     fn vol_rejects_zero_strike() {
         let smile = make_smile();
-        let r = smile.vol(0.0);
+        let r = smile.vol(Strike(0.0));
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn vol_rejects_negative_strike() {
         let smile = make_smile();
-        let r = smile.vol(-10.0);
+        let r = smile.vol(Strike(-10.0));
         assert!(matches!(r, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn vol_rejects_nan_strike() {
+        let smile = make_smile();
+        assert!(matches!(
+            smile.vol(Strike(f64::NAN)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn vol_rejects_inf_strike() {
+        let smile = make_smile();
+        assert!(matches!(
+            smile.vol(Strike(f64::INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            smile.vol(Strike(f64::NEG_INFINITY)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
     }
 
     #[test]
     fn variance_consistent_with_vol() {
         let smile = make_smile();
-        let vol = smile.vol(100.0).unwrap();
-        let var = smile.variance(100.0).unwrap();
+        let vol = smile.vol(Strike(100.0)).unwrap();
+        let var = smile.variance(Strike(100.0)).unwrap();
         // variance = vol^2 * T
         assert_abs_diff_eq!(var.0, vol.0 * vol.0 * T, epsilon = 1e-14);
     }
@@ -895,9 +917,9 @@ mod tests {
     #[test]
     fn flat_smile_with_zero_b() {
         let smile = SviSmile::new(F, T, 0.04, 0.0, 0.0, 0.0, 0.1).unwrap();
-        let vol_80 = smile.vol(80.0).unwrap();
-        let vol_100 = smile.vol(100.0).unwrap();
-        let vol_120 = smile.vol(120.0).unwrap();
+        let vol_80 = smile.vol(Strike(80.0)).unwrap();
+        let vol_100 = smile.vol(Strike(100.0)).unwrap();
+        let vol_120 = smile.vol(Strike(120.0)).unwrap();
         // b=0 => w(k) = a for all k => vol = sqrt(a/T)
         let expected = (0.04_f64 / T).sqrt();
         assert_abs_diff_eq!(vol_80.0, expected, epsilon = 1e-14);
@@ -920,7 +942,7 @@ mod tests {
     #[test]
     fn density_atm_positive() {
         let smile = make_arb_free_smile();
-        let d = smile.density(100.0).unwrap();
+        let d = smile.density(Strike(100.0)).unwrap();
         assert!(d > 0.0, "ATM density should be positive, got {d}");
     }
 
@@ -931,7 +953,7 @@ mod tests {
             .map(|i| 100.0 * ((-3.0 + 6.0 * i as f64 / 200.0).exp()))
             .collect();
         for &k in &strikes {
-            let d = smile.density(k).unwrap();
+            let d = smile.density(Strike(k)).unwrap();
             assert!(
                 d >= -1e-15,
                 "density should be non-negative for arb-free params at K={k}, got {d}"
@@ -944,7 +966,7 @@ mod tests {
         // For symmetric arb-free SVI, density should be positive everywhere
         let smile = SviSmile::new(100.0, 1.0, 0.04, 0.4, 0.0, 0.0, 0.2).unwrap();
         for &strike in &[50.0, 80.0, 90.0, 100.0, 110.0, 120.0, 150.0] {
-            let d = smile.density(strike).unwrap();
+            let d = smile.density(Strike(strike)).unwrap();
             assert!(d > 0.0, "density should be positive at K={strike}, got {d}");
         }
     }
@@ -960,7 +982,7 @@ mod tests {
         for i in 0..=n {
             let k = k_min + i as f64 * dk;
             let strike = smile.forward() * k.exp();
-            let q = smile.density(strike).unwrap();
+            let q = smile.density(Strike(strike)).unwrap();
             let weight = if i == 0 || i == n { 0.5 } else { 1.0 };
             // q(K) dK = q(K) * K * dk  (change of variable: dK = K dk)
             integral += weight * q * strike * dk;
@@ -972,7 +994,25 @@ mod tests {
     fn density_rejects_zero_strike() {
         let smile = make_arb_free_smile();
         assert!(matches!(
-            smile.density(0.0),
+            smile.density(Strike(0.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn density_rejects_nan_strike() {
+        let smile = make_arb_free_smile();
+        assert!(matches!(
+            smile.density(Strike(f64::NAN)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn density_rejects_inf_strike() {
+        let smile = make_arb_free_smile();
+        assert!(matches!(
+            smile.density(Strike(f64::INFINITY)),
             Err(VolSurfError::InvalidInput { .. })
         ));
     }
@@ -989,14 +1029,14 @@ mod tests {
 
         for &strike in &[80.0, 100.0, 120.0] {
             let h = strike * 1e-4;
-            let vol_m = smile.vol(strike - h).unwrap().0;
-            let vol_0 = smile.vol(strike).unwrap().0;
-            let vol_p = smile.vol(strike + h).unwrap().0;
+            let vol_m = smile.vol(Strike(strike - h)).unwrap().0;
+            let vol_0 = smile.vol(Strike(strike)).unwrap().0;
+            let vol_p = smile.vol(Strike(strike + h)).unwrap().0;
             let c_m = black_price(f, strike - h, vol_m, t, OptionType::Call).unwrap();
             let c_0 = black_price(f, strike, vol_0, t, OptionType::Call).unwrap();
             let c_p = black_price(f, strike + h, vol_p, t, OptionType::Call).unwrap();
             let numerical = (c_p - 2.0 * c_0 + c_m) / (h * h);
-            let analytical = smile.density(strike).unwrap();
+            let analytical = smile.density(Strike(strike)).unwrap();
             assert_abs_diff_eq!(analytical, numerical, epsilon = 1e-4);
         }
     }
@@ -1032,7 +1072,7 @@ mod tests {
         let report = smile.is_arbitrage_free().unwrap();
         assert!(!report.butterfly_violations.is_empty());
         for v in &report.butterfly_violations {
-            let expected = smile.density(v.strike).unwrap();
+            let expected = smile.density(Strike(v.strike)).unwrap();
             assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
             assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
         }
@@ -1068,7 +1108,7 @@ mod tests {
         (strikes
             .iter()
             .map(|&k| {
-                let diff = a.vol(k).unwrap().0 - b.vol(k).unwrap().0;
+                let diff = a.vol(Strike(k)).unwrap().0 - b.vol(Strike(k)).unwrap().0;
                 diff * diff
             })
             .sum::<f64>()
@@ -1080,7 +1120,7 @@ mod tests {
     fn synthetic_market_data(smile: &SviSmile, strikes: &[f64]) -> Vec<(f64, f64)> {
         strikes
             .iter()
-            .map(|&k| (k, smile.vol(k).unwrap().0))
+            .map(|&k| (k, smile.vol(Strike(k)).unwrap().0))
             .collect()
     }
 
@@ -1215,7 +1255,7 @@ mod tests {
         let rms = (data
             .iter()
             .map(|&(k, sigma)| {
-                let fitted = calibrated.vol(k).unwrap().0;
+                let fitted = calibrated.vol(Strike(k)).unwrap().0;
                 (fitted - sigma).powi(2)
             })
             .sum::<f64>()
@@ -1281,7 +1321,7 @@ mod tests {
     #[test]
     fn vol_returns_error_when_total_variance_is_negative() {
         let smile = make_invalid_svi();
-        let result = smile.vol(100.0);
+        let result = smile.vol(Strike(100.0));
         assert!(
             matches!(result, Err(VolSurfError::NumericalError { .. })),
             "vol() should return NumericalError for negative variance, got {result:?}"
@@ -1293,7 +1333,7 @@ mod tests {
     #[test]
     fn density_returns_error_when_total_variance_non_positive() {
         let smile = make_invalid_svi();
-        let result = smile.density(100.0);
+        let result = smile.density(Strike(100.0));
         assert!(
             matches!(result, Err(VolSurfError::NumericalError { .. })),
             "density() should return NumericalError for non-positive variance, got {result:?}"
@@ -1412,7 +1452,7 @@ mod tests {
         // (albeit imprecise) fit, or fail with Roger Lee / ATM sanity rejection.
         match SviSmile::calibrate(forward, expiry, &data) {
             Ok(smile) => {
-                let atm_vol = smile.vol(forward).unwrap().0;
+                let atm_vol = smile.vol(Strike(forward)).unwrap().0;
                 assert!(
                     atm_vol > 0.10 && atm_vol < 1.0,
                     "ATM vol {atm_vol:.4} outside [0.10, 1.0]"
@@ -1458,7 +1498,7 @@ mod tests {
         // fit rejected by Roger Lee bound or ATM sanity check.
         match SviSmile::calibrate(forward, expiry, &data) {
             Ok(smile) => {
-                let atm_vol = smile.vol(forward).unwrap().0;
+                let atm_vol = smile.vol(Strike(forward)).unwrap().0;
                 assert!(
                     atm_vol.is_finite() && atm_vol > 0.0,
                     "ATM vol should be finite and positive, got {atm_vol}"
@@ -1484,7 +1524,7 @@ mod tests {
         (data
             .iter()
             .map(|&(strike, vol_obs)| {
-                let vol_fit = smile.vol(strike).unwrap().0;
+                let vol_fit = smile.vol(Strike(strike)).unwrap().0;
                 (vol_fit - vol_obs).powi(2)
             })
             .sum::<f64>()
@@ -1664,7 +1704,7 @@ mod tests {
         let smile = SviSmile::calibrate(forward, expiry, &data)
             .expect("SPX both-sided calibration should succeed");
 
-        let atm_vol = smile.vol(forward).unwrap().0;
+        let atm_vol = smile.vol(Strike(forward)).unwrap().0;
         assert!(
             atm_vol > 0.10 && atm_vol < 0.25,
             "ATM vol {:.4} outside [10%, 25%] — calibration produced degenerate params",
@@ -1691,8 +1731,8 @@ mod tests {
         data[8].1 += 0.10;
 
         let calibrated = SviSmile::calibrate(100.0, 0.5, &data).unwrap();
-        let true_atm = true_smile.vol(100.0).unwrap().0;
-        let fit_atm = calibrated.vol(100.0).unwrap().0;
+        let true_atm = true_smile.vol(Strike(100.0)).unwrap().0;
+        let fit_atm = calibrated.vol(Strike(100.0)).unwrap().0;
         let atm_err = (fit_atm - true_atm).abs();
         assert!(
             atm_err < 0.02,
@@ -1711,7 +1751,7 @@ mod tests {
             .collect();
         match SviSmile::calibrate(forward, expiry, &data) {
             Ok(smile) => {
-                let vol = smile.vol(130.0).unwrap().0;
+                let vol = smile.vol(Strike(130.0)).unwrap().0;
                 assert!(vol.is_finite() && vol > 0.0);
             }
             Err(VolSurfError::CalibrationError { message, .. }) => {
@@ -1746,7 +1786,7 @@ mod tests {
         match SviSmile::calibrate(forward, expiry, &data) {
             Ok(smile) => {
                 // If it calibrates, ATM should still be reasonable (sanity check passed)
-                let atm = smile.vol(forward).unwrap().0;
+                let atm = smile.vol(Strike(forward)).unwrap().0;
                 assert!(
                     atm < 0.80,
                     "degenerate ATM {atm:.4} should be caught by sanity check"

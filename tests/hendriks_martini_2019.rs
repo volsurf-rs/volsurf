@@ -8,8 +8,8 @@
 //!   ρ(θ) = −0.76 − 0.11·(θ/θ_max)^{0.51}  →  ρ₀=−0.76, ρₘ=−0.87, a=0.51
 
 use approx::assert_abs_diff_eq;
-use volsurf::SmileSection;
 use volsurf::surface::{EssviSlice, EssviSurface, SsviSlice, SsviSurface, VolSurface};
+use volsurf::{SmileSection, Strike, Tenor};
 
 const ETA: f64 = 0.98;
 const GAMMA: f64 = 0.42;
@@ -94,7 +94,7 @@ fn eq_2_2_hand_computed_values() {
     let k = 0.2;
     let expected_pos = w_formula(theta, k, rho, eta, gamma);
     let strike_pos = 100.0 * k.exp();
-    let var_pos = slice.variance(strike_pos).unwrap().0;
+    let var_pos = slice.variance(Strike(strike_pos)).unwrap().0;
     assert_abs_diff_eq!(var_pos, expected_pos, epsilon = 1e-14);
     assert_abs_diff_eq!(
         expected_pos,
@@ -106,7 +106,7 @@ fn eq_2_2_hand_computed_values() {
     // w = 0.02[1 + 0.15 + √(0.64 + 0.91)] = 0.02[1.15 + √1.55]
     let expected_neg = w_formula(theta, -k, rho, eta, gamma);
     let strike_neg = 100.0 * (-k).exp();
-    let var_neg = slice.variance(strike_neg).unwrap().0;
+    let var_neg = slice.variance(Strike(strike_neg)).unwrap().0;
     assert_abs_diff_eq!(var_neg, expected_neg, epsilon = 1e-14);
     assert_abs_diff_eq!(
         expected_neg,
@@ -133,7 +133,7 @@ fn eq_2_2_code_matches_formula_across_strikes() {
     for i in -15..=15 {
         let k = i as f64 * 0.1;
         let strike = forward * k.exp();
-        let var_code = slice.variance(strike).unwrap().0;
+        let var_code = slice.variance(Strike(strike)).unwrap().0;
         let var_hand = w_formula(theta, k, rho, eta, gamma);
         assert!(
             (var_code - var_hand).abs() < 1e-13,
@@ -345,8 +345,8 @@ fn ssvi_degeneracy_slice() {
     let ssvi = SsviSlice::new(forward, expiry, rho, eta, gamma, theta).unwrap();
 
     for &strike in &[60.0, 80.0, 90.0, 100.0, 110.0, 120.0, 150.0] {
-        let v_essvi = essvi.vol(strike).unwrap().0;
-        let v_ssvi = ssvi.vol(strike).unwrap().0;
+        let v_essvi = essvi.vol(Strike(strike)).unwrap().0;
+        let v_ssvi = ssvi.vol(Strike(strike)).unwrap().0;
         assert_eq!(
             v_essvi.to_bits(),
             v_ssvi.to_bits(),
@@ -381,8 +381,8 @@ fn ssvi_degeneracy_surface() {
 
     for &t in &tenors {
         for &k in &[70.0, 85.0, 100.0, 115.0, 140.0] {
-            let v_essvi = essvi.black_vol(t, k).unwrap().0;
-            let v_ssvi = ssvi.black_vol(t, k).unwrap().0;
+            let v_essvi = essvi.black_vol(Tenor(t), Strike(k)).unwrap().0;
+            let v_ssvi = ssvi.black_vol(Tenor(t), Strike(k)).unwrap().0;
             assert_eq!(
                 v_essvi.to_bits(),
                 v_ssvi.to_bits(),
@@ -406,7 +406,7 @@ fn paper_surface_total_variance_monotone_in_theta() {
         let mut prev_var = 0.0;
 
         for (i, &t) in tenors.iter().enumerate() {
-            let var = s.black_variance(t, strike).unwrap().0;
+            let var = s.black_variance(Tenor(t), Strike(strike)).unwrap().0;
             assert!(
                 var >= prev_var - 1e-12,
                 "calendar arb at strike={strike:.2}, tenor[{i}]={t}: var={var:.8} < prev={prev_var:.8}"
@@ -429,7 +429,7 @@ fn paper_surface_atm_variance_matches_thetas() {
         .zip(forwards.iter())
         .enumerate()
     {
-        let var = s.black_variance(t, fwd).unwrap().0;
+        let var = s.black_variance(Tenor(t), Strike(fwd)).unwrap().0;
         assert!(
             (var - theta).abs() < 1e-12,
             "ATM variance mismatch at tenor[{i}]={t}: var={var}, theta={theta}"
@@ -451,7 +451,7 @@ fn calibrate_round_trip_paper_params() {
         .zip(strikes.iter())
         .map(|(&t, ks)| {
             ks.iter()
-                .map(|&k| (k, original.black_vol(t, k).unwrap().0))
+                .map(|&k| (k, original.black_vol(Tenor(t), Strike(k)).unwrap().0))
                 .collect()
         })
         .collect();
@@ -462,7 +462,7 @@ fn calibrate_round_trip_paper_params() {
     let mut n = 0;
     for (i, &t) in tenors.iter().enumerate() {
         for &(strike, vol_obs) in &market_data[i] {
-            let vol_fit = calibrated.black_vol(t, strike).unwrap().0;
+            let vol_fit = calibrated.black_vol(Tenor(t), Strike(strike)).unwrap().0;
             total_rss += (vol_fit - vol_obs).powi(2);
             n += 1;
         }
@@ -488,7 +488,7 @@ fn calibrate_paper_structural_check() {
         .zip(strikes.iter())
         .map(|(&t, ks)| {
             ks.iter()
-                .map(|&k| (k, original.black_vol(t, k).unwrap().0))
+                .map(|&k| (k, original.black_vol(Tenor(t), Strike(k)).unwrap().0))
                 .collect()
         })
         .collect();
