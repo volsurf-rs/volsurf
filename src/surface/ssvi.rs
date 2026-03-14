@@ -509,10 +509,17 @@ impl SsviSurface {
         let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
         let one_minus_rho_sq = 1.0 - rho_global * rho_global;
 
-        // Prepare observation triples: (theta, log_moneyness, total_variance)
+        // Prepare observation triples from filtered data so Stage 2 optimizes
+        // against the same points that Stage 1 SVI was calibrated on.
         let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
         for (i, market_vols) in market_data.iter().enumerate() {
-            for &(strike, vol) in market_vols {
+            let filtered = crate::calibration::apply_filter(market_vols, forwards[i], filter);
+            let data = if filtered.len() >= 5 {
+                &filtered
+            } else {
+                market_vols
+            };
+            for &(strike, vol) in data.iter() {
                 let k = (strike / forwards[i]).ln();
                 let w_obs = vol * vol * tenors[i];
                 all_points.push((thetas[i], k, w_obs));

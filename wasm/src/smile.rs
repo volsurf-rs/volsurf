@@ -62,6 +62,12 @@ pub struct WasmDataFilter {
     inner: DataFilter,
 }
 
+impl WasmDataFilter {
+    pub(crate) fn inner(&self) -> DataFilter {
+        self.inner
+    }
+}
+
 #[wasm_bindgen]
 impl WasmDataFilter {
     #[wasm_bindgen(constructor)]
@@ -98,6 +104,12 @@ impl WasmDataFilter {
 #[wasm_bindgen]
 pub struct WasmWeightingScheme {
     inner: WeightingScheme,
+}
+
+impl WasmWeightingScheme {
+    pub(crate) fn inner(&self) -> WeightingScheme {
+        self.inner
+    }
 }
 
 #[wasm_bindgen]
