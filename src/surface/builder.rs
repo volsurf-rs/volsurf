@@ -21,6 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::{DataFilter, WeightingScheme};
 use crate::conventions;
 use crate::error::VolSurfError;
 use crate::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
@@ -121,6 +122,8 @@ pub struct SurfaceBuilder {
     rate: Option<f64>,
     dividend_yield: Option<f64>,
     model: SmileModel,
+    data_filter: Option<DataFilter>,
+    weighting: Option<WeightingScheme>,
     tenor_data: Vec<TenorData>,
 }
 
@@ -140,6 +143,8 @@ impl SurfaceBuilder {
             rate: None,
             dividend_yield: None,
             model: SmileModel::default(),
+            data_filter: None,
+            weighting: None,
             tenor_data: Vec::new(),
         }
     }
@@ -149,6 +154,18 @@ impl SurfaceBuilder {
     /// Default is [`SmileModel::Svi`].
     pub fn model(mut self, model: SmileModel) -> Self {
         self.model = model;
+        self
+    }
+
+    /// Set pre-calibration strike/vol filtering applied to each tenor.
+    pub fn data_filter(mut self, filter: DataFilter) -> Self {
+        self.data_filter = Some(filter);
+        self
+    }
+
+    /// Set the weighting scheme for calibration objective functions.
+    pub fn weighting(mut self, weighting: WeightingScheme) -> Self {
+        self.weighting = Some(weighting);
         self
     }
 
@@ -260,6 +277,8 @@ impl SurfaceBuilder {
         }
 
         let model = self.model;
+        let filter = self.data_filter.unwrap_or_default();
+        let weighting = self.weighting.unwrap_or_default();
         let calibrate_tenor =
             |tenor: &TenorData| -> crate::error::Result<(f64, Box<dyn SmileSection>)> {
                 if tenor.expiry <= 0.0 || !tenor.expiry.is_finite() {
@@ -306,15 +325,33 @@ impl SurfaceBuilder {
                             .zip(tenor.vols.iter())
                             .map(|(&k, &v)| (k, v))
                             .collect();
-                        let svi = SviSmile::calibrate(forward, tenor.expiry, &market_vols)?;
+                        let svi = SviSmile::calibrate_with_config(
+                            forward,
+                            tenor.expiry,
+                            &market_vols,
+                            &filter,
+                            &weighting,
+                            None,
+                        )?;
                         Box::new(svi)
                     }
                     SmileModel::CubicSpline => {
-                        let mut pairs: Vec<(f64, f64)> = tenor
+                        let market_vols: Vec<(f64, f64)> = tenor
                             .strikes
                             .iter()
                             .zip(tenor.vols.iter())
-                            .map(|(&k, &v)| (k, v * v * tenor.expiry))
+                            .map(|(&k, &v)| (k, v))
+                            .collect();
+                        let filtered =
+                            crate::calibration::apply_filter(&market_vols, forward, &filter);
+                        let data = if filtered.len() >= 3 {
+                            &filtered
+                        } else {
+                            &market_vols
+                        };
+                        let mut pairs: Vec<(f64, f64)> = data
+                            .iter()
+                            .map(|&(k, v)| (k, v * v * tenor.expiry))
                             .collect();
                         pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
                         let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
@@ -328,7 +365,15 @@ impl SurfaceBuilder {
                             .zip(tenor.vols.iter())
                             .map(|(&k, &v)| (k, v))
                             .collect();
-                        let sabr = SabrSmile::calibrate(forward, tenor.expiry, beta, &market_vols)?;
+                        let sabr = SabrSmile::calibrate_with_config(
+                            forward,
+                            tenor.expiry,
+                            beta,
+                            &market_vols,
+                            &filter,
+                            &weighting,
+                            None,
+                        )?;
                         Box::new(sabr)
                     }
                 };
