@@ -434,7 +434,7 @@ impl EssviSurface {
             }
         }
 
-        let theta_max = *thetas.last().unwrap();
+        let theta_max = thetas[thetas.len() - 1];
 
         let rho_diff = rho_m - rho_0;
         if rho_diff.abs() > 1e-14 {
@@ -663,7 +663,7 @@ impl EssviSurface {
             }
         }
 
-        let theta_max = *thetas.last().unwrap();
+        let theta_max = thetas[thetas.len() - 1];
         let xs: Vec<f64> = thetas.iter().map(|&t| t / theta_max).collect();
         let ln_xs: Vec<f64> = xs.iter().map(|&x| x.ln()).collect();
 
@@ -910,6 +910,19 @@ impl EssviSurface {
         forwards: &[f64],
     ) -> error::Result<Self> {
         let fits = Self::fit_per_tenor(market_data, tenors, forwards)?;
+        Self::from_per_tenor(&fits)
+    }
+
+    /// Calibrate eSSVI surface with configurable per-tenor filtering and weighting.
+    pub fn calibrate_with_config(
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+    ) -> error::Result<Self> {
+        let fits =
+            Self::fit_per_tenor_with_config(market_data, tenors, forwards, filter, weighting)?;
         Self::from_per_tenor(&fits)
     }
 

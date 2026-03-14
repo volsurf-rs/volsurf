@@ -30,6 +30,7 @@ use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::{DataFilter, WeightingScheme};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
@@ -402,13 +403,29 @@ impl SsviSurface {
         tenors: &[f64],
         forwards: &[f64],
     ) -> error::Result<Self> {
+        Self::calibrate_with_config(
+            market_data,
+            tenors,
+            forwards,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+        )
+    }
+
+    /// Calibrate SSVI surface with configurable per-tenor filtering and weighting.
+    pub fn calibrate_with_config(
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+    ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
         tracing::debug!(n_tenors = tenors.len(), "SSVI calibration started");
 
         const MIN_TENORS: usize = 2;
         const GRID_N: usize = 15;
 
-        // Input validation
         if tenors.len() < MIN_TENORS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -448,15 +465,22 @@ impl SsviSurface {
         let mut rho_sum = 0.0;
 
         for (i, market_vols) in market_data.iter().enumerate() {
-            let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
-                .map_err(|e| VolSurfError::CalibrationError {
-                    message: format!(
-                        "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
-                        tenors[i]
-                    ),
-                    model: "SSVI",
-                    rms_error: None,
-                })?;
+            let svi = crate::smile::SviSmile::calibrate_with_config(
+                forwards[i],
+                tenors[i],
+                market_vols,
+                filter,
+                weighting,
+                None,
+            )
+            .map_err(|e| VolSurfError::CalibrationError {
+                message: format!(
+                    "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
+                    tenors[i]
+                ),
+                model: "SSVI",
+                rms_error: None,
+            })?;
             // Extract ATM total variance (theta) from calibrated SVI
             let theta = svi.variance(Strike(forwards[i]))?.0;
             thetas.push(theta);
