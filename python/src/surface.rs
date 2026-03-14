@@ -312,6 +312,26 @@ impl PyEssviSurface {
     }
 
     #[staticmethod]
+    #[pyo3(signature = (market_data, tenors, forwards, filter=None, weighting=None))]
+    fn fit_per_tenor_with_config(
+        market_data: Vec<Vec<(f64, f64)>>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+        filter: Option<&crate::types::PyDataFilter>,
+        weighting: Option<&crate::types::PyWeightingScheme>,
+    ) -> PyResult<Vec<PyPerTenorFit>> {
+        let f = filter.map_or_else(Default::default, |f| f.inner);
+        let w = weighting.map_or_else(Default::default, |w| w.inner);
+        let fits =
+            EssviSurface::fit_per_tenor_with_config(&market_data, &tenors, &forwards, &f, &w)
+                .map_err(to_py_err)?;
+        Ok(fits
+            .into_iter()
+            .map(|f| PyPerTenorFit { inner: f })
+            .collect())
+    }
+
+    #[staticmethod]
     #[pyo3(signature = (fits))]
     fn from_per_tenor(fits: Vec<PyRef<'_, PyPerTenorFit>>) -> PyResult<Self> {
         let inner_fits: Vec<PerTenorFit> = fits.iter().map(|f| f.inner.clone()).collect();

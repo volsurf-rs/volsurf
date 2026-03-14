@@ -43,9 +43,10 @@ pub enum WeightingScheme {
 
 /// Filter `(strike, vol)` pairs by log-moneyness and minimum vol.
 ///
-/// Silently excludes points with non-finite log-moneyness (NaN/Inf strike
-/// or forward). Does not apply the vol-cliff heuristic — that is handled
-/// by model-specific calibration code based on [`DataFilter::vol_cliff_filter`].
+/// Unconditionally excludes points with non-finite vol (NaN/Inf) or
+/// non-finite log-moneyness (NaN/Inf strike or forward). Does not apply
+/// the vol-cliff heuristic — that is handled by model-specific calibration
+/// code based on [`DataFilter::vol_cliff_filter`].
 pub fn apply_filter(
     market_vols: &[(f64, f64)],
     forward: f64,
@@ -55,6 +56,9 @@ pub fn apply_filter(
         .iter()
         .copied()
         .filter(|&(strike, vol)| {
+            if !vol.is_finite() {
+                return false;
+            }
             let lm = (strike / forward).ln();
             if !lm.is_finite() {
                 return false;
@@ -65,10 +69,7 @@ pub fn apply_filter(
             {
                 return false;
             }
-            if filter
-                .min_vol
-                .is_some_and(|min_v| vol < min_v || vol.is_nan())
-            {
+            if filter.min_vol.is_some_and(|min_v| vol < min_v) {
                 return false;
             }
             true
@@ -163,7 +164,21 @@ mod tests {
     }
 
     #[test]
-    fn nan_vol_excluded_by_min_vol() {
+    fn nan_vol_excluded_unconditionally() {
+        let data = vec![(100.0, f64::NAN), (100.0, 0.20)];
+        let result = apply_filter(&data, 100.0, &DataFilter::default());
+        assert_eq!(result, vec![(100.0, 0.20)]);
+    }
+
+    #[test]
+    fn inf_vol_excluded_unconditionally() {
+        let data = vec![(100.0, f64::INFINITY), (100.0, 0.20)];
+        let result = apply_filter(&data, 100.0, &DataFilter::default());
+        assert_eq!(result, vec![(100.0, 0.20)]);
+    }
+
+    #[test]
+    fn nan_vol_excluded_with_min_vol() {
         let data = vec![(100.0, f64::NAN), (100.0, 0.20)];
         let filter = DataFilter {
             min_vol: Some(0.01),

@@ -258,7 +258,9 @@ impl SviSmile {
             .collect();
         let w_vals: Vec<f64> = market_vols.iter().map(|&(_, v)| v * v * expiry).collect();
 
-        // Resolve weighting: ModelDefault for SVI → Vega
+        // Resolve weighting: ModelDefault for SVI → Vega.
+        // Uses sqrt(n(d₁)) because weights premultiply rows in the linear LS system
+        // (standard weighted LS requires √w on each row, not w).
         let use_vega = matches!(
             weighting,
             WeightingScheme::ModelDefault | WeightingScheme::Vega
