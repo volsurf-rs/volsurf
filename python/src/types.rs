@@ -4,6 +4,7 @@ use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
+use volsurf::calibration::{DataFilter, WeightingScheme};
 use volsurf::smile::{ArbitrageReport, ButterflyViolation};
 use volsurf::surface::{CalendarViolation, SmileModel, SurfaceDiagnostics};
 use volsurf::{OptionType, SmileSection, Strike, Tenor, VolSurface};
@@ -67,6 +68,92 @@ impl PySmileModel {
         Ok(Self {
             inner: SmileModel::Sabr { beta },
         })
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.inner)
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+#[pyclass(frozen, from_py_object, name = "DataFilter")]
+#[derive(Clone)]
+pub struct PyDataFilter {
+    pub(crate) inner: DataFilter,
+}
+
+#[pymethods]
+impl PyDataFilter {
+    #[new]
+    #[pyo3(signature = (max_log_moneyness=None, min_vol=None, vol_cliff_filter=None))]
+    fn new(
+        max_log_moneyness: Option<f64>,
+        min_vol: Option<f64>,
+        vol_cliff_filter: Option<bool>,
+    ) -> Self {
+        Self {
+            inner: DataFilter {
+                max_log_moneyness,
+                min_vol,
+                vol_cliff_filter,
+            },
+        }
+    }
+
+    #[getter]
+    fn max_log_moneyness(&self) -> Option<f64> {
+        self.inner.max_log_moneyness
+    }
+
+    #[getter]
+    fn min_vol(&self) -> Option<f64> {
+        self.inner.min_vol
+    }
+
+    #[getter]
+    fn vol_cliff_filter(&self) -> Option<bool> {
+        self.inner.vol_cliff_filter
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.inner)
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+#[pyclass(frozen, from_py_object, name = "WeightingScheme")]
+#[derive(Clone)]
+pub struct PyWeightingScheme {
+    pub(crate) inner: WeightingScheme,
+}
+
+#[pymethods]
+impl PyWeightingScheme {
+    #[classmethod]
+    fn model_default(_cls: &Bound<'_, PyType>) -> Self {
+        Self {
+            inner: WeightingScheme::ModelDefault,
+        }
+    }
+
+    #[classmethod]
+    fn vega(_cls: &Bound<'_, PyType>) -> Self {
+        Self {
+            inner: WeightingScheme::Vega,
+        }
+    }
+
+    #[classmethod]
+    fn uniform(_cls: &Bound<'_, PyType>) -> Self {
+        Self {
+            inner: WeightingScheme::Uniform,
+        }
     }
 
     fn __repr__(&self) -> String {

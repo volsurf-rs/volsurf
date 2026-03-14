@@ -346,6 +346,18 @@ impl PySurfaceBuilder {
         Ok(())
     }
 
+    fn data_filter(&mut self, filter: &crate::types::PyDataFilter) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.data_filter(filter.inner));
+        Ok(())
+    }
+
+    fn weighting(&mut self, weighting: &crate::types::PyWeightingScheme) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.weighting(weighting.inner));
+        Ok(())
+    }
+
     fn spot(&mut self, spot: f64) -> PyResult<()> {
         let b = self.inner.take().ok_or_else(consumed)?;
         self.inner = Some(b.spot(spot));
