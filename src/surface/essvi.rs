@@ -59,7 +59,10 @@ pub struct PerTenorFit {
     pub theta: f64,
     /// RMS implied-vol fitting error (vol space, not total variance).
     pub rms_error: f64,
-    /// Original (strike, implied_vol) market observations.
+    /// Market observations used for calibration and RMS evaluation.
+    /// When [`fit_per_tenor_with_config`](EssviSurface::fit_per_tenor_with_config)
+    /// applies a [`DataFilter`](crate::calibration::DataFilter), this contains
+    /// the filtered subset (not the raw input).
     pub market_data: Vec<(f64, f64)>,
 }
 

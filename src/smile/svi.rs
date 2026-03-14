@@ -261,10 +261,10 @@ impl SviSmile {
         // Resolve weighting: ModelDefault for SVI → Vega.
         // Uses sqrt(n(d₁)) because weights premultiply rows in the linear LS system
         // (standard weighted LS requires √w on each row, not w).
-        let use_vega = matches!(
-            weighting,
-            WeightingScheme::ModelDefault | WeightingScheme::Vega
-        );
+        let use_vega = match weighting {
+            WeightingScheme::ModelDefault | WeightingScheme::Vega => true,
+            WeightingScheme::Uniform => false,
+        };
         let sqrt_t = expiry.sqrt();
         let sqrt_vega: Vec<f64> = if use_vega {
             market_vols

@@ -167,8 +167,8 @@ impl WasmSviSmile {
         seed: Option<WasmSviSmile>,
     ) -> Result<WasmSviSmile, JsValue> {
         let pairs = pairs_from_flat(&market_vols_flat)?;
-        let f = filter.map_or_else(DataFilter::default, |f| f.inner);
-        let w = weighting.map_or_else(WeightingScheme::default, |w| w.inner);
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
         let inner = SviSmile::calibrate_with_config(
             forward,
             expiry,
@@ -235,8 +235,8 @@ impl WasmSabrSmile {
         seed: Option<WasmSabrSmile>,
     ) -> Result<WasmSabrSmile, JsValue> {
         let pairs = pairs_from_flat(&market_vols_flat)?;
-        let f = filter.map_or_else(DataFilter::default, |f| f.inner);
-        let w = weighting.map_or_else(WeightingScheme::default, |w| w.inner);
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
         let inner = SabrSmile::calibrate_with_config(
             forward,
             expiry,

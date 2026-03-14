@@ -367,7 +367,10 @@ impl SabrSmile {
         // Resolve weighting: ModelDefault for SABR → Uniform.
         // Uses n(d₁) directly (not sqrt) because weight multiplies diff² in the
         // nonlinear RSS loop, unlike SVI where sqrt(w) premultiplies the linear system.
-        let use_vega = matches!(weighting, WeightingScheme::Vega);
+        let use_vega = match weighting {
+            WeightingScheme::Vega => true,
+            WeightingScheme::Uniform | WeightingScheme::ModelDefault => false,
+        };
         let weights: Vec<f64> = if use_vega {
             let sqrt_t = expiry.sqrt();
             market_vols

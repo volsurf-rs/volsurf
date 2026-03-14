@@ -681,3 +681,117 @@ fn model_sabr_accepts_boundary_values() {
     let mut b1 = WasmSurfaceBuilder::new();
     assert!(b1.model_sabr(1.0).is_ok());
 }
+
+// ── Calibration Config ──
+
+#[wasm_bindgen_test]
+fn data_filter_construction_and_getters() {
+    let f = WasmDataFilter::new(Some(0.5), Some(0.01), Some(false));
+    assert_eq!(f.max_log_moneyness(), Some(0.5));
+    assert_eq!(f.min_vol(), Some(0.01));
+    assert_eq!(f.vol_cliff_filter(), Some(false));
+}
+
+#[wasm_bindgen_test]
+fn data_filter_none_fields() {
+    let f = WasmDataFilter::new(None, None, None);
+    assert_eq!(f.max_log_moneyness(), None);
+    assert_eq!(f.min_vol(), None);
+    assert_eq!(f.vol_cliff_filter(), None);
+}
+
+#[wasm_bindgen_test]
+fn weighting_factory_functions() {
+    let _md = weighting_model_default();
+    let _v = weighting_vega();
+    let _u = weighting_uniform();
+}
+
+fn svi_market_data() -> Vec<f64> {
+    let smile = WasmSviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+    let mut flat = Vec::new();
+    for k in (80..=120).step_by(2) {
+        flat.push(k as f64);
+        flat.push(smile.vol(k as f64).unwrap());
+    }
+    flat
+}
+
+#[wasm_bindgen_test]
+fn svi_calibrate_with_config_defaults() {
+    let data = svi_market_data();
+    let result = WasmSviSmile::calibrate_with_config(100.0, 0.25, data, None, None, None);
+    assert!(result.is_ok());
+}
+
+#[wasm_bindgen_test]
+fn svi_calibrate_with_config_filter() {
+    let data = svi_market_data();
+    let filter = WasmDataFilter::new(Some(0.25), None, None);
+    let result = WasmSviSmile::calibrate_with_config(100.0, 0.25, data, Some(filter), None, None);
+    assert!(result.is_ok());
+}
+
+#[wasm_bindgen_test]
+fn svi_calibrate_with_config_weighting() {
+    let data = svi_market_data();
+    let result = WasmSviSmile::calibrate_with_config(
+        100.0,
+        0.25,
+        data,
+        None,
+        Some(weighting_uniform()),
+        None,
+    );
+    assert!(result.is_ok());
+}
+
+#[wasm_bindgen_test]
+fn svi_calibrate_with_config_seed() {
+    let data = svi_market_data();
+    let seed = WasmSviSmile::calibrate(100.0, 0.25, data.clone()).unwrap();
+    let result = WasmSviSmile::calibrate_with_config(100.0, 0.25, data, None, None, Some(seed));
+    assert!(result.is_ok());
+}
+
+#[wasm_bindgen_test]
+fn sabr_calibrate_with_config_defaults() {
+    let smile = WasmSabrSmile::new(100.0, 0.5, 0.3, 0.5, -0.3, 0.4).unwrap();
+    let mut flat = Vec::new();
+    for &k in &[90.0, 95.0, 100.0, 105.0, 110.0] {
+        flat.push(k);
+        flat.push(smile.vol(k).unwrap());
+    }
+    let result = WasmSabrSmile::calibrate_with_config(100.0, 0.5, 0.5, flat, None, None, None);
+    assert!(result.is_ok());
+}
+
+#[wasm_bindgen_test]
+fn builder_with_data_filter() {
+    let data = svi_market_data();
+    let strikes: Vec<f64> = data.chunks(2).map(|c| c[0]).collect();
+    let vols: Vec<f64> = data.chunks(2).map(|c| c[1]).collect();
+
+    let mut builder = WasmSurfaceBuilder::new();
+    builder.spot(100.0).unwrap();
+    builder.rate(0.05).unwrap();
+    builder.data_filter(Some(0.5), None, None).unwrap();
+    builder.add_tenor(0.25, strikes, vols).unwrap();
+    let surface = builder.build().unwrap();
+    assert!(surface.black_vol(0.25, 100.0).unwrap() > 0.0);
+}
+
+#[wasm_bindgen_test]
+fn builder_with_weighting() {
+    let data = svi_market_data();
+    let strikes: Vec<f64> = data.chunks(2).map(|c| c[0]).collect();
+    let vols: Vec<f64> = data.chunks(2).map(|c| c[1]).collect();
+
+    let mut builder = WasmSurfaceBuilder::new();
+    builder.spot(100.0).unwrap();
+    builder.rate(0.05).unwrap();
+    builder.weighting_uniform().unwrap();
+    builder.add_tenor(0.25, strikes, vols).unwrap();
+    let surface = builder.build().unwrap();
+    assert!(surface.black_vol(0.25, 100.0).unwrap() > 0.0);
+}

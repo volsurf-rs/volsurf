@@ -10,7 +10,10 @@ pub use arbitrage::{
     WasmArbitrageReport, WasmButterflyViolation, WasmCalendarViolation, WasmSurfaceDiagnostics,
 };
 pub use builder::{WasmPiecewiseSurface, WasmSurfaceBuilder};
-pub use smile::{WasmSabrSmile, WasmSmile, WasmSviSmile};
+pub use smile::{
+    WasmDataFilter, WasmSabrSmile, WasmSmile, WasmSviSmile, WasmWeightingScheme,
+    weighting_model_default, weighting_uniform, weighting_vega,
+};
 pub use surface::{WasmEssviSurface, WasmPerTenorFit, WasmSsviSurface};
 
 #[wasm_bindgen]

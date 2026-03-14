@@ -113,8 +113,8 @@ impl PySviSmile {
         weighting: Option<&crate::types::PyWeightingScheme>,
         seed: Option<&PySviSmile>,
     ) -> PyResult<Self> {
-        let f = filter.map_or_else(Default::default, |f| f.inner);
-        let w = weighting.map_or_else(Default::default, |w| w.inner);
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
         let inner = SviSmile::calibrate_with_config(
             forward,
             expiry,
@@ -167,8 +167,8 @@ impl PySabrSmile {
         weighting: Option<&crate::types::PyWeightingScheme>,
         seed: Option<&PySabrSmile>,
     ) -> PyResult<Self> {
-        let f = filter.map_or_else(Default::default, |f| f.inner);
-        let w = weighting.map_or_else(Default::default, |w| w.inner);
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
         let inner = SabrSmile::calibrate_with_config(
             forward,
             expiry,
