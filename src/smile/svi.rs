@@ -19,6 +19,7 @@ use std::f64::consts::PI;
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
@@ -170,10 +171,8 @@ impl SviSmile {
     /// the remaining parameters (a, b·ρ, b) enter linearly and are solved
     /// via least-squares. A grid search + Nelder-Mead optimizes (m, σ).
     ///
-    /// # Arguments
-    /// * `forward` — Forward price (must be > 0)
-    /// * `expiry` — Time to expiry in years (must be > 0)
-    /// * `market_vols` — Slice of (strike, implied_vol) pairs (min 5)
+    /// Equivalent to [`calibrate_with_config`](Self::calibrate_with_config)
+    /// with default filter, default weighting, and no seed.
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for insufficient data,
@@ -182,6 +181,43 @@ impl SviSmile {
     /// # References
     /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
     pub fn calibrate(forward: f64, expiry: f64, market_vols: &[(f64, f64)]) -> error::Result<Self> {
+        Self::calibrate_with_config(
+            forward,
+            expiry,
+            market_vols,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+    }
+
+    /// Calibrate SVI parameters with configurable filtering, weighting, and
+    /// optional warm-start seed.
+    ///
+    /// # Arguments
+    /// * `forward` — Forward price (must be > 0)
+    /// * `expiry` — Time to expiry in years (must be > 0)
+    /// * `market_vols` — Slice of (strike, implied_vol) pairs (min 5 after filtering)
+    /// * `filter` — Pre-calibration strike/vol filtering
+    /// * `weighting` — Objective function weighting scheme
+    /// * `seed` — Optional previous calibration for warm-starting (skips grid search)
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] for insufficient data,
+    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    ///
+    /// # References
+    /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
+    /// - Sepp (2014): warm-starting from previous calibration
+    #[expect(clippy::needless_borrows_for_generic_args)]
+    pub fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        market_vols: &[(f64, f64)],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+        seed: Option<&SviSmile>,
+    ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
         tracing::debug!(
             forward,
@@ -190,12 +226,9 @@ impl SviSmile {
             "SVI calibration started"
         );
 
-        /// Minimum market quotes for SVI calibration (5 free params).
         const MIN_POINTS: usize = 5;
-        /// Grid search resolution for (m, sigma) initialization.
         const GRID_N: usize = 21;
 
-        // Input validation
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
         if market_vols.len() < MIN_POINTS {
@@ -211,31 +244,43 @@ impl SviSmile {
             validate_positive(vol, "implied vol")?;
         }
 
-        // Convert to log-moneyness / total-variance
+        // Apply DataFilter after validation (on known-good inputs)
+        let filtered = apply_filter(market_vols, forward, filter);
+        let market_vols = if filtered.len() >= MIN_POINTS {
+            &filtered[..]
+        } else {
+            market_vols
+        };
+
         let k_vals: Vec<f64> = market_vols
             .iter()
             .map(|&(s, _)| (s / forward).ln())
             .collect();
         let w_vals: Vec<f64> = market_vols.iter().map(|&(_, v)| v * v * expiry).collect();
 
-        // Vega weights: n(d₁) for each point. ATM options have highest vega and
-        // naturally dominate the weighted fit, preventing degenerate basin drift.
-        // F·√T cancels across strikes so we use just the normal PDF value.
+        // Resolve weighting: ModelDefault for SVI → Vega
+        let use_vega = matches!(
+            weighting,
+            WeightingScheme::ModelDefault | WeightingScheme::Vega
+        );
         let sqrt_t = expiry.sqrt();
-        let sqrt_vega: Vec<f64> = market_vols
-            .iter()
-            .map(|&(strike, vol)| {
-                let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * sqrt_t);
-                ((-0.5 * d1 * d1).exp() / (2.0 * PI).sqrt())
-                    .sqrt()
-                    .max(1e-8)
-            })
-            .collect();
+        let sqrt_vega: Vec<f64> = if use_vega {
+            market_vols
+                .iter()
+                .map(|&(strike, vol)| {
+                    let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * sqrt_t);
+                    ((-0.5 * d1 * d1).exp() / (2.0 * PI).sqrt())
+                        .sqrt()
+                        .max(1e-8)
+                })
+                .collect()
+        } else {
+            vec![1.0; market_vols.len()]
+        };
 
-        // Pre-filter: remove vol-cliff artifacts (cabinet-level OTM quotes).
-        // Sort by log-moneyness, scan for >50% vol drops between consecutive points,
-        // keep the side with more points. Fallback to full data if too few survive.
-        let (k_vals, w_vals, sqrt_vega) = {
+        // Vol-cliff pre-filter (SVI default: on)
+        let vol_cliff_enabled = filter.vol_cliff_filter.unwrap_or(true);
+        let (k_vals, w_vals, sqrt_vega) = if vol_cliff_enabled {
             let vols: Vec<f64> = market_vols.iter().map(|&(_, v)| v).collect();
             let mut order: Vec<usize> = (0..k_vals.len()).collect();
             order.sort_by(|&a, &b| k_vals[a].total_cmp(&k_vals[b]));
@@ -257,7 +302,6 @@ impl SviSmile {
                 }
             }
 
-            // Both rise and drop means frown/W-shape — don't filter
             if let Some(ci) = cliff_idx.filter(|_| !has_rise || !has_drop) {
                 let left_count = ci + 1;
                 let right_count = order.len() - left_count;
@@ -277,15 +321,14 @@ impl SviSmile {
             } else {
                 (k_vals, w_vals, sqrt_vega)
             }
+        } else {
+            (k_vals, w_vals, sqrt_vega)
         };
 
         let k_min = k_vals.iter().cloned().fold(f64::INFINITY, f64::min);
         let k_max = k_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let k_range = (k_max - k_min).max(0.1);
 
-        // Interpolate ATM total variance from nearest-ATM input points.
-        // Only meaningful when data brackets k=0 (both sides of ATM present).
-        // One-sided data after vol-cliff filtering produces unreliable ATM estimates.
         let w_atm = {
             let mut best_below = (f64::NEG_INFINITY, 0.0_f64);
             let mut best_above = (f64::INFINITY, 0.0_f64);
@@ -308,9 +351,6 @@ impl SviSmile {
             }
         };
 
-        // Inner linear solve: for fixed (m, sigma), solve for (a, b*rho, b)
-        // using vega-weighted least squares. Premultiplying rows by √ν_i converts
-        // to standard LS on the transformed system (Zeliade QR structure preserved).
         let inner_solve = |m: f64, sigma: f64| -> Option<(f64, f64, f64, f64)> {
             let n = k_vals.len();
             let a_mat = DMatrix::<f64>::from_fn(n, 3, |i, j| {
@@ -334,10 +374,6 @@ impl SviSmile {
             Some((x[0], x[1], x[2], rss))
         };
 
-        // Bound m to a sensible range around the data. Without this, Nelder-Mead
-        // can drift m far from the data range, producing degenerate fits where
-        // all points lie on one asymptote (b → ∞, ρ → ±1, m far away).
-        // Allow m to range 1.5× the data span beyond each edge.
         let m_bound_lo = k_min - 1.5 * k_range;
         let m_bound_hi = k_max + 1.5 * k_range;
 
@@ -369,100 +405,102 @@ impl SviSmile {
             }
         };
 
-        // Multi-start grid search: 8 starts with different (m, σ) ranges to escape
-        // local minima in the 2D objective landscape (see Zeliade 2009, §3.2).
-        // At least 3 starts are k_range-independent to avoid correlated basin drift.
-        let mut k_sorted = k_vals.clone();
-        k_sorted.sort_by(|a, b| a.total_cmp(b));
-        let k_median = k_sorted[k_sorted.len() / 2];
-        let sigma_atm = w_atm
-            .map(|w| w.max(0.0).sqrt().clamp(0.01, 2.0))
-            .unwrap_or(0.2);
-        let starts: [(f64, f64, f64, f64); 8] = [
-            // Start 0: original wide range (k_range-dependent)
-            (
-                k_min - 0.5 * k_range,
-                k_max + 0.5 * k_range,
-                0.01,
-                k_range.max(0.5),
-            ),
-            // Start 1: same m, tighter σ
-            (
-                k_min - 0.5 * k_range,
-                k_max + 0.5 * k_range,
-                0.005,
-                (k_range / 2.0).max(0.2),
-            ),
-            // Start 2: ATM-centered, wide σ (fixed range)
-            (-0.2, 0.2, 0.01, 1.0),
-            // Start 3: ATM-variance-centered — σ anchored to observed ATM level
-            (
-                -0.15,
-                0.15,
-                (sigma_atm * 0.3).max(0.005),
-                (sigma_atm * 3.0).max(0.3),
-            ),
-            // Start 4: wide m (±2× data range), moderate σ
-            (
-                k_min - k_range,
-                k_max + k_range,
-                0.02,
-                (k_range * 0.7).max(0.3),
-            ),
-            // Start 5: median-k centered m, tight σ for short tenors
-            (k_median - 0.1, k_median + 0.1, 0.003, 0.15),
-            // Start 6: fixed near-ATM, very tight σ (short-dated equity)
-            (-0.05, 0.05, 0.002, 0.08),
-            // Start 7: fixed wide m, large σ (long-dated / high-vol regimes)
-            (-0.5, 0.5, 0.05, 2.0),
-        ];
-
         let nm_config = crate::optim::NelderMeadConfig::calibration();
 
         let mut best_m = 0.0;
         let mut best_sigma = 0.1;
         let mut best_rss = f64::MAX;
 
-        for &(m_lo, m_hi, sigma_lo, sigma_hi) in &starts {
-            let mut start_m = 0.0;
-            let mut start_sigma = 0.1;
-            let mut start_rss = f64::MAX;
+        if let Some(s) = seed {
+            // Warm-start: skip grid search, single NM from seed params
+            let step_m = 0.01 * k_range.max(0.1);
+            let step_s = (0.01 * s.sigma).max(0.001);
+            let nm =
+                crate::optim::nelder_mead_2d(&objective, s.m, s.sigma, step_m, step_s, &nm_config);
+            best_rss = nm.fval;
+            best_m = nm.x;
+            best_sigma = nm.y;
+        } else {
+            // Cold start: 8-start grid search + NM
+            let mut k_sorted = k_vals.clone();
+            k_sorted.sort_by(|a, b| a.total_cmp(b));
+            let k_median = k_sorted[k_sorted.len() / 2];
+            let sigma_atm = w_atm
+                .map(|w| w.max(0.0).sqrt().clamp(0.01, 2.0))
+                .unwrap_or(0.2);
+            let starts: [(f64, f64, f64, f64); 8] = [
+                (
+                    k_min - 0.5 * k_range,
+                    k_max + 0.5 * k_range,
+                    0.01,
+                    k_range.max(0.5),
+                ),
+                (
+                    k_min - 0.5 * k_range,
+                    k_max + 0.5 * k_range,
+                    0.005,
+                    (k_range / 2.0).max(0.2),
+                ),
+                (-0.2, 0.2, 0.01, 1.0),
+                (
+                    -0.15,
+                    0.15,
+                    (sigma_atm * 0.3).max(0.005),
+                    (sigma_atm * 3.0).max(0.3),
+                ),
+                (
+                    k_min - k_range,
+                    k_max + k_range,
+                    0.02,
+                    (k_range * 0.7).max(0.3),
+                ),
+                (k_median - 0.1, k_median + 0.1, 0.003, 0.15),
+                (-0.05, 0.05, 0.002, 0.08),
+                (-0.5, 0.5, 0.05, 2.0),
+            ];
 
-            for im in 0..GRID_N {
-                let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
-                for is in 0..GRID_N {
-                    let t = is as f64 / (GRID_N - 1) as f64;
-                    let sigma = sigma_lo * (sigma_hi / sigma_lo).powf(t);
-                    let rss = objective(m, sigma);
-                    if rss < start_rss {
-                        start_rss = rss;
-                        start_m = m;
-                        start_sigma = sigma;
+            for &(m_lo, m_hi, sigma_lo, sigma_hi) in &starts {
+                let mut start_m = 0.0;
+                let mut start_sigma = 0.1;
+                let mut start_rss = f64::MAX;
+
+                for im in 0..GRID_N {
+                    let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
+                    for is in 0..GRID_N {
+                        let t = is as f64 / (GRID_N - 1) as f64;
+                        let sigma = sigma_lo * (sigma_hi / sigma_lo).powf(t);
+                        let rss = objective(m, sigma);
+                        if rss < start_rss {
+                            start_rss = rss;
+                            start_m = m;
+                            start_sigma = sigma;
+                        }
                     }
                 }
-            }
 
-            if start_rss >= f64::MAX {
-                continue;
-            }
+                if start_rss >= f64::MAX {
+                    continue;
+                }
 
-            let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
-            let step_s =
-                (start_sigma * (sigma_hi / sigma_lo).ln() / ((GRID_N - 1) as f64) * 0.5).max(0.001);
+                let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
+                let step_s = (start_sigma * (sigma_hi / sigma_lo).ln() / ((GRID_N - 1) as f64)
+                    * 0.5)
+                    .max(0.001);
 
-            let nm = crate::optim::nelder_mead_2d(
-                objective,
-                start_m,
-                start_sigma,
-                step_m,
-                step_s,
-                &nm_config,
-            );
+                let nm = crate::optim::nelder_mead_2d(
+                    &objective,
+                    start_m,
+                    start_sigma,
+                    step_m,
+                    step_s,
+                    &nm_config,
+                );
 
-            if nm.fval < best_rss {
-                best_rss = nm.fval;
-                best_m = nm.x;
-                best_sigma = nm.y;
+                if nm.fval < best_rss {
+                    best_rss = nm.fval;
+                    best_m = nm.x;
+                    best_sigma = nm.y;
+                }
             }
         }
 
@@ -474,7 +512,6 @@ impl SviSmile {
             });
         }
 
-        // Recover final parameters
         let (opt_m, opt_sigma) = (best_m, best_sigma);
 
         let (a, b_rho, b, _rss) =
@@ -491,7 +528,6 @@ impl SviSmile {
             (b_rho / b).clamp(-0.999, 0.999)
         };
 
-        // One-sided data has no reliable ATM reference — skip sanity check
         if w_atm.is_some() {
             let dk_atm = -opt_m;
             let w_atm_fitted =
@@ -1853,6 +1889,133 @@ mod tests {
             calibrated.b,
             calibrated.rho,
             lee
+        );
+    }
+
+    #[test]
+    fn calibrate_with_config_defaults_matches_calibrate() {
+        let strikes: Vec<f64> = (80..=120).map(|k| k as f64).collect();
+        let svi = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| svi.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        let a = SviSmile::calibrate(100.0, 0.25, &market).unwrap();
+        let b = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn calibrate_with_seed_converges() {
+        let strikes: Vec<f64> = (80..=120).map(|k| k as f64).collect();
+        let svi = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| svi.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        let result = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            Some(&svi),
+        );
+        assert!(
+            result.is_ok(),
+            "warm-start from exact params should converge"
+        );
+        let fitted = result.unwrap();
+        let atm_diff =
+            (fitted.vol(Strike(100.0)).unwrap().0 - svi.vol(Strike(100.0)).unwrap().0).abs();
+        assert!(atm_diff < 0.001, "ATM vol should match, diff={atm_diff}");
+    }
+
+    #[test]
+    fn calibrate_with_filter_reduces_input() {
+        let mut market: Vec<(f64, f64)> = (80..=120)
+            .map(|k| {
+                let svi = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+                (k as f64, svi.vol(Strike(k as f64)).unwrap().0)
+            })
+            .collect();
+        // Add far-wing garbage
+        market.push((30.0, 0.80));
+        market.push((300.0, 0.60));
+
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.25),
+            ..Default::default()
+        };
+        let result = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &filter,
+            &WeightingScheme::default(),
+            None,
+        );
+        assert!(result.is_ok(), "should succeed after filtering far wings");
+    }
+
+    #[test]
+    fn calibrate_with_uniform_weighting() {
+        let strikes: Vec<f64> = (80..=120).map(|k| k as f64).collect();
+        let svi = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| svi.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        let result = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::Uniform,
+            None,
+        );
+        assert!(result.is_ok(), "uniform weighting should produce valid fit");
+    }
+
+    #[test]
+    fn calibrate_vol_cliff_filter_toggle() {
+        let strikes: Vec<f64> = (80..=120).map(|k| k as f64).collect();
+        let svi = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| svi.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        let filter = DataFilter {
+            vol_cliff_filter: Some(false),
+            ..Default::default()
+        };
+        let result = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &filter,
+            &WeightingScheme::default(),
+            None,
+        );
+        assert!(
+            result.is_ok(),
+            "disabling vol-cliff should still work on clean data"
         );
     }
 }
