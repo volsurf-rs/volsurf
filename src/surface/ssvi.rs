@@ -30,6 +30,7 @@ use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::{DataFilter, WeightingScheme};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
@@ -402,13 +403,29 @@ impl SsviSurface {
         tenors: &[f64],
         forwards: &[f64],
     ) -> error::Result<Self> {
+        Self::calibrate_with_config(
+            market_data,
+            tenors,
+            forwards,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+        )
+    }
+
+    /// Calibrate SSVI surface with configurable per-tenor filtering and weighting.
+    pub fn calibrate_with_config(
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+    ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
         tracing::debug!(n_tenors = tenors.len(), "SSVI calibration started");
 
         const MIN_TENORS: usize = 2;
         const GRID_N: usize = 15;
 
-        // Input validation
         if tenors.len() < MIN_TENORS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -448,15 +465,22 @@ impl SsviSurface {
         let mut rho_sum = 0.0;
 
         for (i, market_vols) in market_data.iter().enumerate() {
-            let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
-                .map_err(|e| VolSurfError::CalibrationError {
-                    message: format!(
-                        "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
-                        tenors[i]
-                    ),
-                    model: "SSVI",
-                    rms_error: None,
-                })?;
+            let svi = crate::smile::SviSmile::calibrate_with_config(
+                forwards[i],
+                tenors[i],
+                market_vols,
+                filter,
+                weighting,
+                None,
+            )
+            .map_err(|e| VolSurfError::CalibrationError {
+                message: format!(
+                    "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
+                    tenors[i]
+                ),
+                model: "SSVI",
+                rms_error: None,
+            })?;
             // Extract ATM total variance (theta) from calibrated SVI
             let theta = svi.variance(Strike(forwards[i]))?.0;
             thetas.push(theta);
@@ -485,10 +509,17 @@ impl SsviSurface {
         let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
         let one_minus_rho_sq = 1.0 - rho_global * rho_global;
 
-        // Prepare observation triples: (theta, log_moneyness, total_variance)
+        // Prepare observation triples from filtered data so Stage 2 optimizes
+        // against the same points that Stage 1 SVI was calibrated on.
         let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
         for (i, market_vols) in market_data.iter().enumerate() {
-            for &(strike, vol) in market_vols {
+            let filtered = crate::calibration::apply_filter(market_vols, forwards[i], filter);
+            let data = if filtered.len() >= 5 {
+                &filtered
+            } else {
+                market_vols
+            };
+            for &(strike, vol) in data.iter() {
                 let k = (strike / forwards[i]).ln();
                 let w_obs = vol * vol * tenors[i];
                 all_points.push((thetas[i], k, w_obs));

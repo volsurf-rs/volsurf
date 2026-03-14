@@ -29,6 +29,7 @@
 //!   `Serialize` / `Deserialize` with validation on deserialization where
 //!   invariants exist (SVI, SABR, SSVI, eSSVI parameters).
 
+pub mod calibration;
 pub mod conventions;
 pub mod error;
 pub mod implied;
@@ -39,6 +40,8 @@ pub mod surface;
 pub mod types;
 mod validate;
 
+#[doc(inline)]
+pub use calibration::{DataFilter, WeightingScheme, apply_filter};
 #[doc(inline)]
 pub use error::{Result, VolSurfError};
 #[doc(inline)]

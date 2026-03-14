@@ -1,4 +1,5 @@
 use volsurf::Strike;
+use volsurf::calibration::{DataFilter, WeightingScheme};
 use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
 use wasm_bindgen::prelude::*;
 
@@ -57,6 +58,82 @@ fn pairs_from_flat(flat: &[f64]) -> Result<Vec<(f64, f64)>, JsValue> {
 }
 
 #[wasm_bindgen]
+pub struct WasmDataFilter {
+    inner: DataFilter,
+}
+
+impl WasmDataFilter {
+    pub(crate) fn inner(&self) -> DataFilter {
+        self.inner
+    }
+}
+
+#[wasm_bindgen]
+impl WasmDataFilter {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        max_log_moneyness: Option<f64>,
+        min_vol: Option<f64>,
+        vol_cliff_filter: Option<bool>,
+    ) -> WasmDataFilter {
+        Self {
+            inner: DataFilter {
+                max_log_moneyness,
+                min_vol,
+                vol_cliff_filter,
+            },
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn max_log_moneyness(&self) -> Option<f64> {
+        self.inner.max_log_moneyness
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn min_vol(&self) -> Option<f64> {
+        self.inner.min_vol
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn vol_cliff_filter(&self) -> Option<bool> {
+        self.inner.vol_cliff_filter
+    }
+}
+
+#[wasm_bindgen]
+pub struct WasmWeightingScheme {
+    inner: WeightingScheme,
+}
+
+impl WasmWeightingScheme {
+    pub(crate) fn inner(&self) -> WeightingScheme {
+        self.inner
+    }
+}
+
+#[wasm_bindgen]
+pub fn weighting_model_default() -> WasmWeightingScheme {
+    WasmWeightingScheme {
+        inner: WeightingScheme::ModelDefault,
+    }
+}
+
+#[wasm_bindgen]
+pub fn weighting_vega() -> WasmWeightingScheme {
+    WasmWeightingScheme {
+        inner: WeightingScheme::Vega,
+    }
+}
+
+#[wasm_bindgen]
+pub fn weighting_uniform() -> WasmWeightingScheme {
+    WasmWeightingScheme {
+        inner: WeightingScheme::Uniform,
+    }
+}
+
+#[wasm_bindgen]
 pub struct WasmSviSmile {
     inner: SviSmile,
 }
@@ -90,6 +167,29 @@ impl WasmSviSmile {
     ) -> Result<WasmSviSmile, JsValue> {
         let pairs = pairs_from_flat(&market_vols_flat)?;
         let inner = SviSmile::calibrate(forward, expiry, &pairs).map_err(to_js_err)?;
+        Ok(Self { inner })
+    }
+
+    pub fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        market_vols_flat: Vec<f64>,
+        filter: Option<WasmDataFilter>,
+        weighting: Option<WasmWeightingScheme>,
+        seed: Option<WasmSviSmile>,
+    ) -> Result<WasmSviSmile, JsValue> {
+        let pairs = pairs_from_flat(&market_vols_flat)?;
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
+        let inner = SviSmile::calibrate_with_config(
+            forward,
+            expiry,
+            &pairs,
+            &f,
+            &w,
+            seed.as_ref().map(|s| &s.inner),
+        )
+        .map_err(to_js_err)?;
         Ok(Self { inner })
     }
 
@@ -134,6 +234,31 @@ impl WasmSabrSmile {
     ) -> Result<WasmSabrSmile, JsValue> {
         let pairs = pairs_from_flat(&market_vols_flat)?;
         let inner = SabrSmile::calibrate(forward, expiry, beta, &pairs).map_err(to_js_err)?;
+        Ok(Self { inner })
+    }
+
+    pub fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        beta: f64,
+        market_vols_flat: Vec<f64>,
+        filter: Option<WasmDataFilter>,
+        weighting: Option<WasmWeightingScheme>,
+        seed: Option<WasmSabrSmile>,
+    ) -> Result<WasmSabrSmile, JsValue> {
+        let pairs = pairs_from_flat(&market_vols_flat)?;
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
+        let inner = SabrSmile::calibrate_with_config(
+            forward,
+            expiry,
+            beta,
+            &pairs,
+            &f,
+            &w,
+            seed.as_ref().map(|s| &s.inner),
+        )
+        .map_err(to_js_err)?;
         Ok(Self { inner })
     }
 

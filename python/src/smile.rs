@@ -102,6 +102,30 @@ impl PySviSmile {
         let inner = SviSmile::calibrate(forward, expiry, &market_vols).map_err(to_py_err)?;
         Ok(Self { inner })
     }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, market_vols, filter=None, weighting=None, seed=None))]
+    fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        market_vols: Vec<(f64, f64)>,
+        filter: Option<&crate::types::PyDataFilter>,
+        weighting: Option<&crate::types::PyWeightingScheme>,
+        seed: Option<&PySviSmile>,
+    ) -> PyResult<Self> {
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
+        let inner = SviSmile::calibrate_with_config(
+            forward,
+            expiry,
+            &market_vols,
+            &f,
+            &w,
+            seed.map(|s| &s.inner),
+        )
+        .map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
 }
 
 impl_smile_methods!(PySviSmile);
@@ -129,6 +153,32 @@ impl PySabrSmile {
         market_vols: Vec<(f64, f64)>,
     ) -> PyResult<Self> {
         let inner = SabrSmile::calibrate(forward, expiry, beta, &market_vols).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, beta, market_vols, filter=None, weighting=None, seed=None))]
+    fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        beta: f64,
+        market_vols: Vec<(f64, f64)>,
+        filter: Option<&crate::types::PyDataFilter>,
+        weighting: Option<&crate::types::PyWeightingScheme>,
+        seed: Option<&PySabrSmile>,
+    ) -> PyResult<Self> {
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
+        let inner = SabrSmile::calibrate_with_config(
+            forward,
+            expiry,
+            beta,
+            &market_vols,
+            &f,
+            &w,
+            seed.map(|s| &s.inner),
+        )
+        .map_err(to_py_err)?;
         Ok(Self { inner })
     }
 }

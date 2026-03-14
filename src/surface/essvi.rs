@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::ArbitrageReport;
@@ -58,7 +59,10 @@ pub struct PerTenorFit {
     pub theta: f64,
     /// RMS implied-vol fitting error (vol space, not total variance).
     pub rms_error: f64,
-    /// Original (strike, implied_vol) market observations.
+    /// Market observations used for calibration and RMS evaluation.
+    /// When [`EssviSurface::fit_per_tenor_with_config`]
+    /// applies a [`DataFilter`], this contains the filtered subset
+    /// (not the raw input).
     pub market_data: Vec<(f64, f64)>,
 }
 
@@ -430,7 +434,7 @@ impl EssviSurface {
             }
         }
 
-        let theta_max = *thetas.last().unwrap();
+        let theta_max = thetas[thetas.len() - 1];
 
         let rho_diff = rho_m - rho_0;
         if rho_diff.abs() > 1e-14 {
@@ -480,6 +484,27 @@ impl EssviSurface {
         tenors: &[f64],
         forwards: &[f64],
     ) -> error::Result<Vec<PerTenorFit>> {
+        Self::fit_per_tenor_with_config(
+            market_data,
+            tenors,
+            forwards,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+        )
+    }
+
+    /// Per-tenor SVI calibration with configurable filtering and weighting.
+    ///
+    /// Same as [`fit_per_tenor`](Self::fit_per_tenor) but accepts a
+    /// [`DataFilter`] and [`WeightingScheme`] that flow through to
+    /// [`SviSmile::calibrate_with_config`](crate::smile::SviSmile::calibrate_with_config).
+    pub fn fit_per_tenor_with_config(
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+    ) -> error::Result<Vec<PerTenorFit>> {
         if tenors.len() != forwards.len() || tenors.len() != market_data.len() {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -507,23 +532,37 @@ impl EssviSurface {
 
         let mut fits = Vec::with_capacity(tenors.len());
         for (i, market_vols) in market_data.iter().enumerate() {
-            let svi = crate::smile::SviSmile::calibrate(forwards[i], tenors[i], market_vols)
-                .map_err(|e| VolSurfError::CalibrationError {
-                    message: format!(
-                        "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
-                        tenors[i]
-                    ),
-                    model: "eSSVI",
-                    rms_error: None,
-                })?;
+            let svi = crate::smile::SviSmile::calibrate_with_config(
+                forwards[i],
+                tenors[i],
+                market_vols,
+                filter,
+                weighting,
+                None,
+            )
+            .map_err(|e| VolSurfError::CalibrationError {
+                message: format!(
+                    "per-tenor SVI calibration failed for tenor[{i}]={}: {e}",
+                    tenors[i]
+                ),
+                model: "eSSVI",
+                rms_error: None,
+            })?;
             let theta = svi.variance(Strike(forwards[i]))?.0;
 
+            // RMS on filtered data for consistency with calibration
+            let filtered = apply_filter(market_vols, forwards[i], filter);
+            let eval_data = if filtered.len() >= 5 {
+                &filtered
+            } else {
+                market_vols
+            };
             let mut sum_sq = 0.0;
-            for &(strike, market_vol) in market_vols {
+            for &(strike, market_vol) in eval_data.iter() {
                 let fitted_vol = svi.vol(Strike(strike))?.0;
                 sum_sq += (fitted_vol - market_vol).powi(2);
             }
-            let rms_error = (sum_sq / market_vols.len() as f64).sqrt();
+            let rms_error = (sum_sq / eval_data.len() as f64).sqrt();
 
             fits.push(PerTenorFit {
                 tenor: tenors[i],
@@ -531,7 +570,7 @@ impl EssviSurface {
                 svi,
                 theta,
                 rms_error,
-                market_data: market_vols.clone(),
+                market_data: eval_data.to_vec(),
             });
         }
 
@@ -624,7 +663,7 @@ impl EssviSurface {
             }
         }
 
-        let theta_max = *thetas.last().unwrap();
+        let theta_max = thetas[thetas.len() - 1];
         let xs: Vec<f64> = thetas.iter().map(|&t| t / theta_max).collect();
         let ln_xs: Vec<f64> = xs.iter().map(|&x| x.ln()).collect();
 
@@ -871,6 +910,19 @@ impl EssviSurface {
         forwards: &[f64],
     ) -> error::Result<Self> {
         let fits = Self::fit_per_tenor(market_data, tenors, forwards)?;
+        Self::from_per_tenor(&fits)
+    }
+
+    /// Calibrate eSSVI surface with configurable per-tenor filtering and weighting.
+    pub fn calibrate_with_config(
+        market_data: &[Vec<(f64, f64)>],
+        tenors: &[f64],
+        forwards: &[f64],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+    ) -> error::Result<Self> {
+        let fits =
+            Self::fit_per_tenor_with_config(market_data, tenors, forwards, filter, weighting)?;
         Self::from_per_tenor(&fits)
     }
 

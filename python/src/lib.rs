@@ -17,6 +17,8 @@ fn volsurf(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySmile>()?;
     m.add_class::<PySurface>()?;
     m.add_class::<PySmileModel>()?;
+    m.add_class::<PyDataFilter>()?;
+    m.add_class::<PyWeightingScheme>()?;
     m.add_class::<PyOptionType>()?;
     m.add_class::<PyArbitrageReport>()?;
     m.add_class::<PyButterflyViolation>()?;

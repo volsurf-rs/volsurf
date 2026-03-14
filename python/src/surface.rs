@@ -139,6 +139,22 @@ impl PySsviSurface {
         let inner = SsviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_py_err)?;
         Ok(Self { inner })
     }
+
+    #[staticmethod]
+    #[pyo3(signature = (market_data, tenors, forwards, filter=None, weighting=None))]
+    fn calibrate_with_config(
+        market_data: Vec<Vec<(f64, f64)>>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+        filter: Option<&crate::types::PyDataFilter>,
+        weighting: Option<&crate::types::PyWeightingScheme>,
+    ) -> PyResult<Self> {
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
+        let inner = SsviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
+            .map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
 }
 
 impl_vol_grid!(PySsviSurface);
@@ -297,6 +313,22 @@ impl PyEssviSurface {
     }
 
     #[staticmethod]
+    #[pyo3(signature = (market_data, tenors, forwards, filter=None, weighting=None))]
+    fn calibrate_with_config(
+        market_data: Vec<Vec<(f64, f64)>>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+        filter: Option<&crate::types::PyDataFilter>,
+        weighting: Option<&crate::types::PyWeightingScheme>,
+    ) -> PyResult<Self> {
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
+        let inner = EssviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
+            .map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
     #[pyo3(signature = (market_data, tenors, forwards))]
     fn fit_per_tenor(
         market_data: Vec<Vec<(f64, f64)>>,
@@ -305,6 +337,26 @@ impl PyEssviSurface {
     ) -> PyResult<Vec<PyPerTenorFit>> {
         let fits =
             EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).map_err(to_py_err)?;
+        Ok(fits
+            .into_iter()
+            .map(|f| PyPerTenorFit { inner: f })
+            .collect())
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (market_data, tenors, forwards, filter=None, weighting=None))]
+    fn fit_per_tenor_with_config(
+        market_data: Vec<Vec<(f64, f64)>>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+        filter: Option<&crate::types::PyDataFilter>,
+        weighting: Option<&crate::types::PyWeightingScheme>,
+    ) -> PyResult<Vec<PyPerTenorFit>> {
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let w = weighting.map(|w| w.inner).unwrap_or_default();
+        let fits =
+            EssviSurface::fit_per_tenor_with_config(&market_data, &tenors, &forwards, &f, &w)
+                .map_err(to_py_err)?;
         Ok(fits
             .into_iter()
             .map(|f| PyPerTenorFit { inner: f })
@@ -343,6 +395,18 @@ impl PySurfaceBuilder {
     fn model(&mut self, model: &PySmileModel) -> PyResult<()> {
         let b = self.inner.take().ok_or_else(consumed)?;
         self.inner = Some(b.model(model.inner));
+        Ok(())
+    }
+
+    fn data_filter(&mut self, filter: &crate::types::PyDataFilter) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.data_filter(filter.inner));
+        Ok(())
+    }
+
+    fn weighting(&mut self, weighting: &crate::types::PyWeightingScheme) -> PyResult<()> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.weighting(weighting.inner));
         Ok(())
     }
 

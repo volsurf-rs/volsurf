@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use volsurf::VolSurface;
+use volsurf::calibration::{DataFilter, WeightingScheme};
 use volsurf::surface::{SmileModel, SurfaceBuilder};
 use volsurf::{Strike, Tenor};
 use wasm_bindgen::prelude::*;
@@ -53,6 +54,33 @@ impl WasmSurfaceBuilder {
         }
         let b = self.inner.take().ok_or_else(consumed)?;
         self.inner = Some(b.model(SmileModel::Sabr { beta }));
+        Ok(())
+    }
+
+    pub fn data_filter(
+        &mut self,
+        max_log_moneyness: Option<f64>,
+        min_vol: Option<f64>,
+        vol_cliff_filter: Option<bool>,
+    ) -> Result<(), JsValue> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.data_filter(DataFilter {
+            max_log_moneyness,
+            min_vol,
+            vol_cliff_filter,
+        }));
+        Ok(())
+    }
+
+    pub fn weighting_vega(&mut self) -> Result<(), JsValue> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.weighting(WeightingScheme::Vega));
+        Ok(())
+    }
+
+    pub fn weighting_uniform(&mut self) -> Result<(), JsValue> {
+        let b = self.inner.take().ok_or_else(consumed)?;
+        self.inner = Some(b.weighting(WeightingScheme::Uniform));
         Ok(())
     }
 

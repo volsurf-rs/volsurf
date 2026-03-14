@@ -5,7 +5,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
-use crate::smile::{WasmSmile, WasmSviSmile};
+use crate::smile::{WasmDataFilter, WasmSmile, WasmSviSmile, WasmWeightingScheme};
 
 fn market_data_from_flat(
     flat: &[f64],
@@ -128,6 +128,22 @@ impl WasmSsviSurface {
         let inner = SsviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
         Ok(Self { inner })
     }
+
+    pub fn calibrate_with_config(
+        market_data_flat: Vec<f64>,
+        tenor_sizes: Vec<usize>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+        filter: Option<WasmDataFilter>,
+        weighting: Option<WasmWeightingScheme>,
+    ) -> Result<WasmSsviSurface, JsValue> {
+        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
+        let f = filter.map(|f| f.inner()).unwrap_or_default();
+        let w = weighting.map(|w| w.inner()).unwrap_or_default();
+        let inner = SsviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
+            .map_err(to_js_err)?;
+        Ok(Self { inner })
+    }
 }
 
 #[wasm_bindgen]
@@ -243,6 +259,22 @@ impl WasmEssviSurface {
     ) -> Result<WasmEssviSurface, JsValue> {
         let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
         let inner = EssviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
+        Ok(Self { inner })
+    }
+
+    pub fn calibrate_with_config(
+        market_data_flat: Vec<f64>,
+        tenor_sizes: Vec<usize>,
+        tenors: Vec<f64>,
+        forwards: Vec<f64>,
+        filter: Option<WasmDataFilter>,
+        weighting: Option<WasmWeightingScheme>,
+    ) -> Result<WasmEssviSurface, JsValue> {
+        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
+        let f = filter.map(|f| f.inner()).unwrap_or_default();
+        let w = weighting.map(|w| w.inner()).unwrap_or_default();
+        let inner = EssviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
+            .map_err(to_js_err)?;
         Ok(Self { inner })
     }
 
