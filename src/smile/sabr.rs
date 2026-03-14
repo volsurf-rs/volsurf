@@ -16,6 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
 use crate::error::{self, VolSurfError};
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
@@ -276,11 +277,51 @@ impl SabrSmile {
     /// assert!((vol.0 - 0.20).abs() < 0.01);
     /// # Ok::<(), volsurf::VolSurfError>(())
     /// ```
+    /// Calibrate SABR parameters from market (strike, vol) observations.
+    ///
+    /// Equivalent to [`calibrate_with_config`](Self::calibrate_with_config)
+    /// with default filter, default weighting, and no seed.
     pub fn calibrate(
         forward: f64,
         expiry: f64,
         beta: f64,
         market_vols: &[(f64, f64)],
+    ) -> error::Result<Self> {
+        Self::calibrate_with_config(
+            forward,
+            expiry,
+            beta,
+            market_vols,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+    }
+
+    /// Calibrate SABR parameters with configurable filtering, weighting, and
+    /// optional warm-start seed.
+    ///
+    /// # Arguments
+    /// * `forward` — Forward price (must be > 0)
+    /// * `expiry` — Time to expiry in years (must be > 0)
+    /// * `beta` — CEV exponent in \[0, 1\]
+    /// * `market_vols` — Slice of (strike, implied_vol) pairs (min 4 after filtering)
+    /// * `filter` — Pre-calibration strike/vol filtering
+    /// * `weighting` — Objective function weighting scheme
+    /// * `seed` — Optional previous calibration for warm-starting (skips grid search)
+    ///
+    /// # References
+    /// - Hagan, P. et al., "Managing Smile Risk", Wilmott Magazine, Jan 2002
+    /// - Sepp (2014): warm-starting from previous calibration
+    #[expect(clippy::needless_borrows_for_generic_args)]
+    pub fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        beta: f64,
+        market_vols: &[(f64, f64)],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+        seed: Option<&SabrSmile>,
     ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
         tracing::debug!(
@@ -295,7 +336,6 @@ impl SabrSmile {
         const GRID_N: usize = 15;
         const ALPHA_MAX_ITER: usize = 50;
 
-        // Input validation
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
         if !(0.0..=1.0).contains(&beta) || !beta.is_finite() {
@@ -316,22 +356,32 @@ impl SabrSmile {
             validate_positive(vol, "implied vol")?;
         }
 
-        // Interpolate ATM vol from market data
+        // Apply DataFilter after validation
+        let filtered = apply_filter(market_vols, forward, filter);
+        let market_vols = if filtered.len() >= MIN_POINTS {
+            &filtered[..]
+        } else {
+            market_vols
+        };
+
+        // Resolve weighting: ModelDefault for SABR → Uniform
+        let use_vega = matches!(weighting, WeightingScheme::Vega);
+        let weights: Vec<f64> = if use_vega {
+            let sqrt_t = expiry.sqrt();
+            market_vols
+                .iter()
+                .map(|&(strike, vol)| {
+                    let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * sqrt_t);
+                    ((-0.5 * d1 * d1).exp() / (2.0 * std::f64::consts::PI).sqrt()).max(1e-8)
+                })
+                .collect()
+        } else {
+            vec![1.0; market_vols.len()]
+        };
+
         let sigma_atm = interpolate_atm_vol(forward, market_vols);
         let f_beta = forward.powf(1.0 - beta);
 
-        // Alpha solver: Newton iteration on the ATM cubic
-        //
-        // ATM Hagan formula (K = F):
-        //   σ_ATM = (α / F^(1-β)) * [1 + T·(A·α² + B·α + C)]
-        //
-        // where:
-        //   A = (1-β)² / (24 · F^(2(1-β)))
-        //   B = ρ·β·ν / (4 · F^(1-β))
-        //   C = (2 - 3ρ²) / 24 · ν²
-        //
-        // Rearranged as f(α) = 0:
-        //   f(α) = T·A·α³ + T·B·α² + (1 + T·C)·α − σ_ATM·F^(1-β) = 0
         let solve_alpha = |rho: f64, nu: f64| -> Option<f64> {
             let omb = 1.0 - beta;
             let a_coeff = omb * omb / (24.0 * f_beta * f_beta);
@@ -340,9 +390,7 @@ impl SabrSmile {
             let target = sigma_atm * f_beta;
             let t = expiry;
 
-            // f(α) = t·A·α³ + t·B·α² + (1 + t·C)·α − target
-            // f'(α) = 3·t·A·α² + 2·t·B·α + (1 + t·C)
-            let mut alpha = target; // initial guess: zeroth-order approximation
+            let mut alpha = target;
             for _ in 0..ALPHA_MAX_ITER {
                 let a2 = alpha * alpha;
                 let f_val =
@@ -369,8 +417,6 @@ impl SabrSmile {
             }
         };
 
-        // Objective function in transformed space
-        // x → rho = tanh(x), y → nu = exp(y)
         let objective = |x: f64, y: f64| -> f64 {
             let rho = x.tanh();
             let nu = y.exp();
@@ -381,63 +427,78 @@ impl SabrSmile {
                 Some(a) => a,
                 None => return f64::MAX,
             };
-            // Build a temporary SABR smile and compute RSS
             let smile = match Self::new(forward, expiry, alpha, beta, rho, nu) {
                 Ok(s) => s,
                 Err(_) => return f64::MAX,
             };
             let mut rss = 0.0;
-            for &(strike, market_vol) in market_vols {
+            for (i, &(strike, market_vol)) in market_vols.iter().enumerate() {
                 let model_vol = smile.hagan_implied_vol(strike);
                 if !model_vol.is_finite() || model_vol <= 0.0 {
                     return f64::MAX;
                 }
                 let diff = model_vol - market_vol;
-                rss += diff * diff;
+                rss += diff * diff * weights[i];
             }
             rss
         };
 
-        // Grid search over transformed (x, y) space
-        let x_lo = -1.5_f64; // tanh(-1.5) ≈ -0.905
-        let x_hi = 1.5_f64; // tanh(1.5) ≈ 0.905
-        let y_lo = (-2.0_f64).max((0.01_f64).ln()); // nu ≥ 0.01
-        let y_hi = (2.0_f64).ln(); // nu ≤ ~7.4
+        let nm_config = crate::optim::NelderMeadConfig::calibration();
 
-        let mut best_x = 0.0;
-        let mut best_y = 0.0;
-        let mut best_rss = f64::MAX;
+        let nm_result = if let Some(s) = seed {
+            // Warm-start: skip grid, single NM from seed
+            let x0 = s.rho.clamp(-0.999, 0.999).atanh();
+            let y0 = if s.nu > 0.0 {
+                s.nu.ln()
+            } else {
+                (0.01_f64).ln()
+            };
+            crate::optim::nelder_mead_2d(&objective, x0, y0, 0.1, 0.1, &nm_config)
+        } else {
+            // Cold start: grid search + NM
+            let x_lo = -1.5_f64;
+            let x_hi = 1.5_f64;
+            let y_lo = (-2.0_f64).max((0.01_f64).ln());
+            let y_hi = (2.0_f64).ln();
 
-        for ix in 0..GRID_N {
-            let x = x_lo + (x_hi - x_lo) * (ix as f64) / ((GRID_N - 1) as f64);
-            for iy in 0..GRID_N {
-                let y = y_lo + (y_hi - y_lo) * (iy as f64) / ((GRID_N - 1) as f64);
-                let rss = objective(x, y);
-                if rss < best_rss {
-                    best_rss = rss;
-                    best_x = x;
-                    best_y = y;
+            let mut best_x = 0.0;
+            let mut best_y = 0.0;
+            let mut best_rss = f64::MAX;
+
+            for ix in 0..GRID_N {
+                let x = x_lo + (x_hi - x_lo) * (ix as f64) / ((GRID_N - 1) as f64);
+                for iy in 0..GRID_N {
+                    let y = y_lo + (y_hi - y_lo) * (iy as f64) / ((GRID_N - 1) as f64);
+                    let rss = objective(x, y);
+                    if rss < best_rss {
+                        best_rss = rss;
+                        best_x = x;
+                        best_y = y;
+                    }
                 }
             }
-        }
 
-        if best_rss >= f64::MAX {
+            if best_rss >= f64::MAX {
+                return Err(VolSurfError::CalibrationError {
+                    message: "grid search found no valid starting point".into(),
+                    model: "SABR",
+                    rms_error: None,
+                });
+            }
+
+            let step_x = (x_hi - x_lo) / (GRID_N as f64) * 0.5;
+            let step_y = (y_hi - y_lo) / (GRID_N as f64) * 0.5;
+            crate::optim::nelder_mead_2d(&objective, best_x, best_y, step_x, step_y, &nm_config)
+        };
+
+        if nm_result.fval >= f64::MAX {
             return Err(VolSurfError::CalibrationError {
-                message: "grid search found no valid starting point".into(),
+                message: "optimization found no valid point".into(),
                 model: "SABR",
                 rms_error: None,
             });
         }
 
-        // Nelder-Mead 2D refinement
-        let step_x = (x_hi - x_lo) / (GRID_N as f64) * 0.5;
-        let step_y = (y_hi - y_lo) / (GRID_N as f64) * 0.5;
-
-        let nm_config = crate::optim::NelderMeadConfig::calibration();
-        let nm_result =
-            crate::optim::nelder_mead_2d(objective, best_x, best_y, step_x, step_y, &nm_config);
-
-        // Recover final parameters
         let rho = nm_result.x.tanh();
         let nu = nm_result.y.exp();
         let alpha = solve_alpha(rho, nu).ok_or_else(|| VolSurfError::CalibrationError {
@@ -2272,5 +2333,105 @@ mod tests {
             (actual - expected_corrected).abs() < 1e-14,
             "CEV ATM: expected {expected_corrected:.15e}, got {actual:.15e}"
         );
+    }
+
+    #[test]
+    fn calibrate_with_config_defaults_matches_calibrate() {
+        let strikes = vec![90.0, 95.0, 100.0, 105.0, 110.0];
+        let smile = SabrSmile::new(100.0, 0.5, 0.3, 0.5, -0.3, 0.4).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| smile.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        let a = SabrSmile::calibrate(100.0, 0.5, 0.5, &market).unwrap();
+        let b = SabrSmile::calibrate_with_config(
+            100.0,
+            0.5,
+            0.5,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(a.alpha(), b.alpha());
+        assert_eq!(a.rho(), b.rho());
+        assert_eq!(a.nu(), b.nu());
+    }
+
+    #[test]
+    fn calibrate_with_seed_converges() {
+        let strikes = vec![90.0, 95.0, 100.0, 105.0, 110.0];
+        let smile = SabrSmile::new(100.0, 0.5, 0.3, 0.5, -0.3, 0.4).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| smile.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        let result = SabrSmile::calibrate_with_config(
+            100.0,
+            0.5,
+            0.5,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            Some(&smile),
+        );
+        assert!(
+            result.is_ok(),
+            "warm-start from exact params should converge"
+        );
+    }
+
+    #[test]
+    fn calibrate_with_filter() {
+        let strikes = [90.0, 95.0, 100.0, 105.0, 110.0];
+        let smile = SabrSmile::new(100.0, 0.5, 0.3, 0.5, -0.3, 0.4).unwrap();
+        let mut market: Vec<(f64, f64)> = strikes
+            .iter()
+            .map(|&k| (k, smile.vol(Strike(k)).unwrap().0))
+            .collect();
+        market.push((30.0, 0.80));
+        market.push((300.0, 0.60));
+
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.25),
+            ..Default::default()
+        };
+        let result = SabrSmile::calibrate_with_config(
+            100.0,
+            0.5,
+            0.5,
+            &market,
+            &filter,
+            &WeightingScheme::default(),
+            None,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn calibrate_with_vega_weighting() {
+        let strikes = vec![90.0, 95.0, 100.0, 105.0, 110.0];
+        let smile = SabrSmile::new(100.0, 0.5, 0.3, 0.5, -0.3, 0.4).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| smile.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        let result = SabrSmile::calibrate_with_config(
+            100.0,
+            0.5,
+            0.5,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::Vega,
+            None,
+        );
+        assert!(result.is_ok(), "vega weighting should produce valid fit");
     }
 }
