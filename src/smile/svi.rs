@@ -414,7 +414,6 @@ impl SviSmile {
         let mut best_rss = f64::MAX;
 
         if let Some(s) = seed {
-            // Warm-start: skip grid search, single NM from seed params
             let step_m = 0.01 * k_range.max(0.1);
             let step_s = (0.01 * s.sigma).max(0.001);
             let nm =
@@ -422,8 +421,9 @@ impl SviSmile {
             best_rss = nm.fval;
             best_m = nm.x;
             best_sigma = nm.y;
-        } else {
-            // Cold start: 8-start grid search + NM
+        }
+
+        if best_rss >= f64::MAX {
             let mut k_sorted = k_vals.clone();
             k_sorted.sort_by(|a, b| a.total_cmp(b));
             let k_median = k_sorted[k_sorted.len() / 2];
@@ -2018,6 +2018,67 @@ mod tests {
         assert!(
             result.is_ok(),
             "disabling vol-cliff should still work on clean data"
+        );
+    }
+
+    #[test]
+    fn calibrate_bad_seed_falls_back_to_grid_search() {
+        let strikes: Vec<f64> = (80..=120).map(|k| k as f64).collect();
+        let svi = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+        let vols: Vec<f64> = strikes
+            .iter()
+            .map(|&k| svi.vol(Strike(k)).unwrap().0)
+            .collect();
+        let market: Vec<(f64, f64)> = strikes.into_iter().zip(vols).collect();
+
+        // m=50, sigma=50 is far outside the valid (m,sigma) region for this data
+        let bad_seed = SviSmile::new(100.0, 1.0, 0.04, 0.4, -0.4, 50.0, 50.0).unwrap();
+
+        let result = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            Some(&bad_seed),
+        );
+        assert!(
+            result.is_ok(),
+            "bad seed should fall back to grid search: {result:?}"
+        );
+        let fitted = result.unwrap();
+        let atm_diff =
+            (fitted.vol(Strike(100.0)).unwrap().0 - svi.vol(Strike(100.0)).unwrap().0).abs();
+        assert!(
+            atm_diff < 0.01,
+            "fallback should still fit well, diff={atm_diff}"
+        );
+    }
+
+    #[test]
+    fn calibrate_bad_seed_and_bad_data_returns_error() {
+        let market = vec![
+            (60.0, 0.001),
+            (80.0, 0.001),
+            (90.0, 0.40),
+            (100.0, 0.50),
+            (110.0, 0.40),
+            (120.0, 0.001),
+            (140.0, 0.001),
+        ];
+        let bad_seed = SviSmile::new(100.0, 1.0, 0.04, 0.4, -0.4, 50.0, 50.0).unwrap();
+
+        let result = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            Some(&bad_seed),
+        );
+        assert!(
+            matches!(result, Err(VolSurfError::CalibrationError { .. })),
+            "both seed and grid search should fail on frown data"
         );
     }
 }
