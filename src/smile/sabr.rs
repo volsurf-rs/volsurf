@@ -617,7 +617,7 @@ impl SmileSection for SabrSmile {
         }
 
         Ok(ArbitrageReport {
-            is_free: violations.is_empty(),
+            expiry: self.expiry,
             butterfly_violations: violations,
         })
     }
@@ -1468,7 +1468,7 @@ mod tests {
         let s = make_equity_smile();
         let report = s.is_arbitrage_free().unwrap();
         assert!(
-            report.is_free,
+            report.is_free(),
             "well-behaved params should be arb-free, got {} violations",
             report.butterfly_violations.len()
         );
@@ -1480,7 +1480,7 @@ mod tests {
         let s = SabrSmile::new(F, T, 0.20, 1.0, -0.25, 0.30).unwrap();
         let report = s.is_arbitrage_free().unwrap();
         assert!(
-            report.is_free,
+            report.is_free(),
             "β=1 with moderate params should be arb-free"
         );
     }
@@ -1490,7 +1490,7 @@ mod tests {
         let s = SabrSmile::new(F, T, 10.0, 0.0, -0.2, 0.30).unwrap();
         let report = s.is_arbitrage_free().unwrap();
         assert!(
-            report.is_free,
+            report.is_free(),
             "β=0 with moderate params should be arb-free"
         );
     }
@@ -1500,7 +1500,7 @@ mod tests {
         // nu=0 (CEV) should always be arb-free
         let s = SabrSmile::new(F, T, EQ_ALPHA, BETA, RHO, 0.0).unwrap();
         let report = s.is_arbitrage_free().unwrap();
-        assert!(report.is_free, "CEV (ν=0) should be arb-free");
+        assert!(report.is_free(), "CEV (ν=0) should be arb-free");
     }
 
     #[test]
@@ -1511,7 +1511,7 @@ mod tests {
         let report = s.is_arbitrage_free().unwrap();
         // With nu=5.0, the approximation likely produces negative densities
         // (if not, this is still a valid test — just confirms well-behaved)
-        if !report.is_free {
+        if !report.is_free() {
             for v in &report.butterfly_violations {
                 assert!(v.density < 0.0);
                 assert!(v.magnitude > 0.0);
@@ -1525,7 +1525,7 @@ mod tests {
         // High nu provokes violations; verify field structure if detected
         let s = SabrSmile::new(F, T, EQ_ALPHA, BETA, -0.5, 5.0).unwrap();
         let report = s.is_arbitrage_free().unwrap();
-        if !report.is_free {
+        if !report.is_free() {
             let v = &report.butterfly_violations[0];
             assert!(v.strike > 0.0, "violation strike should be positive");
             assert!(v.density < 0.0, "violation density should be negative");
@@ -1549,7 +1549,7 @@ mod tests {
         let v = boxed.vol(Strike(F)).unwrap();
         assert!(v.0 > 0.0);
         let report = boxed.is_arbitrage_free().unwrap();
-        assert!(report.is_free);
+        assert!(report.is_free());
     }
 
     // ========================================================================

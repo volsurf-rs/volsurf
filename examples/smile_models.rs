@@ -89,12 +89,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "SVI:    {} butterfly violations, arb-free={}",
         svi_report.butterfly_violations.len(),
-        svi_report.is_free
+        svi_report.is_free()
     );
     println!(
         "Spline: {} butterfly violations, arb-free={}",
         spline_report.butterfly_violations.len(),
-        spline_report.is_free
+        spline_report.is_free()
     );
 
     // ---------------------------------------------------------------

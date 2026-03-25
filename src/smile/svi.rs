@@ -700,7 +700,7 @@ impl SmileSection for SviSmile {
         }
 
         Ok(ArbitrageReport {
-            is_free: violations.is_empty(),
+            expiry: self.expiry,
             butterfly_violations: violations,
         })
     }
@@ -1083,7 +1083,7 @@ mod tests {
     fn arb_free_params_clean_report() {
         let smile = make_arb_free_smile();
         let report = smile.is_arbitrage_free().unwrap();
-        assert!(report.is_free, "expected arb-free report");
+        assert!(report.is_free(), "expected arb-free report");
         assert!(report.butterfly_violations.is_empty());
     }
 
@@ -1092,7 +1092,7 @@ mod tests {
         // Aggressive slope with small curvature: g(k) goes negative in wings
         let smile = SviSmile::new(100.0, 1.0, 0.001, 0.8, -0.7, 0.0, 0.05).unwrap();
         let report = smile.is_arbitrage_free().unwrap();
-        assert!(!report.is_free, "expected violations");
+        assert!(!report.is_free(), "expected violations");
         assert!(
             !report.butterfly_violations.is_empty(),
             "expected non-empty violations"
@@ -1129,7 +1129,7 @@ mod tests {
     fn flat_smile_is_arb_free() {
         let smile = SviSmile::new(100.0, 1.0, 0.04, 0.0, 0.0, 0.0, 0.1).unwrap();
         let report = smile.is_arbitrage_free().unwrap();
-        assert!(report.is_free);
+        assert!(report.is_free());
     }
 
     #[test]

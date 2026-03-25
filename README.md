@@ -151,7 +151,7 @@ use volsurf::smile::{SviSmile, SmileSection};
 
 let smile = SviSmile::new(100.0, 1.0, 0.04, 0.4, -0.4, 0.0, 0.2)?;
 let report = smile.is_arbitrage_free()?;
-assert!(report.is_free);
+assert!(report.is_free());
 
 // Surface-level diagnostics (butterfly + calendar)
 let diagnostics = surface.diagnostics()?;

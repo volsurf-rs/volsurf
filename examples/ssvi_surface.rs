@@ -124,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "  Tenor {}: {} violations, arb-free={}",
             i + 1,
             report.butterfly_violations.len(),
-            report.is_free
+            report.is_free()
         );
     }
     println!("Calendar violations: {}", diag.calendar_violations.len());

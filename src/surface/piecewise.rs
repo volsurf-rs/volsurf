@@ -209,7 +209,7 @@ impl PiecewiseSurface {
             }
         }
 
-        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+        let is_free = smile_reports.iter().all(|r| r.is_free()) && calendar_violations.is_empty();
 
         Ok(SurfaceDiagnostics {
             smile_reports,

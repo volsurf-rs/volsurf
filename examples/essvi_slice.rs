@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Butterfly arbitrage check
     let report = slice.is_arbitrage_free()?;
     println!("=== Arbitrage Check ===");
-    println!("Butterfly arb-free: {}", report.is_free);
+    println!("Butterfly arb-free: {}", report.is_free());
     if !report.butterfly_violations.is_empty() {
         println!("Violations: {}", report.butterfly_violations.len());
     }

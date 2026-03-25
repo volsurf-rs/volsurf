@@ -1108,7 +1108,7 @@ impl VolSurface for EssviSurface {
             }
         }
 
-        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+        let is_free = smile_reports.iter().all(|r| r.is_free()) && calendar_violations.is_empty();
 
         Ok(SurfaceDiagnostics {
             smile_reports,
@@ -1252,7 +1252,7 @@ mod tests {
     fn arb_free_conservative_params() {
         let s = equity_slice();
         let report = s.is_arbitrage_free().unwrap();
-        assert!(report.is_free);
+        assert!(report.is_free());
         assert!(report.butterfly_violations.is_empty());
     }
 
@@ -1261,7 +1261,7 @@ mod tests {
         // eta * (1 + |rho|) = 3.0 * 1.95 = 5.85 >> 2
         let s = EssviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
         let report = s.is_arbitrage_free().unwrap();
-        assert!(!report.is_free);
+        assert!(!report.is_free());
         assert!(!report.butterfly_violations.is_empty());
     }
 

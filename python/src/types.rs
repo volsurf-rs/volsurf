@@ -425,7 +425,7 @@ impl PyArbitrageReport {
 impl From<ArbitrageReport> for PyArbitrageReport {
     fn from(r: ArbitrageReport) -> Self {
         Self {
-            is_free: r.is_free,
+            is_free: r.is_free(),
             violations: r.butterfly_violations,
         }
     }

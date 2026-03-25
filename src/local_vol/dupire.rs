@@ -153,7 +153,6 @@ impl LocalVol for DupireLocalVol {
 mod tests {
     use super::*;
     use crate::smile::SmileSection;
-    use crate::smile::arbitrage::ArbitrageReport;
     use crate::surface::arbitrage::SurfaceDiagnostics;
     use crate::types::{Strike, Tenor, Variance};
 

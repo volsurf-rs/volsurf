@@ -9,51 +9,27 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Report on arbitrage-freeness of a smile or surface.
+/// Report on arbitrage-freeness of a smile at a specific expiry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArbitrageReport {
-    /// Whether the smile/surface is free of detected arbitrage.
-    pub is_free: bool,
+    /// Expiry (time to maturity) of the smile this report covers.
+    pub expiry: f64,
     /// Butterfly spread violations (negative density regions).
     pub butterfly_violations: Vec<ButterflyViolation>,
 }
 
 impl ArbitrageReport {
     /// Create a report indicating no arbitrage was found.
-    pub fn clean() -> Self {
+    pub fn clean(expiry: f64) -> Self {
         Self {
-            is_free: true,
+            expiry,
             butterfly_violations: Vec::new(),
         }
     }
 
-    /// Merge two reports, combining all violations.
-    ///
-    /// The merged report is arbitrage-free only if both source reports are free.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use volsurf::smile::{ArbitrageReport, ButterflyViolation};
-    ///
-    /// let clean = ArbitrageReport::clean();
-    /// let violated = ArbitrageReport {
-    ///     is_free: false,
-    ///     butterfly_violations: vec![ButterflyViolation {
-    ///         strike: 80.0, density: -0.001, magnitude: 0.001,
-    ///     }],
-    /// };
-    /// let merged = clean.merge(&violated);
-    /// assert!(!merged.is_free);
-    /// assert_eq!(merged.butterfly_violations.len(), 1);
-    /// ```
-    pub fn merge(&self, other: &ArbitrageReport) -> ArbitrageReport {
-        let mut violations = self.butterfly_violations.clone();
-        violations.extend(other.butterfly_violations.iter().cloned());
-        ArbitrageReport {
-            is_free: self.is_free && other.is_free,
-            butterfly_violations: violations,
-        }
+    /// Whether this smile is free of detected butterfly arbitrage.
+    pub fn is_free(&self) -> bool {
+        self.butterfly_violations.is_empty()
     }
 
     /// Return the worst (largest magnitude) butterfly violation, if any.
@@ -64,7 +40,7 @@ impl ArbitrageReport {
     /// use volsurf::smile::{ArbitrageReport, ButterflyViolation};
     ///
     /// let report = ArbitrageReport {
-    ///     is_free: false,
+    ///     expiry: 1.0,
     ///     butterfly_violations: vec![
     ///         ButterflyViolation { strike: 80.0, density: -0.001, magnitude: 0.001 },
     ///         ButterflyViolation { strike: 90.0, density: -0.005, magnitude: 0.005 },
@@ -104,99 +80,39 @@ mod tests {
         }
     }
 
-    fn violated_report() -> ArbitrageReport {
-        ArbitrageReport {
-            is_free: false,
-            butterfly_violations: vec![make_violation(80.0, -0.001), make_violation(85.0, -0.005)],
-        }
-    }
-
-    // ========== merge() ==========
-
     #[test]
-    fn merge_two_clean_reports() {
-        let a = ArbitrageReport::clean();
-        let b = ArbitrageReport::clean();
-        let merged = a.merge(&b);
-        assert!(merged.is_free);
-        assert!(merged.butterfly_violations.is_empty());
+    fn clean_report_is_free() {
+        let report = ArbitrageReport::clean(1.0);
+        assert!(report.is_free());
+        assert!(report.butterfly_violations.is_empty());
+        assert_eq!(report.expiry, 1.0);
     }
 
     #[test]
-    fn merge_clean_and_violated() {
-        let clean = ArbitrageReport::clean();
-        let bad = violated_report();
-        let merged = clean.merge(&bad);
-        assert!(!merged.is_free);
-        assert_eq!(merged.butterfly_violations.len(), 2);
-    }
+    fn is_free_computed_from_violations() {
+        let clean = ArbitrageReport {
+            expiry: 1.0,
+            butterfly_violations: vec![],
+        };
+        assert!(clean.is_free());
 
-    #[test]
-    fn merge_violated_and_clean() {
-        let bad = violated_report();
-        let clean = ArbitrageReport::clean();
-        let merged = bad.merge(&clean);
-        assert!(!merged.is_free);
-        assert_eq!(merged.butterfly_violations.len(), 2);
-    }
-
-    #[test]
-    fn merge_two_violated_combines_violations() {
-        let a = ArbitrageReport {
-            is_free: false,
+        let violated = ArbitrageReport {
+            expiry: 1.0,
             butterfly_violations: vec![make_violation(80.0, -0.001)],
         };
-        let b = ArbitrageReport {
-            is_free: false,
-            butterfly_violations: vec![make_violation(90.0, -0.003), make_violation(95.0, -0.002)],
-        };
-        let merged = a.merge(&b);
-        assert!(!merged.is_free);
-        assert_eq!(merged.butterfly_violations.len(), 3);
+        assert!(!violated.is_free());
     }
-
-    #[test]
-    fn merge_preserves_violation_data() {
-        let a = ArbitrageReport {
-            is_free: false,
-            butterfly_violations: vec![make_violation(80.0, -0.007)],
-        };
-        let b = ArbitrageReport::clean();
-        let merged = a.merge(&b);
-        assert_eq!(merged.butterfly_violations.len(), 1);
-        let v = &merged.butterfly_violations[0];
-        assert_eq!(v.strike, 80.0);
-        assert_eq!(v.density, -0.007);
-        assert_eq!(v.magnitude, 0.007);
-    }
-
-    #[test]
-    fn merge_not_free_empty_violations_with_clean() {
-        let report_a = ArbitrageReport {
-            is_free: false,
-            butterfly_violations: vec![],
-        };
-        let report_b = ArbitrageReport {
-            is_free: true,
-            butterfly_violations: vec![],
-        };
-        let merged = report_a.merge(&report_b);
-        assert!(!merged.is_free);
-        assert!(merged.butterfly_violations.is_empty());
-    }
-
-    // ========== worst_violation() ==========
 
     #[test]
     fn worst_violation_clean_report_returns_none() {
-        let clean = ArbitrageReport::clean();
+        let clean = ArbitrageReport::clean(1.0);
         assert!(clean.worst_violation().is_none());
     }
 
     #[test]
     fn worst_violation_single_violation() {
         let report = ArbitrageReport {
-            is_free: false,
+            expiry: 1.0,
             butterfly_violations: vec![make_violation(80.0, -0.003)],
         };
         let worst = report.worst_violation().unwrap();
@@ -207,7 +123,7 @@ mod tests {
     #[test]
     fn worst_violation_picks_largest_magnitude() {
         let report = ArbitrageReport {
-            is_free: false,
+            expiry: 1.0,
             butterfly_violations: vec![
                 make_violation(80.0, -0.001),
                 make_violation(85.0, -0.010),
@@ -222,7 +138,7 @@ mod tests {
     #[test]
     fn worst_violation_tied_magnitudes() {
         let report = ArbitrageReport {
-            is_free: false,
+            expiry: 1.0,
             butterfly_violations: vec![
                 ButterflyViolation {
                     strike: 90.0,
@@ -238,25 +154,20 @@ mod tests {
         };
         let worst = report.worst_violation().unwrap();
         assert!((worst.magnitude - 0.005).abs() < 1e-15);
-        // max_by with total_cmp returns last equal element
         assert_eq!(worst.strike, 110.0);
     }
 
-    // ========== SABR butterfly detection ==========
-
     #[test]
     fn sabr_extreme_nu_detects_violations() {
-        // Large nu produces wild smile curvature that creates negative density.
         use crate::smile::SabrSmile;
         let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
         let report = sabr.is_arbitrage_free().unwrap();
         assert!(
-            !report.is_free,
+            !report.is_free(),
             "extreme nu should produce butterfly violations"
         );
         assert!(!report.butterfly_violations.is_empty());
-        let worst = report.worst_violation().unwrap();
-        assert!(worst.magnitude > 0.0);
+        assert!(report.worst_violation().unwrap().magnitude > 0.0);
     }
 
     #[test]
@@ -264,33 +175,28 @@ mod tests {
         use crate::smile::SabrSmile;
         let sabr = SabrSmile::new(100.0, 1.0, 0.2, 0.5, -0.3, 0.3).unwrap();
         let report = sabr.is_arbitrage_free().unwrap();
-        assert!(report.is_free, "conservative SABR should be arb-free");
+        assert!(report.is_free(), "conservative SABR should be arb-free");
         assert!(report.worst_violation().is_none());
     }
 
-    // ========== SSVI butterfly detection ==========
-
     #[test]
     fn ssvi_extreme_params_detects_violations() {
-        // eta*(1+|rho|) = 3*(1+0.95) = 5.85 >> 2 => violations expected.
         use crate::surface::SsviSlice;
         let slice = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
         let report = slice.is_arbitrage_free().unwrap();
         assert!(
-            !report.is_free,
+            !report.is_free(),
             "extreme SSVI params should detect violations"
         );
-        let worst = report.worst_violation().unwrap();
-        assert!(worst.magnitude > 0.0);
+        assert!(report.worst_violation().unwrap().magnitude > 0.0);
     }
 
     #[test]
     fn ssvi_conservative_params_clean() {
-        // eta*(1+|rho|) = 0.5*(1+0.3) = 0.65 < 2 => clean.
         use crate::surface::SsviSlice;
         let slice = SsviSlice::new(100.0, 1.0, -0.3, 0.5, 0.5, 0.16).unwrap();
         let report = slice.is_arbitrage_free().unwrap();
-        assert!(report.is_free, "conservative SSVI should be arb-free");
+        assert!(report.is_free(), "conservative SSVI should be arb-free");
         assert!(report.worst_violation().is_none());
     }
 
@@ -304,7 +210,7 @@ mod tests {
         let config_report = svi
             .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
             .unwrap();
-        assert_eq!(default_report.is_free, config_report.is_free);
+        assert_eq!(default_report.is_free(), config_report.is_free());
         assert_eq!(
             default_report.butterfly_violations.len(),
             config_report.butterfly_violations.len()
@@ -319,7 +225,7 @@ mod tests {
         let config_report = sabr
             .is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
             .unwrap();
-        assert_eq!(default_report.is_free, config_report.is_free);
+        assert_eq!(default_report.is_free(), config_report.is_free());
         assert_eq!(
             default_report.butterfly_violations.len(),
             config_report.butterfly_violations.len()

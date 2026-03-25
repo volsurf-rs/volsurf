@@ -298,7 +298,7 @@ impl SmileSection for SplineSmile {
         }
 
         Ok(ArbitrageReport {
-            is_free: violations.is_empty(),
+            expiry: self.expiry,
             butterfly_violations: violations,
         })
     }
@@ -574,7 +574,7 @@ mod tests {
 
         let report = smile.is_arbitrage_free().unwrap();
         assert!(
-            report.is_free,
+            report.is_free(),
             "convex smile should be arb-free, got {} violations",
             report.butterfly_violations.len()
         );

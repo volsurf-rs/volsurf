@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn diagnostics_with_butterfly_violations_not_free() {
         let report = ArbitrageReport {
-            is_free: false,
+            expiry: 1.0,
             butterfly_violations: vec![ButterflyViolation {
                 strike: 90.0,
                 density: -0.001,
@@ -66,7 +66,7 @@ mod tests {
         };
         assert!(!diag.is_free);
         assert_eq!(diag.smile_reports.len(), 1);
-        assert!(!diag.smile_reports[0].is_free);
+        assert!(!diag.smile_reports[0].is_free());
     }
 
     #[test]
@@ -79,7 +79,7 @@ mod tests {
             variance_long: 0.05,
         };
         let clean_report = ArbitrageReport {
-            is_free: true,
+            expiry: 1.0,
             butterfly_violations: vec![],
         };
         let diag = SurfaceDiagnostics {
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn diagnostics_mixed_violations_not_free() {
         let butterfly_report = ArbitrageReport {
-            is_free: false,
+            expiry: 1.0,
             butterfly_violations: vec![ButterflyViolation {
                 strike: 85.0,
                 density: -0.002,
@@ -127,11 +127,11 @@ mod tests {
         let diag = SurfaceDiagnostics {
             smile_reports: vec![
                 ArbitrageReport {
-                    is_free: true,
+                    expiry: 0.5,
                     butterfly_violations: vec![],
                 },
                 ArbitrageReport {
-                    is_free: false,
+                    expiry: 1.0,
                     butterfly_violations: vec![ButterflyViolation {
                         strike: 95.0,
                         density: -0.0005,

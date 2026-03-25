@@ -696,7 +696,7 @@ impl VolSurface for SsviSurface {
             }
         }
 
-        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+        let is_free = smile_reports.iter().all(|r| r.is_free()) && calendar_violations.is_empty();
 
         Ok(SurfaceDiagnostics {
             smile_reports,
@@ -1009,7 +1009,7 @@ impl SmileSection for SsviSlice {
         }
 
         Ok(ArbitrageReport {
-            is_free: violations.is_empty(),
+            expiry: self.expiry,
             butterfly_violations: violations,
         })
     }
@@ -2028,7 +2028,7 @@ mod tests {
         assert!(diag.is_free, "conservative SSVI should be arb-free");
         assert!(diag.calendar_violations.is_empty());
         assert_eq!(diag.smile_reports.len(), 4);
-        assert!(diag.smile_reports.iter().all(|r| r.is_free));
+        assert!(diag.smile_reports.iter().all(|r| r.is_free()));
     }
 
     #[test]
@@ -2046,7 +2046,7 @@ mod tests {
         let diag = s.diagnostics().unwrap();
         assert!(!diag.is_free);
         // At least one tenor should have butterfly violations
-        assert!(diag.smile_reports.iter().any(|r| !r.is_free));
+        assert!(diag.smile_reports.iter().any(|r| !r.is_free()));
     }
 
     #[test]
@@ -2370,7 +2370,7 @@ mod tests {
         let s = equity_slice();
         let report = s.is_arbitrage_free().unwrap();
         assert!(
-            report.is_free,
+            report.is_free(),
             "conservative SSVI params should be arb-free"
         );
         assert!(report.butterfly_violations.is_empty());
@@ -2382,7 +2382,7 @@ mod tests {
         let s = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
         let report = s.is_arbitrage_free().unwrap();
         assert!(
-            !report.is_free,
+            !report.is_free(),
             "extreme SSVI params should detect butterfly violations"
         );
         assert!(!report.butterfly_violations.is_empty());
