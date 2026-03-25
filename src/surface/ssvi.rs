@@ -1003,14 +1003,10 @@ impl SmileSection for SsviSlice {
             }
         }
 
-        if violations.is_empty() {
-            Ok(ArbitrageReport::clean())
-        } else {
-            Ok(ArbitrageReport {
-                is_free: false,
-                butterfly_violations: violations,
-            })
-        }
+        Ok(ArbitrageReport {
+            is_free: violations.is_empty(),
+            butterfly_violations: violations,
+        })
     }
 }
 
