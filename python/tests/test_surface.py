@@ -409,6 +409,35 @@ class TestDupireLocalVol:
         with pytest.raises((ValueError, RuntimeError)):
             dupire.local_vol(0.5, 0.0)
 
+    def test_custom_bump_size(self):
+        surf = build_sabr_surface()
+        default = DupireLocalVol(surf)
+        custom = DupireLocalVol(surf, bump_size=0.001)
+        lv_default = default.local_vol(0.5, 100.0)
+        lv_custom = custom.local_vol(0.5, 100.0)
+        assert lv_custom > 0 and math.isfinite(lv_custom)
+        assert lv_default != lv_custom
+
+    def test_bump_size_rejects_zero(self):
+        surf = build_sabr_surface()
+        with pytest.raises(ValueError):
+            DupireLocalVol(surf, bump_size=0.0)
+
+    def test_bump_size_rejects_negative(self):
+        surf = build_sabr_surface()
+        with pytest.raises(ValueError):
+            DupireLocalVol(surf, bump_size=-0.01)
+
+    def test_bump_size_rejects_nan(self):
+        surf = build_sabr_surface()
+        with pytest.raises(ValueError):
+            DupireLocalVol(surf, bump_size=float("nan"))
+
+    def test_bump_size_rejects_inf(self):
+        surf = build_sabr_surface()
+        with pytest.raises(ValueError):
+            DupireLocalVol(surf, bump_size=float("inf"))
+
 
 class TestEssviTwoStageApi:
     MARKET_3M = [
