@@ -27,6 +27,58 @@ use crate::implied::black::black_price;
 use crate::types::{OptionType, Strike, Variance, Vol};
 use crate::validate::validate_positive;
 
+/// Grid configuration for butterfly arbitrage scanning.
+///
+/// Controls the number of sample points and log-moneyness range
+/// k = ln(K/F) used when checking `is_arbitrage_free_with`.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ArbitrageScanConfig {
+    pub n_points: usize,
+    pub k_min: f64,
+    pub k_max: f64,
+}
+
+impl ArbitrageScanConfig {
+    /// Default for SVI and SSVI models: 200 points over [-3, 3].
+    pub fn svi_default() -> Self {
+        Self {
+            n_points: 200,
+            k_min: -3.0,
+            k_max: 3.0,
+        }
+    }
+
+    /// Default for SABR model: 200 points over [-2, 2].
+    ///
+    /// Narrower range than SVI because Hagan formula breaks down in deep wings.
+    pub fn sabr_default() -> Self {
+        Self {
+            n_points: 200,
+            k_min: -2.0,
+            k_max: 2.0,
+        }
+    }
+
+    pub(crate) fn validate(&self) -> error::Result<()> {
+        if self.n_points < 2 {
+            return Err(error::VolSurfError::InvalidInput {
+                message: format!("n_points must be >= 2, got {}", self.n_points),
+            });
+        }
+        if !self.k_min.is_finite() || !self.k_max.is_finite() {
+            return Err(error::VolSurfError::InvalidInput {
+                message: "k_min and k_max must be finite".to_string(),
+            });
+        }
+        if self.k_min >= self.k_max {
+            return Err(error::VolSurfError::InvalidInput {
+                message: format!("k_min ({}) must be < k_max ({})", self.k_min, self.k_max),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// A single-tenor volatility smile.
 ///
 /// Represents the relationship between strike and implied volatility at a
@@ -133,5 +185,46 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     fn expiry(&self) -> f64;
 
     /// Check whether this smile is free of butterfly arbitrage.
-    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport>;
+    ///
+    /// Uses model-specific defaults for scan grid. Override this or
+    /// [`is_arbitrage_free_with`](SmileSection::is_arbitrage_free_with)
+    /// for custom grid parameters.
+    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
+        self.is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+    }
+
+    /// Check butterfly arbitrage with custom scan grid configuration.
+    ///
+    /// Default implementation uses density-based detection (Breeden-Litzenberger)
+    /// over `config.n_points` equally-spaced log-moneyness points in
+    /// `[config.k_min, config.k_max]`. Models with analytical g-functions
+    /// (SVI, SSVI) override this for better accuracy.
+    fn is_arbitrage_free_with(
+        &self,
+        config: &ArbitrageScanConfig,
+    ) -> error::Result<ArbitrageReport> {
+        config.validate()?;
+        let fwd = self.forward();
+        let n = config.n_points;
+        let mut violations = Vec::new();
+        for i in 0..n {
+            let k = config.k_min + (config.k_max - config.k_min) * (i as f64) / ((n - 1) as f64);
+            let strike = fwd * k.exp();
+            let d = match self.density(Strike(strike)) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            if d < -DENSITY_NEG_TOL {
+                violations.push(ButterflyViolation {
+                    strike,
+                    density: d,
+                    magnitude: d.abs(),
+                });
+            }
+        }
+        Ok(ArbitrageReport {
+            is_free: violations.is_empty(),
+            butterfly_violations: violations,
+        })
+    }
 }
