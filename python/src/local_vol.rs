@@ -15,11 +15,13 @@ pub struct PyDupireLocalVol {
 #[pymethods]
 impl PyDupireLocalVol {
     #[new]
-    #[pyo3(signature = (surface))]
-    fn new(surface: &PySurface) -> Self {
-        Self {
-            inner: DupireLocalVol::new(Arc::clone(&surface.inner)),
+    #[pyo3(signature = (surface, bump_size=None))]
+    fn new(surface: &PySurface, bump_size: Option<f64>) -> PyResult<Self> {
+        let mut lv = DupireLocalVol::new(Arc::clone(&surface.inner));
+        if let Some(h) = bump_size {
+            lv = lv.with_bump_size(h).map_err(to_py_err)?;
         }
+        Ok(Self { inner: lv })
     }
 
     fn local_vol(&self, expiry: f64, strike: f64) -> PyResult<f64> {
