@@ -153,7 +153,6 @@ impl LocalVol for DupireLocalVol {
 mod tests {
     use super::*;
     use crate::smile::SmileSection;
-    use crate::smile::arbitrage::ArbitrageReport;
     use crate::surface::arbitrage::SurfaceDiagnostics;
     use crate::types::{Strike, Tenor, Variance};
 
@@ -178,6 +177,9 @@ mod tests {
             _: &crate::smile::ArbitrageScanConfig,
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
+        }
+        fn tenors(&self) -> &[f64] {
+            &[]
         }
     }
 
@@ -212,6 +214,9 @@ mod tests {
         fn expiry(&self) -> f64 {
             self.expiry
         }
+        fn model_name(&self) -> &'static str {
+            "Flat"
+        }
         fn density(&self, _: Strike) -> error::Result<f64> {
             unimplemented!()
         }
@@ -239,6 +244,9 @@ mod tests {
             _: &crate::smile::ArbitrageScanConfig,
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
+        }
+        fn tenors(&self) -> &[f64] {
+            &[]
         }
     }
 
@@ -455,6 +463,9 @@ mod tests {
             fn expiry(&self) -> f64 {
                 0.5
             }
+            fn model_name(&self) -> &'static str {
+                "ZeroFwd"
+            }
             fn density(&self, _: Strike) -> error::Result<f64> {
                 unimplemented!()
             }
@@ -478,6 +489,9 @@ mod tests {
                 _: &crate::smile::ArbitrageScanConfig,
             ) -> error::Result<SurfaceDiagnostics> {
                 unimplemented!()
+            }
+            fn tenors(&self) -> &[f64] {
+                &[]
             }
         }
 

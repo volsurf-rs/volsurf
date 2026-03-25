@@ -48,6 +48,11 @@ macro_rules! impl_smile_methods {
                     .into())
             }
 
+            #[getter]
+            fn model_name(&self) -> &str {
+                self.inner.model_name()
+            }
+
             fn to_json(&self) -> PyResult<String> {
                 serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
             }

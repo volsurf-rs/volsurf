@@ -42,7 +42,12 @@ impl From<ArbitrageReport> for WasmArbitrageReport {
 impl WasmArbitrageReport {
     #[wasm_bindgen(getter)]
     pub fn is_arbitrage_free(&self) -> bool {
-        self.inner.is_free
+        self.inner.is_free()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn expiry(&self) -> f64 {
+        self.inner.expiry
     }
 
     pub fn butterfly_violations(&self) -> Vec<WasmButterflyViolation> {
@@ -114,7 +119,7 @@ impl From<SurfaceDiagnostics> for WasmSurfaceDiagnostics {
 impl WasmSurfaceDiagnostics {
     #[wasm_bindgen(getter)]
     pub fn is_arbitrage_free(&self) -> bool {
-        self.inner.is_free
+        self.inner.is_free()
     }
 
     pub fn smile_reports(&self) -> Vec<WasmArbitrageReport> {

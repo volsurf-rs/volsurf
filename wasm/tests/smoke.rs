@@ -248,6 +248,9 @@ fn builder_svi_surface() {
 
     let var = surface.black_variance(0.5, 100.0).unwrap();
     assert!((var - vol * vol * 0.5).abs() < 1e-10);
+
+    let tenors = surface.tenors();
+    assert_eq!(tenors.len(), 2);
 }
 
 #[wasm_bindgen_test]
@@ -373,7 +376,7 @@ fn too_few_points_rejected() {
 
 #[wasm_bindgen_test]
 fn version_returns_string() {
-    assert_eq!(version(), "2.0.0");
+    assert_eq!(version(), "2.1.0");
 }
 
 // ── is_arbitrage_free on smiles ──
@@ -386,8 +389,21 @@ fn svi_is_arbitrage_free() {
     assert!(report.butterfly_violations().is_empty());
 
     let json = report.to_json().unwrap();
-    assert!(json.contains("\"is_free\""));
+    assert!(json.contains("\"expiry\":1.0"));
     assert!(json.contains("\"butterfly_violations\""));
+    assert_eq!(report.expiry(), 1.0);
+}
+
+#[wasm_bindgen_test]
+fn svi_model_name() {
+    let smile = WasmSviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.0, 0.3).unwrap();
+    assert_eq!(smile.model_name(), "SVI");
+}
+
+#[wasm_bindgen_test]
+fn sabr_model_name() {
+    let smile = WasmSabrSmile::new(100.0, 1.0, 0.2, 0.5, -0.3, 0.4).unwrap();
+    assert_eq!(smile.model_name(), "SABR");
 }
 
 #[wasm_bindgen_test]
@@ -538,7 +554,8 @@ fn svi_butterfly_violations_detected() {
     }
 
     let json = report.to_json().unwrap();
-    assert!(json.contains("\"is_free\":false"));
+    assert!(json.contains("\"butterfly_violations\""));
+    assert!(!report.is_arbitrage_free());
 }
 
 // ── WasmSmile is_arbitrage_free (via smile_at) ──

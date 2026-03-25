@@ -276,6 +276,10 @@ impl SmileSection for SplineSmile {
         self.expiry
     }
 
+    fn model_name(&self) -> &'static str {
+        "CubicSpline"
+    }
+
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         // Number of grid points for density-based arbitrage scan.
         let n_samples = 200;
@@ -298,7 +302,7 @@ impl SmileSection for SplineSmile {
         }
 
         Ok(ArbitrageReport {
-            is_free: violations.is_empty(),
+            expiry: self.expiry,
             butterfly_violations: violations,
         })
     }
@@ -574,7 +578,7 @@ mod tests {
 
         let report = smile.is_arbitrage_free().unwrap();
         assert!(
-            report.is_free,
+            report.is_free(),
             "convex smile should be arb-free, got {} violations",
             report.butterfly_violations.len()
         );

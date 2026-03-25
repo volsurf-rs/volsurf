@@ -124,11 +124,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "  Tenor {}: {} violations, arb-free={}",
             i + 1,
             report.butterfly_violations.len(),
-            report.is_free
+            report.is_free()
         );
     }
     println!("Calendar violations: {}", diag.calendar_violations.len());
-    println!("Surface arb-free: {}", diag.is_free);
+    println!("Surface arb-free: {}", diag.is_free());
 
     // Analytical calendar check (SSVI-specific)
     let cal_violations = surface.calendar_arb_analytical();

@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Butterfly violations: {}, arb-free: {}",
         report.butterfly_violations.len(),
-        report.is_free
+        report.is_free()
     );
 
     // ---------------------------------------------------------------
@@ -200,7 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Surface diagnostics
     let diag = surface.diagnostics()?;
-    println!("\nSurface arb-free: {}", diag.is_free);
+    println!("\nSurface arb-free: {}", diag.is_free());
     println!("Calendar violations: {}", diag.calendar_violations.len());
 
     Ok(())

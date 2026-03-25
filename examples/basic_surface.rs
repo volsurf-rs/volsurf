@@ -112,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     println!("Calendar violations: {}", diag.calendar_violations.len());
-    println!("Surface is arbitrage-free: {}", diag.is_free);
+    println!("Surface is arbitrage-free: {}", diag.is_free());
 
     Ok(())
 }

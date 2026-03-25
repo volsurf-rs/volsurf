@@ -13,8 +13,13 @@ pub struct SurfaceDiagnostics {
     pub smile_reports: Vec<ArbitrageReport>,
     /// Calendar spread violations (variance decreasing in time).
     pub calendar_violations: Vec<CalendarViolation>,
-    /// Whether the entire surface is arbitrage-free.
-    pub is_free: bool,
+}
+
+impl SurfaceDiagnostics {
+    /// Whether the entire surface is free of detected arbitrage.
+    pub fn is_free(&self) -> bool {
+        self.smile_reports.iter().all(|r| r.is_free()) && self.calendar_violations.is_empty()
+    }
 }
 
 /// A calendar spread arbitrage violation at a specific (tenor, strike) point.
@@ -42,9 +47,8 @@ mod tests {
         let diag = SurfaceDiagnostics {
             smile_reports: vec![],
             calendar_violations: vec![],
-            is_free: true,
         };
-        assert!(diag.is_free);
+        assert!(diag.is_free());
         assert!(diag.smile_reports.is_empty());
         assert!(diag.calendar_violations.is_empty());
     }
@@ -52,7 +56,7 @@ mod tests {
     #[test]
     fn diagnostics_with_butterfly_violations_not_free() {
         let report = ArbitrageReport {
-            is_free: false,
+            expiry: 1.0,
             butterfly_violations: vec![ButterflyViolation {
                 strike: 90.0,
                 density: -0.001,
@@ -62,11 +66,10 @@ mod tests {
         let diag = SurfaceDiagnostics {
             smile_reports: vec![report],
             calendar_violations: vec![],
-            is_free: false,
         };
-        assert!(!diag.is_free);
+        assert!(!diag.is_free());
         assert_eq!(diag.smile_reports.len(), 1);
-        assert!(!diag.smile_reports[0].is_free);
+        assert!(!diag.smile_reports[0].is_free());
     }
 
     #[test]
@@ -79,15 +82,14 @@ mod tests {
             variance_long: 0.05,
         };
         let clean_report = ArbitrageReport {
-            is_free: true,
+            expiry: 1.0,
             butterfly_violations: vec![],
         };
         let diag = SurfaceDiagnostics {
             smile_reports: vec![clean_report],
             calendar_violations: vec![violation],
-            is_free: false,
         };
-        assert!(!diag.is_free);
+        assert!(!diag.is_free());
         assert_eq!(diag.calendar_violations.len(), 1);
         assert_eq!(diag.calendar_violations[0].strike, 100.0);
         assert!(
@@ -98,7 +100,7 @@ mod tests {
     #[test]
     fn diagnostics_mixed_violations_not_free() {
         let butterfly_report = ArbitrageReport {
-            is_free: false,
+            expiry: 1.0,
             butterfly_violations: vec![ButterflyViolation {
                 strike: 85.0,
                 density: -0.002,
@@ -115,9 +117,8 @@ mod tests {
         let diag = SurfaceDiagnostics {
             smile_reports: vec![butterfly_report],
             calendar_violations: vec![cal_violation],
-            is_free: false,
         };
-        assert!(!diag.is_free);
+        assert!(!diag.is_free());
         assert!(!diag.smile_reports.is_empty());
         assert!(!diag.calendar_violations.is_empty());
     }
@@ -127,11 +128,11 @@ mod tests {
         let diag = SurfaceDiagnostics {
             smile_reports: vec![
                 ArbitrageReport {
-                    is_free: true,
+                    expiry: 0.5,
                     butterfly_violations: vec![],
                 },
                 ArbitrageReport {
-                    is_free: false,
+                    expiry: 1.0,
                     butterfly_violations: vec![ButterflyViolation {
                         strike: 95.0,
                         density: -0.0005,
@@ -146,13 +147,12 @@ mod tests {
                 variance_short: 0.07,
                 variance_long: 0.065,
             }],
-            is_free: false,
         };
 
         let json = serde_json::to_string(&diag).unwrap();
         let roundtrip: SurfaceDiagnostics = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(roundtrip.is_free, diag.is_free);
+        assert_eq!(roundtrip.is_free(), diag.is_free());
         assert_eq!(roundtrip.smile_reports.len(), diag.smile_reports.len());
         assert_eq!(
             roundtrip.calendar_violations.len(),

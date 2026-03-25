@@ -696,13 +696,14 @@ impl VolSurface for SsviSurface {
             }
         }
 
-        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
-
         Ok(SurfaceDiagnostics {
             smile_reports,
             calendar_violations,
-            is_free,
         })
+    }
+
+    fn tenors(&self) -> &[f64] {
+        &self.tenors
     }
 }
 
@@ -945,6 +946,10 @@ impl SmileSection for SsviSlice {
         self.expiry
     }
 
+    fn model_name(&self) -> &'static str {
+        "SSVI"
+    }
+
     /// Analytical risk-neutral density via the Gatheral g-function.
     ///
     /// ```text
@@ -1009,7 +1014,7 @@ impl SmileSection for SsviSlice {
         }
 
         Ok(ArbitrageReport {
-            is_free: violations.is_empty(),
+            expiry: self.expiry,
             butterfly_violations: violations,
         })
     }
@@ -1823,7 +1828,7 @@ mod tests {
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let diag = calibrated.diagnostics().unwrap();
         assert!(
-            diag.is_free,
+            diag.is_free(),
             "calibrated SSVI from conservative input should be arb-free"
         );
     }
@@ -2025,10 +2030,10 @@ mod tests {
         // eta * (1 + |rho|) = 0.5 * 1.3 = 0.65 < 2, and thetas strictly increasing.
         let s = equity_surface();
         let diag = s.diagnostics().unwrap();
-        assert!(diag.is_free, "conservative SSVI should be arb-free");
+        assert!(diag.is_free(), "conservative SSVI should be arb-free");
         assert!(diag.calendar_violations.is_empty());
         assert_eq!(diag.smile_reports.len(), 4);
-        assert!(diag.smile_reports.iter().all(|r| r.is_free));
+        assert!(diag.smile_reports.iter().all(|r| r.is_free()));
     }
 
     #[test]
@@ -2044,9 +2049,9 @@ mod tests {
         )
         .unwrap();
         let diag = s.diagnostics().unwrap();
-        assert!(!diag.is_free);
+        assert!(!diag.is_free());
         // At least one tenor should have butterfly violations
-        assert!(diag.smile_reports.iter().any(|r| !r.is_free));
+        assert!(diag.smile_reports.iter().any(|r| !r.is_free()));
     }
 
     #[test]
@@ -2170,7 +2175,7 @@ mod tests {
 
         let diag = surface.diagnostics().unwrap();
         assert!(
-            !diag.is_free,
+            !diag.is_free(),
             "inverted SSVI slices should have calendar violations"
         );
         assert!(
@@ -2370,7 +2375,7 @@ mod tests {
         let s = equity_slice();
         let report = s.is_arbitrage_free().unwrap();
         assert!(
-            report.is_free,
+            report.is_free(),
             "conservative SSVI params should be arb-free"
         );
         assert!(report.butterfly_violations.is_empty());
@@ -2382,7 +2387,7 @@ mod tests {
         let s = SsviSlice::new(100.0, 1.0, -0.95, 3.0, 0.5, 0.16).unwrap();
         let report = s.is_arbitrage_free().unwrap();
         assert!(
-            !report.is_free,
+            !report.is_free(),
             "extreme SSVI params should detect butterfly violations"
         );
         assert!(!report.butterfly_violations.is_empty());

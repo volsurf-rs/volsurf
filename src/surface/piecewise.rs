@@ -209,12 +209,9 @@ impl PiecewiseSurface {
             }
         }
 
-        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
-
         Ok(SurfaceDiagnostics {
             smile_reports,
             calendar_violations,
-            is_free,
         })
     }
 }
@@ -335,6 +332,10 @@ impl VolSurface for PiecewiseSurface {
             smile_reports.push(smile.is_arbitrage_free_with(config)?);
         }
         self.diagnostics_from_smile_reports(smile_reports)
+    }
+
+    fn tenors(&self) -> &[f64] {
+        &self.tenors
     }
 }
 
@@ -550,7 +551,7 @@ mod tests {
 
         let diag = surface.diagnostics().unwrap();
         assert!(
-            diag.is_free,
+            diag.is_free(),
             "surface with increasing vol should be arb-free, but got {} calendar violations",
             diag.calendar_violations.len()
         );
@@ -564,7 +565,7 @@ mod tests {
         let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
 
         let diag = surface.diagnostics().unwrap();
-        assert!(!diag.is_free, "inverted surface should have violations");
+        assert!(!diag.is_free(), "inverted surface should have violations");
         assert!(
             !diag.calendar_violations.is_empty(),
             "should have calendar violations"

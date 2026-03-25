@@ -290,7 +290,7 @@ fn butterfly_arb_free_params_report_clean() -> Result<(), Box<dyn std::error::Er
     let smile = SviSmile::new(100.0, 1.0, 0.04, 0.4, -0.3, 0.0, 0.5)?;
     let report = smile.is_arbitrage_free()?;
     assert!(
-        report.is_free,
+        report.is_free(),
         "Clean params should be arb-free, got {} violations",
         report.butterfly_violations.len()
     );
@@ -309,7 +309,7 @@ fn butterfly_violation_detected_via_diagnostics() -> Result<(), Box<dyn std::err
     // With such extreme params, butterfly violations are likely
     // (though not 100% guaranteed for every param set).
     // If this particular set is arb-free, that's fine — skip assertion.
-    if !report.is_free {
+    if !report.is_free() {
         assert!(
             !report.butterfly_violations.is_empty(),
             "Non-free report should have violations"
@@ -355,7 +355,7 @@ fn calendar_violation_detected_for_inverted_surface() -> Result<(), Box<dyn std:
     )?;
 
     let diag = surface.diagnostics()?;
-    assert!(!diag.is_free, "Inverted surface should not be arb-free");
+    assert!(!diag.is_free(), "Inverted surface should not be arb-free");
     assert!(
         !diag.calendar_violations.is_empty(),
         "Should have calendar violations"
@@ -823,7 +823,7 @@ fn sabr_butterfly_clean_params() -> Result<(), Box<dyn std::error::Error>> {
     let smile = SabrSmile::new(100.0, 1.0, 0.20, 0.5, -0.30, 0.30)?;
     let report = smile.is_arbitrage_free()?;
     assert!(
-        report.is_free,
+        report.is_free(),
         "Well-behaved SABR should be arb-free, got {} violations",
         report.butterfly_violations.len()
     );

@@ -118,7 +118,7 @@ impl ArbitrageScanConfig {
 /// assert!((var.0 - vol.0 * vol.0 * smile.expiry()).abs() < 1e-12);
 ///
 /// let report = smile.is_arbitrage_free()?;
-/// assert!(report.is_free);
+/// assert!(report.is_free());
 /// # Ok::<(), volsurf::VolSurfError>(())
 /// ```
 pub trait SmileSection: Send + Sync + std::fmt::Debug {
@@ -184,6 +184,9 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// Time to expiry T in years.
     fn expiry(&self) -> f64;
 
+    /// Human-readable model name (e.g. "SVI", "SABR", "CubicSpline").
+    fn model_name(&self) -> &'static str;
+
     /// Check whether this smile is free of butterfly arbitrage.
     ///
     /// Uses model-specific defaults for scan grid. Override this or
@@ -223,7 +226,7 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
             }
         }
         Ok(ArbitrageReport {
-            is_free: violations.is_empty(),
+            expiry: self.expiry(),
             butterfly_violations: violations,
         })
     }
