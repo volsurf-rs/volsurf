@@ -662,6 +662,10 @@ impl SmileSection for SviSmile {
         self.expiry
     }
 
+    fn model_name(&self) -> &'static str {
+        "SVI"
+    }
+
     /// Check butterfly arbitrage by scanning the Gatheral g-function.
     ///
     /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].

@@ -580,6 +580,10 @@ impl SmileSection for SabrSmile {
         self.expiry
     }
 
+    fn model_name(&self) -> &'static str {
+        "SABR"
+    }
+
     /// Check butterfly arbitrage by scanning risk-neutral density.
     ///
     /// Evaluates density on a grid of 200 points over k ∈ \[−2, 2\].

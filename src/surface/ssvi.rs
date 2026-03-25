@@ -942,6 +942,10 @@ impl SmileSection for SsviSlice {
         self.expiry
     }
 
+    fn model_name(&self) -> &'static str {
+        "SSVI"
+    }
+
     /// Analytical risk-neutral density via the Gatheral g-function.
     ///
     /// ```text

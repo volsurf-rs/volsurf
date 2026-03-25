@@ -213,6 +213,10 @@ impl SmileSection for EssviSlice {
         self.0.expiry()
     }
 
+    fn model_name(&self) -> &'static str {
+        "eSSVI"
+    }
+
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         self.0.is_arbitrage_free()
     }

@@ -211,6 +211,9 @@ mod tests {
         fn expiry(&self) -> f64 {
             self.expiry
         }
+        fn model_name(&self) -> &'static str {
+            "Flat"
+        }
         fn density(&self, _: Strike) -> error::Result<f64> {
             unimplemented!()
         }
@@ -453,6 +456,9 @@ mod tests {
             }
             fn expiry(&self) -> f64 {
                 0.5
+            }
+            fn model_name(&self) -> &'static str {
+                "ZeroFwd"
             }
             fn density(&self, _: Strike) -> error::Result<f64> {
                 unimplemented!()

@@ -276,6 +276,10 @@ impl SmileSection for SplineSmile {
         self.expiry
     }
 
+    fn model_name(&self) -> &'static str {
+        "CubicSpline"
+    }
+
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         // Number of grid points for density-based arbitrage scan.
         let n_samples = 200;
