@@ -25,6 +25,7 @@ macro_rules! impl_vol_grid {
                 let stk: Vec<f64> = strikes.as_array().to_vec();
                 let (nexp, nstk) = (exp.len(), stk.len());
                 let inner = &self.inner;
+                // frozen pyclass: &self is immutable + alive for method duration; inner is pure Rust
                 let data = py.detach(|| {
                     let mut out = Vec::with_capacity(nexp * nstk);
                     for &t in &exp {
