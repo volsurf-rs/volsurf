@@ -657,7 +657,10 @@ impl VolSurface for SsviSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        // Per-tenor butterfly reports
+        self.diagnostics_with(&ArbitrageScanConfig::svi_default())
+    }
+
+    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
         let mut smile_reports = Vec::with_capacity(self.tenors.len());
         for (i, &tenor) in self.tenors.iter().enumerate() {
             let slice = SsviSlice::new(
@@ -668,10 +671,9 @@ impl VolSurface for SsviSurface {
                 self.gamma,
                 self.thetas[i],
             )?;
-            smile_reports.push(slice.is_arbitrage_free()?);
+            smile_reports.push(slice.is_arbitrage_free_with(config)?);
         }
 
-        // Calendar spread checks between consecutive tenors
         let mut calendar_violations = Vec::new();
         for i in 0..self.tenors.len().saturating_sub(1) {
             let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);

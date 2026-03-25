@@ -26,7 +26,7 @@ pub(crate) const CALENDAR_ARB_TOL: f64 = 1e-10;
 pub(crate) const EXPIRY_MATCH_TOL: f64 = 1e-10;
 
 use crate::error;
-use crate::smile::SmileSection;
+use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::types::{Strike, Tenor, Variance, Vol};
 
 /// A full volatility surface: (expiry, strike) → vol.
@@ -91,4 +91,10 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
 
     /// Surface-level arbitrage diagnostics (butterfly + calendar).
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics>;
+
+    /// Surface-level diagnostics with custom butterfly scan configuration.
+    ///
+    /// Passes `config` through to per-smile `is_arbitrage_free_with()` calls.
+    /// Calendar spread checks use the same hardcoded grid as `diagnostics()`.
+    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics>;
 }

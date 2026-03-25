@@ -173,6 +173,12 @@ mod tests {
         fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
+        fn diagnostics_with(
+            &self,
+            _: &crate::smile::ArbitrageScanConfig,
+        ) -> error::Result<SurfaceDiagnostics> {
+            unimplemented!()
+        }
     }
 
     fn stub_surface() -> Arc<dyn VolSurface> {
@@ -226,6 +232,12 @@ mod tests {
             }))
         }
         fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+            unimplemented!()
+        }
+        fn diagnostics_with(
+            &self,
+            _: &crate::smile::ArbitrageScanConfig,
+        ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
     }
@@ -459,6 +471,12 @@ mod tests {
                 Ok(Box::new(ZeroFwdSmile))
             }
             fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+                unimplemented!()
+            }
+            fn diagnostics_with(
+                &self,
+                _: &crate::smile::ArbitrageScanConfig,
+            ) -> error::Result<SurfaceDiagnostics> {
                 unimplemented!()
             }
         }
