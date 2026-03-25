@@ -50,7 +50,7 @@ macro_rules! impl_wasm_smile_methods {
                 config: &WasmArbitrageScanConfig,
             ) -> Result<WasmArbitrageReport, JsValue> {
                 self.inner
-                    .is_arbitrage_free_with(&config.inner)
+                    .is_arbitrage_free_with(&config.inner())
                     .map(WasmArbitrageReport::from)
                     .map_err(to_js_err)
             }
