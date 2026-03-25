@@ -57,6 +57,7 @@ macro_rules! impl_smile_methods {
             ) -> PyResult<Bound<'py, PyArray1<f64>>> {
                 let stk: Vec<f64> = strikes.as_array().to_vec();
                 let inner = &self.inner;
+                // frozen pyclass: &self is immutable + alive for method duration; inner is pure Rust
                 let data = py.detach(|| {
                     stk.iter()
                         .map(|&k| inner.vol(Strike(k)).map(|v| v.0))

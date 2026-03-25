@@ -206,6 +206,7 @@ impl PySmile {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let stk: Vec<f64> = strikes.as_array().to_vec();
         let inner = &self.inner;
+        // frozen pyclass: &self is immutable + alive for method duration; inner is pure Rust
         let data = py.detach(|| {
             stk.iter()
                 .map(|&k| inner.vol(Strike(k)).map(|v| v.0))
@@ -259,6 +260,7 @@ impl PySurface {
         let stk: Vec<f64> = strikes.as_array().to_vec();
         let (nexp, nstk) = (exp.len(), stk.len());
         let inner = &self.inner;
+        // frozen pyclass: &self is immutable + alive for method duration; inner is pure Rust
         let data = py.detach(|| {
             let mut out = Vec::with_capacity(nexp * nstk);
             for &t in &exp {
