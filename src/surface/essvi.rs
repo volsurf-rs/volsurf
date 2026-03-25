@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
 use crate::error::{self, VolSurfError};
-use crate::smile::SmileSection;
 use crate::smile::arbitrage::ArbitrageReport;
+use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
@@ -215,6 +215,13 @@ impl SmileSection for EssviSlice {
 
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         self.0.is_arbitrage_free()
+    }
+
+    fn is_arbitrage_free_with(
+        &self,
+        config: &ArbitrageScanConfig,
+    ) -> error::Result<ArbitrageReport> {
+        self.0.is_arbitrage_free_with(config)
     }
 }
 

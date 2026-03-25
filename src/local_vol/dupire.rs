@@ -209,9 +209,6 @@ mod tests {
         fn density(&self, _: Strike) -> error::Result<f64> {
             unimplemented!()
         }
-        fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-            unimplemented!()
-        }
     }
 
     impl VolSurface for FlatVolSurface {
@@ -447,9 +444,6 @@ mod tests {
                 0.5
             }
             fn density(&self, _: Strike) -> error::Result<f64> {
-                unimplemented!()
-            }
-            fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
                 unimplemented!()
             }
         }

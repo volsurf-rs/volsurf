@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
 use crate::error::{self, VolSurfError};
+use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::types::{Strike, Vol};
@@ -589,17 +590,22 @@ impl SmileSection for SabrSmile {
     /// # Reference
     /// Hagan et al. (2002), "Managing Smile Risk".
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        const N: usize = 200;
-        const K_MIN: f64 = -2.0;
-        const K_MAX: f64 = 2.0;
+        self.is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+    }
 
+    fn is_arbitrage_free_with(
+        &self,
+        config: &ArbitrageScanConfig,
+    ) -> error::Result<ArbitrageReport> {
+        config.validate()?;
+        let n = config.n_points;
         let mut violations = Vec::new();
-        for i in 0..N {
-            let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
+        for i in 0..n {
+            let k = config.k_min + (config.k_max - config.k_min) * (i as f64) / ((n - 1) as f64);
             let strike = self.forward * k.exp();
             let d = match self.density(Strike(strike)) {
                 Ok(d) => d,
-                Err(_) => continue, // Hagan breakdown in wings
+                Err(_) => continue,
             };
             if d < -super::DENSITY_NEG_TOL {
                 violations.push(ButterflyViolation {

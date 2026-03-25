@@ -21,6 +21,7 @@ use nalgebra::{DMatrix, DVector};
 
 use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
 use crate::error::{self, VolSurfError};
+use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::types::{Strike, Vol};
@@ -670,16 +671,19 @@ impl SmileSection for SviSmile {
     /// # Reference
     /// Gatheral & Jacquier (2014), Theorem 4.1.
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        /// Number of grid points for g-function arbitrage scan.
-        const N: usize = 200;
-        /// Minimum log-moneyness for arbitrage scan.
-        const K_MIN: f64 = -3.0;
-        /// Maximum log-moneyness for arbitrage scan.
-        const K_MAX: f64 = 3.0;
+        self.is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+    }
+
+    fn is_arbitrage_free_with(
+        &self,
+        config: &ArbitrageScanConfig,
+    ) -> error::Result<ArbitrageReport> {
+        config.validate()?;
+        let n = config.n_points;
         let mut violations = Vec::new();
 
-        for i in 0..N {
-            let k = K_MIN + (K_MAX - K_MIN) * (i as f64) / ((N - 1) as f64);
+        for i in 0..n {
+            let k = config.k_min + (config.k_max - config.k_min) * (i as f64) / ((n - 1) as f64);
             let g = self.g_function(k);
             if g < -super::BUTTERFLY_G_TOL {
                 let strike = self.forward * k.exp();
