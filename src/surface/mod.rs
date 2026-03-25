@@ -97,4 +97,7 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// Passes `config` through to per-smile `is_arbitrage_free_with()` calls.
     /// Calendar spread checks use the same hardcoded grid as `diagnostics()`.
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics>;
+
+    /// The tenor grid (expiries in years) that this surface covers.
+    fn tenors(&self) -> &[f64];
 }

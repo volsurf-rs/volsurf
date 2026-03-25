@@ -333,6 +333,10 @@ impl VolSurface for PiecewiseSurface {
         }
         self.diagnostics_from_smile_reports(smile_reports)
     }
+
+    fn tenors(&self) -> &[f64] {
+        &self.tenors
+    }
 }
 
 #[cfg(test)]

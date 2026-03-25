@@ -701,6 +701,10 @@ impl VolSurface for SsviSurface {
             calendar_violations,
         })
     }
+
+    fn tenors(&self) -> &[f64] {
+        &self.tenors
+    }
 }
 
 pub(crate) fn strike_grid(forward: f64, n: usize) -> Vec<f64> {

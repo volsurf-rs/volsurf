@@ -178,6 +178,9 @@ mod tests {
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
+        fn tenors(&self) -> &[f64] {
+            &[]
+        }
     }
 
     fn stub_surface() -> Arc<dyn VolSurface> {
@@ -241,6 +244,9 @@ mod tests {
             _: &crate::smile::ArbitrageScanConfig,
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
+        }
+        fn tenors(&self) -> &[f64] {
+            &[]
         }
     }
 
@@ -483,6 +489,9 @@ mod tests {
                 _: &crate::smile::ArbitrageScanConfig,
             ) -> error::Result<SurfaceDiagnostics> {
                 unimplemented!()
+            }
+            fn tenors(&self) -> &[f64] {
+                &[]
             }
         }
 

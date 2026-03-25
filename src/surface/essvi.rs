@@ -1117,6 +1117,10 @@ impl VolSurface for EssviSurface {
             calendar_violations,
         })
     }
+
+    fn tenors(&self) -> &[f64] {
+        &self.tenors
+    }
 }
 
 #[cfg(test)]
