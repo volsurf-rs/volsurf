@@ -293,4 +293,117 @@ mod tests {
         assert!(report.is_free, "conservative SSVI should be arb-free");
         assert!(report.worst_violation().is_none());
     }
+
+    // ========== ArbitrageScanConfig ==========
+
+    #[test]
+    fn svi_default_config_matches_hardcoded() {
+        use crate::smile::{ArbitrageScanConfig, SviSmile};
+        let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.0, 0.3).unwrap();
+        let default_report = svi.is_arbitrage_free().unwrap();
+        let config_report = svi
+            .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+            .unwrap();
+        assert_eq!(default_report.is_free, config_report.is_free);
+        assert_eq!(
+            default_report.butterfly_violations.len(),
+            config_report.butterfly_violations.len()
+        );
+    }
+
+    #[test]
+    fn sabr_default_config_matches_hardcoded() {
+        use crate::smile::{ArbitrageScanConfig, SabrSmile};
+        let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
+        let default_report = sabr.is_arbitrage_free().unwrap();
+        let config_report = sabr
+            .is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+            .unwrap();
+        assert_eq!(default_report.is_free, config_report.is_free);
+        assert_eq!(
+            default_report.butterfly_violations.len(),
+            config_report.butterfly_violations.len()
+        );
+    }
+
+    #[test]
+    fn higher_n_points_finds_more_violations() {
+        use crate::smile::{ArbitrageScanConfig, SviSmile};
+        // Params that produce wing violations
+        let svi = SviSmile::new(100.0, 1.0, 0.04, 0.4, -0.9, 0.1, 0.2).unwrap();
+        let coarse = svi
+            .is_arbitrage_free_with(&ArbitrageScanConfig {
+                n_points: 20,
+                k_min: -3.0,
+                k_max: 3.0,
+            })
+            .unwrap();
+        let fine = svi
+            .is_arbitrage_free_with(&ArbitrageScanConfig {
+                n_points: 500,
+                k_min: -3.0,
+                k_max: 3.0,
+            })
+            .unwrap();
+        assert!(
+            fine.butterfly_violations.len() >= coarse.butterfly_violations.len(),
+            "finer grid should find at least as many violations"
+        );
+    }
+
+    #[test]
+    fn narrow_range_misses_wing_violations() {
+        use crate::smile::{ArbitrageScanConfig, SabrSmile};
+        let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
+        let wide = sabr
+            .is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+            .unwrap();
+        let narrow = sabr
+            .is_arbitrage_free_with(&ArbitrageScanConfig {
+                n_points: 200,
+                k_min: -0.5,
+                k_max: 0.5,
+            })
+            .unwrap();
+        assert!(
+            narrow.butterfly_violations.len() <= wide.butterfly_violations.len(),
+            "narrow range should find fewer violations"
+        );
+    }
+
+    #[test]
+    fn config_rejects_n_points_below_two() {
+        use crate::smile::{ArbitrageScanConfig, SviSmile};
+        let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.0, 0.3).unwrap();
+        let config = ArbitrageScanConfig {
+            n_points: 1,
+            k_min: -3.0,
+            k_max: 3.0,
+        };
+        assert!(svi.is_arbitrage_free_with(&config).is_err());
+    }
+
+    #[test]
+    fn config_rejects_inverted_range() {
+        use crate::smile::{ArbitrageScanConfig, SviSmile};
+        let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.0, 0.3).unwrap();
+        let config = ArbitrageScanConfig {
+            n_points: 200,
+            k_min: 3.0,
+            k_max: -3.0,
+        };
+        assert!(svi.is_arbitrage_free_with(&config).is_err());
+    }
+
+    #[test]
+    fn config_rejects_nan() {
+        use crate::smile::{ArbitrageScanConfig, SviSmile};
+        let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.0, 0.3).unwrap();
+        let config = ArbitrageScanConfig {
+            n_points: 200,
+            k_min: f64::NAN,
+            k_max: 3.0,
+        };
+        assert!(svi.is_arbitrage_free_with(&config).is_err());
+    }
 }

@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
 use crate::error::{self, VolSurfError};
-use crate::smile::SmileSection;
 use crate::smile::arbitrage::ArbitrageReport;
+use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
@@ -215,6 +215,13 @@ impl SmileSection for EssviSlice {
 
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         self.0.is_arbitrage_free()
+    }
+
+    fn is_arbitrage_free_with(
+        &self,
+        config: &ArbitrageScanConfig,
+    ) -> error::Result<ArbitrageReport> {
+        self.0.is_arbitrage_free_with(config)
     }
 }
 
@@ -1061,6 +1068,10 @@ impl VolSurface for EssviSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+        self.diagnostics_with(&ArbitrageScanConfig::svi_default())
+    }
+
+    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
         let mut smile_reports = Vec::with_capacity(self.tenors.len());
         for (i, &tenor) in self.tenors.iter().enumerate() {
             let rho = self.rho(self.thetas[i]);
@@ -1072,7 +1083,7 @@ impl VolSurface for EssviSurface {
                 self.gamma,
                 self.thetas[i],
             )?;
-            smile_reports.push(slice.is_arbitrage_free()?);
+            smile_reports.push(slice.is_arbitrage_free_with(config)?);
         }
 
         let mut calendar_violations = Vec::new();

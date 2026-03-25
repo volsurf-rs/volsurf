@@ -25,8 +25,9 @@
 use std::fmt;
 
 use crate::error::{self, VolSurfError};
-use crate::smile::SmileSection;
+use crate::smile::arbitrage::ArbitrageReport;
 use crate::smile::spline::SplineSmile;
+use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
 use crate::surface::{CALENDAR_ARB_TOL, EXPIRY_MATCH_TOL};
@@ -181,6 +182,43 @@ enum TenorPosition {
     Between(usize, usize),
 }
 
+impl PiecewiseSurface {
+    fn diagnostics_from_smile_reports(
+        &self,
+        smile_reports: Vec<ArbitrageReport>,
+    ) -> error::Result<SurfaceDiagnostics> {
+        let mut calendar_violations = Vec::new();
+        for i in 0..self.tenors.len().saturating_sub(1) {
+            let f1 = self.smiles[i].forward();
+            let f2 = self.smiles[i + 1].forward();
+            let fwd_avg = 0.5 * (f1 + f2);
+            let grid = Self::strike_grid(fwd_avg, CALENDAR_CHECK_GRID_SIZE);
+
+            for &k in &grid {
+                let w_short = self.smiles[i].variance(Strike(k))?;
+                let w_long = self.smiles[i + 1].variance(Strike(k))?;
+                if w_long.0 < w_short.0 - CALENDAR_ARB_TOL {
+                    calendar_violations.push(CalendarViolation {
+                        strike: k,
+                        tenor_short: self.tenors[i],
+                        tenor_long: self.tenors[i + 1],
+                        variance_short: w_short.0,
+                        variance_long: w_long.0,
+                    });
+                }
+            }
+        }
+
+        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
+
+        Ok(SurfaceDiagnostics {
+            smile_reports,
+            calendar_violations,
+            is_free,
+        })
+    }
+}
+
 impl VolSurface for PiecewiseSurface {
     fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
         validate_positive(expiry.0, "expiry")?;
@@ -284,42 +322,19 @@ impl VolSurface for PiecewiseSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        // Collect per-tenor butterfly reports
         let mut smile_reports = Vec::with_capacity(self.smiles.len());
         for smile in &self.smiles {
             smile_reports.push(smile.is_arbitrage_free()?);
         }
+        self.diagnostics_from_smile_reports(smile_reports)
+    }
 
-        // Calendar spread checks between consecutive tenors
-        let mut calendar_violations = Vec::new();
-        for i in 0..self.tenors.len().saturating_sub(1) {
-            let f1 = self.smiles[i].forward();
-            let f2 = self.smiles[i + 1].forward();
-            let fwd_avg = 0.5 * (f1 + f2);
-            let grid = Self::strike_grid(fwd_avg, CALENDAR_CHECK_GRID_SIZE);
-
-            for &k in &grid {
-                let w_short = self.smiles[i].variance(Strike(k))?;
-                let w_long = self.smiles[i + 1].variance(Strike(k))?;
-                if w_long.0 < w_short.0 - CALENDAR_ARB_TOL {
-                    calendar_violations.push(CalendarViolation {
-                        strike: k,
-                        tenor_short: self.tenors[i],
-                        tenor_long: self.tenors[i + 1],
-                        variance_short: w_short.0,
-                        variance_long: w_long.0,
-                    });
-                }
-            }
+    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
+        let mut smile_reports = Vec::with_capacity(self.smiles.len());
+        for smile in &self.smiles {
+            smile_reports.push(smile.is_arbitrage_free_with(config)?);
         }
-
-        let is_free = smile_reports.iter().all(|r| r.is_free) && calendar_violations.is_empty();
-
-        Ok(SurfaceDiagnostics {
-            smile_reports,
-            calendar_violations,
-            is_free,
-        })
+        self.diagnostics_from_smile_reports(smile_reports)
     }
 }
 

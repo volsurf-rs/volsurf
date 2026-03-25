@@ -11,8 +11,8 @@ pub use arbitrage::{
 };
 pub use builder::{WasmPiecewiseSurface, WasmSurfaceBuilder};
 pub use smile::{
-    WasmDataFilter, WasmSabrSmile, WasmSmile, WasmSviSmile, WasmWeightingScheme,
-    weighting_model_default, weighting_uniform, weighting_vega,
+    WasmArbitrageScanConfig, WasmDataFilter, WasmSabrSmile, WasmSmile, WasmSviSmile,
+    WasmWeightingScheme, weighting_model_default, weighting_uniform, weighting_vega,
 };
 pub use surface::{WasmEssviSurface, WasmPerTenorFit, WasmSsviSurface};
 

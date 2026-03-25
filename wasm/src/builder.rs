@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
-use crate::smile::WasmSmile;
+use crate::smile::{WasmArbitrageScanConfig, WasmSmile};
 
 fn consumed() -> JsValue {
     JsValue::from_str("builder already consumed by build()")
@@ -171,6 +171,16 @@ impl WasmPiecewiseSurface {
     pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
         self.inner
             .diagnostics()
+            .map(WasmSurfaceDiagnostics::from)
+            .map_err(to_js_err)
+    }
+
+    pub fn diagnostics_with(
+        &self,
+        config: &WasmArbitrageScanConfig,
+    ) -> Result<WasmSurfaceDiagnostics, JsValue> {
+        self.inner
+            .diagnostics_with(&config.inner())
             .map(WasmSurfaceDiagnostics::from)
             .map_err(to_js_err)
     }

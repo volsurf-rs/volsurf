@@ -5,7 +5,9 @@ use wasm_bindgen::prelude::*;
 
 use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
-use crate::smile::{WasmDataFilter, WasmSmile, WasmSviSmile, WasmWeightingScheme};
+use crate::smile::{
+    WasmArbitrageScanConfig, WasmDataFilter, WasmSmile, WasmSviSmile, WasmWeightingScheme,
+};
 
 fn market_data_from_flat(
     flat: &[f64],
@@ -72,6 +74,16 @@ macro_rules! impl_wasm_surface_methods {
             pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
                 self.inner
                     .diagnostics()
+                    .map(WasmSurfaceDiagnostics::from)
+                    .map_err(to_js_err)
+            }
+
+            pub fn diagnostics_with(
+                &self,
+                config: &WasmArbitrageScanConfig,
+            ) -> Result<WasmSurfaceDiagnostics, JsValue> {
+                self.inner
+                    .diagnostics_with(&config.inner())
                     .map(WasmSurfaceDiagnostics::from)
                     .map_err(to_js_err)
             }

@@ -173,6 +173,12 @@ mod tests {
         fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
+        fn diagnostics_with(
+            &self,
+            _: &crate::smile::ArbitrageScanConfig,
+        ) -> error::Result<SurfaceDiagnostics> {
+            unimplemented!()
+        }
     }
 
     fn stub_surface() -> Arc<dyn VolSurface> {
@@ -209,9 +215,6 @@ mod tests {
         fn density(&self, _: Strike) -> error::Result<f64> {
             unimplemented!()
         }
-        fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-            unimplemented!()
-        }
     }
 
     impl VolSurface for FlatVolSurface {
@@ -229,6 +232,12 @@ mod tests {
             }))
         }
         fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+            unimplemented!()
+        }
+        fn diagnostics_with(
+            &self,
+            _: &crate::smile::ArbitrageScanConfig,
+        ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
     }
@@ -449,9 +458,6 @@ mod tests {
             fn density(&self, _: Strike) -> error::Result<f64> {
                 unimplemented!()
             }
-            fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-                unimplemented!()
-            }
         }
 
         impl VolSurface for ZeroFwdSurface {
@@ -465,6 +471,12 @@ mod tests {
                 Ok(Box::new(ZeroFwdSmile))
             }
             fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+                unimplemented!()
+            }
+            fn diagnostics_with(
+                &self,
+                _: &crate::smile::ArbitrageScanConfig,
+            ) -> error::Result<SurfaceDiagnostics> {
                 unimplemented!()
             }
         }

@@ -8,7 +8,7 @@ use volsurf::surface::{EssviSurface, PerTenorFit, SsviSurface, SurfaceBuilder};
 use volsurf::{Strike, Tenor};
 
 use crate::error::to_py_err;
-use crate::types::{PySmile, PySmileModel, PySurface, PySurfaceDiagnostics};
+use crate::types::{PyArbitrageScanConfig, PySmile, PySmileModel, PySurface, PySurfaceDiagnostics};
 
 macro_rules! impl_vol_grid {
     ($name:ident) => {
@@ -89,6 +89,14 @@ impl PySsviSurface {
 
     fn diagnostics(&self) -> PyResult<PySurfaceDiagnostics> {
         Ok(self.inner.diagnostics().map_err(to_py_err)?.into())
+    }
+
+    fn diagnostics_with(&self, config: &PyArbitrageScanConfig) -> PyResult<PySurfaceDiagnostics> {
+        Ok(self
+            .inner
+            .diagnostics_with(&config.inner)
+            .map_err(to_py_err)?
+            .into())
     }
 
     #[getter]
@@ -246,6 +254,14 @@ impl PyEssviSurface {
 
     fn diagnostics(&self) -> PyResult<PySurfaceDiagnostics> {
         Ok(self.inner.diagnostics().map_err(to_py_err)?.into())
+    }
+
+    fn diagnostics_with(&self, config: &PyArbitrageScanConfig) -> PyResult<PySurfaceDiagnostics> {
+        Ok(self
+            .inner
+            .diagnostics_with(&config.inner)
+            .map_err(to_py_err)?
+            .into())
     }
 
     #[getter]

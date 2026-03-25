@@ -5,7 +5,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 use volsurf::calibration::{DataFilter, WeightingScheme};
-use volsurf::smile::{ArbitrageReport, ButterflyViolation};
+use volsurf::smile::{ArbitrageReport, ArbitrageScanConfig, ButterflyViolation};
 use volsurf::surface::{CalendarViolation, SmileModel, SurfaceDiagnostics};
 use volsurf::{OptionType, SmileSection, Strike, Tenor, VolSurface};
 
@@ -127,6 +127,64 @@ impl PyDataFilter {
     }
 }
 
+#[pyclass(frozen, from_py_object, name = "ArbitrageScanConfig")]
+#[derive(Clone)]
+pub struct PyArbitrageScanConfig {
+    pub(crate) inner: ArbitrageScanConfig,
+}
+
+#[pymethods]
+impl PyArbitrageScanConfig {
+    #[new]
+    #[pyo3(signature = (n_points, k_min, k_max))]
+    fn new(n_points: usize, k_min: f64, k_max: f64) -> Self {
+        Self {
+            inner: ArbitrageScanConfig {
+                n_points,
+                k_min,
+                k_max,
+            },
+        }
+    }
+
+    #[staticmethod]
+    fn svi_default() -> Self {
+        Self {
+            inner: ArbitrageScanConfig::svi_default(),
+        }
+    }
+
+    #[staticmethod]
+    fn sabr_default() -> Self {
+        Self {
+            inner: ArbitrageScanConfig::sabr_default(),
+        }
+    }
+
+    #[getter]
+    fn n_points(&self) -> usize {
+        self.inner.n_points
+    }
+
+    #[getter]
+    fn k_min(&self) -> f64 {
+        self.inner.k_min
+    }
+
+    #[getter]
+    fn k_max(&self) -> f64 {
+        self.inner.k_max
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.inner)
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
 #[pyclass(frozen, from_py_object, name = "WeightingScheme")]
 #[derive(Clone)]
 pub struct PyWeightingScheme {
@@ -198,6 +256,17 @@ impl PySmile {
         Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
     }
 
+    fn is_arbitrage_free_with(
+        &self,
+        config: &PyArbitrageScanConfig,
+    ) -> PyResult<PyArbitrageReport> {
+        Ok(self
+            .inner
+            .is_arbitrage_free_with(&config.inner)
+            .map_err(to_py_err)?
+            .into())
+    }
+
     #[pyo3(signature = (strikes))]
     fn vol_array<'py>(
         &self,
@@ -247,6 +316,14 @@ impl PySurface {
 
     fn diagnostics(&self) -> PyResult<PySurfaceDiagnostics> {
         Ok(self.inner.diagnostics().map_err(to_py_err)?.into())
+    }
+
+    fn diagnostics_with(&self, config: &PyArbitrageScanConfig) -> PyResult<PySurfaceDiagnostics> {
+        Ok(self
+            .inner
+            .diagnostics_with(&config.inner)
+            .map_err(to_py_err)?
+            .into())
     }
 
     #[pyo3(signature = (expiries, strikes))]
