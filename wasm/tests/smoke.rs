@@ -386,7 +386,7 @@ fn svi_is_arbitrage_free() {
     assert!(report.butterfly_violations().is_empty());
 
     let json = report.to_json().unwrap();
-    assert!(json.contains("\"is_free\""));
+    assert!(json.contains("\"expiry\""));
     assert!(json.contains("\"butterfly_violations\""));
 }
 
@@ -538,7 +538,8 @@ fn svi_butterfly_violations_detected() {
     }
 
     let json = report.to_json().unwrap();
-    assert!(json.contains("\"is_free\":false"));
+    assert!(json.contains("\"butterfly_violations\""));
+    assert!(!report.is_arbitrage_free());
 }
 
 // ── WasmSmile is_arbitrage_free (via smile_at) ──

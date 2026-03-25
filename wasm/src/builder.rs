@@ -168,6 +168,10 @@ impl WasmPiecewiseSurface {
         Ok(WasmSmile::new(smile))
     }
 
+    pub fn tenors(&self) -> Vec<f64> {
+        self.inner.tenors().to_vec()
+    }
+
     pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
         self.inner
             .diagnostics()

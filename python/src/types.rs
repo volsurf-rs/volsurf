@@ -252,6 +252,11 @@ impl PySmile {
         self.inner.expiry()
     }
 
+    #[getter]
+    fn model_name(&self) -> &str {
+        self.inner.model_name()
+    }
+
     fn is_arbitrage_free(&self) -> PyResult<PyArbitrageReport> {
         Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
     }
@@ -312,6 +317,10 @@ impl PySurface {
     fn smile_at(&self, expiry: f64) -> PyResult<PySmile> {
         let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_py_err)?;
         Ok(PySmile { inner: smile })
+    }
+
+    fn tenors(&self) -> Vec<f64> {
+        self.inner.tenors().to_vec()
     }
 
     fn diagnostics(&self) -> PyResult<PySurfaceDiagnostics> {
@@ -389,6 +398,8 @@ impl From<&ButterflyViolation> for PyButterflyViolation {
 pub struct PyArbitrageReport {
     #[pyo3(get)]
     is_free: bool,
+    #[pyo3(get)]
+    expiry: f64,
     violations: Vec<ButterflyViolation>,
 }
 
@@ -426,6 +437,7 @@ impl From<ArbitrageReport> for PyArbitrageReport {
     fn from(r: ArbitrageReport) -> Self {
         Self {
             is_free: r.is_free(),
+            expiry: r.expiry,
             violations: r.butterfly_violations,
         }
     }

@@ -38,6 +38,11 @@ macro_rules! impl_wasm_smile_methods {
                 self.inner.expiry()
             }
 
+            #[wasm_bindgen(getter)]
+            pub fn model_name(&self) -> String {
+                self.inner.model_name().to_string()
+            }
+
             pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
                 self.inner
                     .is_arbitrage_free()
