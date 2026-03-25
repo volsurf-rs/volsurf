@@ -5,7 +5,7 @@ use volsurf::Strike;
 use volsurf::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
 
 use crate::error::to_py_err;
-use crate::types::PyArbitrageReport;
+use crate::types::{PyArbitrageReport, PyArbitrageScanConfig};
 
 macro_rules! impl_smile_methods {
     ($name:ident) => {
@@ -35,6 +35,17 @@ macro_rules! impl_smile_methods {
 
             fn is_arbitrage_free(&self) -> PyResult<PyArbitrageReport> {
                 Ok(self.inner.is_arbitrage_free().map_err(to_py_err)?.into())
+            }
+
+            fn is_arbitrage_free_with(
+                &self,
+                config: &PyArbitrageScanConfig,
+            ) -> PyResult<PyArbitrageReport> {
+                Ok(self
+                    .inner
+                    .is_arbitrage_free_with(&config.inner)
+                    .map_err(to_py_err)?
+                    .into())
             }
 
             fn to_json(&self) -> PyResult<String> {

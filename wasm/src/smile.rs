@@ -1,6 +1,6 @@
 use volsurf::Strike;
 use volsurf::calibration::{DataFilter, WeightingScheme};
-use volsurf::smile::{SabrSmile, SmileSection, SviSmile};
+use volsurf::smile::{ArbitrageScanConfig, SabrSmile, SmileSection, SviSmile};
 use wasm_bindgen::prelude::*;
 
 use crate::arbitrage::WasmArbitrageReport;
@@ -41,6 +41,16 @@ macro_rules! impl_wasm_smile_methods {
             pub fn is_arbitrage_free(&self) -> Result<WasmArbitrageReport, JsValue> {
                 self.inner
                     .is_arbitrage_free()
+                    .map(WasmArbitrageReport::from)
+                    .map_err(to_js_err)
+            }
+
+            pub fn is_arbitrage_free_with(
+                &self,
+                config: &WasmArbitrageScanConfig,
+            ) -> Result<WasmArbitrageReport, JsValue> {
+                self.inner
+                    .is_arbitrage_free_with(&config.inner)
                     .map(WasmArbitrageReport::from)
                     .map_err(to_js_err)
             }
@@ -98,6 +108,58 @@ impl WasmDataFilter {
     #[wasm_bindgen(getter)]
     pub fn vol_cliff_filter(&self) -> Option<bool> {
         self.inner.vol_cliff_filter
+    }
+}
+
+#[wasm_bindgen]
+pub struct WasmArbitrageScanConfig {
+    inner: ArbitrageScanConfig,
+}
+
+impl WasmArbitrageScanConfig {
+    pub(crate) fn inner(&self) -> ArbitrageScanConfig {
+        self.inner
+    }
+}
+
+#[wasm_bindgen]
+impl WasmArbitrageScanConfig {
+    #[wasm_bindgen(constructor)]
+    pub fn new(n_points: usize, k_min: f64, k_max: f64) -> WasmArbitrageScanConfig {
+        Self {
+            inner: ArbitrageScanConfig {
+                n_points,
+                k_min,
+                k_max,
+            },
+        }
+    }
+
+    pub fn svi_default() -> WasmArbitrageScanConfig {
+        Self {
+            inner: ArbitrageScanConfig::svi_default(),
+        }
+    }
+
+    pub fn sabr_default() -> WasmArbitrageScanConfig {
+        Self {
+            inner: ArbitrageScanConfig::sabr_default(),
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn n_points(&self) -> usize {
+        self.inner.n_points
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn k_min(&self) -> f64 {
+        self.inner.k_min
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn k_max(&self) -> f64 {
+        self.inner.k_max
     }
 }
 
