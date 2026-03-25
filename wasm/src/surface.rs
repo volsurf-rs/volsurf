@@ -32,6 +32,92 @@ fn market_data_from_flat(
     Ok(out)
 }
 
+macro_rules! impl_wasm_surface_methods {
+    ($name:ident, $inner:ty) => {
+        #[wasm_bindgen]
+        impl $name {
+            pub fn black_vol(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
+                Ok(self
+                    .inner
+                    .black_vol(Tenor(expiry), Strike(strike))
+                    .map_err(to_js_err)?
+                    .0)
+            }
+
+            pub fn black_variance(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
+                Ok(self
+                    .inner
+                    .black_variance(Tenor(expiry), Strike(strike))
+                    .map_err(to_js_err)?
+                    .0)
+            }
+
+            pub fn tenors(&self) -> Vec<f64> {
+                self.inner.tenors().to_vec()
+            }
+
+            pub fn forwards(&self) -> Vec<f64> {
+                self.inner.forwards().to_vec()
+            }
+
+            pub fn thetas(&self) -> Vec<f64> {
+                self.inner.thetas().to_vec()
+            }
+
+            pub fn smile_at(&self, expiry: f64) -> Result<WasmSmile, JsValue> {
+                let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_js_err)?;
+                Ok(WasmSmile::new(smile))
+            }
+
+            pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
+                self.inner
+                    .diagnostics()
+                    .map(WasmSurfaceDiagnostics::from)
+                    .map_err(to_js_err)
+            }
+
+            pub fn to_json(&self) -> Result<String, JsValue> {
+                serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+            }
+
+            pub fn from_json(s: &str) -> Result<$name, JsValue> {
+                let inner: $inner =
+                    serde_json::from_str(s).map_err(|e| JsValue::from_str(&e.to_string()))?;
+                Ok(Self { inner })
+            }
+
+            pub fn calibrate(
+                market_data_flat: Vec<f64>,
+                tenor_sizes: Vec<usize>,
+                tenors: Vec<f64>,
+                forwards: Vec<f64>,
+            ) -> Result<$name, JsValue> {
+                let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
+                let inner =
+                    <$inner>::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
+                Ok(Self { inner })
+            }
+
+            pub fn calibrate_with_config(
+                market_data_flat: Vec<f64>,
+                tenor_sizes: Vec<usize>,
+                tenors: Vec<f64>,
+                forwards: Vec<f64>,
+                filter: Option<WasmDataFilter>,
+                weighting: Option<WasmWeightingScheme>,
+            ) -> Result<$name, JsValue> {
+                let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
+                let f = filter.map(|f| f.inner()).unwrap_or_default();
+                let w = weighting.map(|w| w.inner()).unwrap_or_default();
+                let inner =
+                    <$inner>::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
+                        .map_err(to_js_err)?;
+                Ok(Self { inner })
+            }
+        }
+    };
+}
+
 #[wasm_bindgen]
 pub struct WasmSsviSurface {
     inner: SsviSurface,
@@ -53,22 +139,6 @@ impl WasmSsviSurface {
         Ok(Self { inner })
     }
 
-    pub fn black_vol(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
-        Ok(self
-            .inner
-            .black_vol(Tenor(expiry), Strike(strike))
-            .map_err(to_js_err)?
-            .0)
-    }
-
-    pub fn black_variance(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
-        Ok(self
-            .inner
-            .black_variance(Tenor(expiry), Strike(strike))
-            .map_err(to_js_err)?
-            .0)
-    }
-
     #[wasm_bindgen(getter)]
     pub fn rho(&self) -> f64 {
         self.inner.rho()
@@ -83,68 +153,9 @@ impl WasmSsviSurface {
     pub fn gamma(&self) -> f64 {
         self.inner.gamma()
     }
-
-    pub fn tenors(&self) -> Vec<f64> {
-        self.inner.tenors().to_vec()
-    }
-
-    pub fn forwards(&self) -> Vec<f64> {
-        self.inner.forwards().to_vec()
-    }
-
-    pub fn thetas(&self) -> Vec<f64> {
-        self.inner.thetas().to_vec()
-    }
-
-    pub fn smile_at(&self, expiry: f64) -> Result<WasmSmile, JsValue> {
-        let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_js_err)?;
-        Ok(WasmSmile::new(smile))
-    }
-
-    pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
-        self.inner
-            .diagnostics()
-            .map(WasmSurfaceDiagnostics::from)
-            .map_err(to_js_err)
-    }
-
-    pub fn to_json(&self) -> Result<String, JsValue> {
-        serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    pub fn from_json(s: &str) -> Result<WasmSsviSurface, JsValue> {
-        let inner: SsviSurface =
-            serde_json::from_str(s).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(Self { inner })
-    }
-
-    pub fn calibrate(
-        market_data_flat: Vec<f64>,
-        tenor_sizes: Vec<usize>,
-        tenors: Vec<f64>,
-        forwards: Vec<f64>,
-    ) -> Result<WasmSsviSurface, JsValue> {
-        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
-        let inner = SsviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
-        Ok(Self { inner })
-    }
-
-    pub fn calibrate_with_config(
-        market_data_flat: Vec<f64>,
-        tenor_sizes: Vec<usize>,
-        tenors: Vec<f64>,
-        forwards: Vec<f64>,
-        filter: Option<WasmDataFilter>,
-        weighting: Option<WasmWeightingScheme>,
-    ) -> Result<WasmSsviSurface, JsValue> {
-        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
-        let f = filter.map(|f| f.inner()).unwrap_or_default();
-        let w = weighting.map(|w| w.inner()).unwrap_or_default();
-        let inner = SsviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
-            .map_err(to_js_err)?;
-        Ok(Self { inner })
-    }
 }
+
+impl_wasm_surface_methods!(WasmSsviSurface, SsviSurface);
 
 #[wasm_bindgen]
 pub struct WasmEssviSurface {
@@ -169,22 +180,6 @@ impl WasmEssviSurface {
         let inner = EssviSurface::new(rho_0, rho_m, a, eta, gamma, tenors, forwards, thetas)
             .map_err(to_js_err)?;
         Ok(Self { inner })
-    }
-
-    pub fn black_vol(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
-        Ok(self
-            .inner
-            .black_vol(Tenor(expiry), Strike(strike))
-            .map_err(to_js_err)?
-            .0)
-    }
-
-    pub fn black_variance(&self, expiry: f64, strike: f64) -> Result<f64, JsValue> {
-        Ok(self
-            .inner
-            .black_variance(Tenor(expiry), Strike(strike))
-            .map_err(to_js_err)?
-            .0)
     }
 
     #[wasm_bindgen(getter)]
@@ -217,67 +212,6 @@ impl WasmEssviSurface {
         self.inner.theta_max()
     }
 
-    pub fn tenors(&self) -> Vec<f64> {
-        self.inner.tenors().to_vec()
-    }
-
-    pub fn forwards(&self) -> Vec<f64> {
-        self.inner.forwards().to_vec()
-    }
-
-    pub fn thetas(&self) -> Vec<f64> {
-        self.inner.thetas().to_vec()
-    }
-
-    pub fn smile_at(&self, expiry: f64) -> Result<WasmSmile, JsValue> {
-        let smile = self.inner.smile_at(Tenor(expiry)).map_err(to_js_err)?;
-        Ok(WasmSmile::new(smile))
-    }
-
-    pub fn diagnostics(&self) -> Result<WasmSurfaceDiagnostics, JsValue> {
-        self.inner
-            .diagnostics()
-            .map(WasmSurfaceDiagnostics::from)
-            .map_err(to_js_err)
-    }
-
-    pub fn to_json(&self) -> Result<String, JsValue> {
-        serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    pub fn from_json(s: &str) -> Result<WasmEssviSurface, JsValue> {
-        let inner: EssviSurface =
-            serde_json::from_str(s).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(Self { inner })
-    }
-
-    pub fn calibrate(
-        market_data_flat: Vec<f64>,
-        tenor_sizes: Vec<usize>,
-        tenors: Vec<f64>,
-        forwards: Vec<f64>,
-    ) -> Result<WasmEssviSurface, JsValue> {
-        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
-        let inner = EssviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
-        Ok(Self { inner })
-    }
-
-    pub fn calibrate_with_config(
-        market_data_flat: Vec<f64>,
-        tenor_sizes: Vec<usize>,
-        tenors: Vec<f64>,
-        forwards: Vec<f64>,
-        filter: Option<WasmDataFilter>,
-        weighting: Option<WasmWeightingScheme>,
-    ) -> Result<WasmEssviSurface, JsValue> {
-        let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
-        let f = filter.map(|f| f.inner()).unwrap_or_default();
-        let w = weighting.map(|w| w.inner()).unwrap_or_default();
-        let inner = EssviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
-            .map_err(to_js_err)?;
-        Ok(Self { inner })
-    }
-
     pub fn fit_per_tenor(
         market_data_flat: Vec<f64>,
         tenor_sizes: Vec<usize>,
@@ -297,6 +231,8 @@ impl WasmEssviSurface {
         Ok(Self { inner })
     }
 }
+
+impl_wasm_surface_methods!(WasmEssviSurface, EssviSurface);
 
 #[wasm_bindgen]
 pub struct WasmPerTenorFit {
