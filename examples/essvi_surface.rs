@@ -174,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Numerical calendar violations: {}",
         diag.calendar_violations.len()
     );
-    println!("Surface arb-free: {}", diag.is_free);
+    println!("Surface arb-free: {}", diag.is_free());
 
     // ---------------------------------------------------------------
     // 7. Compare eSSVI vs SSVI (fixed rho = rho_m)

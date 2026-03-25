@@ -1108,12 +1108,9 @@ impl VolSurface for EssviSurface {
             }
         }
 
-        let is_free = smile_reports.iter().all(|r| r.is_free()) && calendar_violations.is_empty();
-
         Ok(SurfaceDiagnostics {
             smile_reports,
             calendar_violations,
-            is_free,
         })
     }
 }
@@ -2048,7 +2045,7 @@ mod tests {
         let s = equity_surface();
         let diag = s.diagnostics().unwrap();
         assert_eq!(diag.smile_reports.len(), 4);
-        assert!(diag.is_free, "conservative params should be arb-free");
+        assert!(diag.is_free(), "conservative params should be arb-free");
         assert!(diag.calendar_violations.is_empty());
     }
 
@@ -2057,7 +2054,7 @@ mod tests {
         let s = two_tenor_surface();
         let diag = s.diagnostics().unwrap();
         assert_eq!(diag.smile_reports.len(), 2);
-        assert!(diag.is_free);
+        assert!(diag.is_free());
     }
 
     #[test]
@@ -2325,7 +2322,7 @@ mod tests {
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let diag = calibrated.diagnostics().unwrap();
         assert!(
-            diag.is_free,
+            diag.is_free(),
             "calibrated eSSVI from conservative input should be arb-free"
         );
     }

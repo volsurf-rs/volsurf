@@ -269,7 +269,7 @@ fn thm_4_1_full_diagnostics_paper_params() {
         "paper params should have no calendar violations, found {}",
         diag.calendar_violations.len()
     );
-    assert!(diag.is_free, "paper params should be fully arb-free");
+    assert!(diag.is_free(), "paper params should be fully arb-free");
 }
 
 // ── Proposition 3.5: two-slice discrete no-arb ──────────────────

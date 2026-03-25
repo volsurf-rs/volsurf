@@ -114,7 +114,7 @@ impl From<SurfaceDiagnostics> for WasmSurfaceDiagnostics {
 impl WasmSurfaceDiagnostics {
     #[wasm_bindgen(getter)]
     pub fn is_arbitrage_free(&self) -> bool {
-        self.inner.is_free
+        self.inner.is_free()
     }
 
     pub fn smile_reports(&self) -> Vec<WasmArbitrageReport> {

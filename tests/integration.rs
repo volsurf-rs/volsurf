@@ -355,7 +355,7 @@ fn calendar_violation_detected_for_inverted_surface() -> Result<(), Box<dyn std:
     )?;
 
     let diag = surface.diagnostics()?;
-    assert!(!diag.is_free, "Inverted surface should not be arb-free");
+    assert!(!diag.is_free(), "Inverted surface should not be arb-free");
     assert!(
         !diag.calendar_violations.is_empty(),
         "Should have calendar violations"

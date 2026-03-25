@@ -200,7 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Surface diagnostics
     let diag = surface.diagnostics()?;
-    println!("\nSurface arb-free: {}", diag.is_free);
+    println!("\nSurface arb-free: {}", diag.is_free());
     println!("Calendar violations: {}", diag.calendar_violations.len());
 
     Ok(())

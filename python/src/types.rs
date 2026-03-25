@@ -509,7 +509,7 @@ impl PySurfaceDiagnostics {
 impl From<SurfaceDiagnostics> for PySurfaceDiagnostics {
     fn from(d: SurfaceDiagnostics) -> Self {
         Self {
-            is_free: d.is_free,
+            is_free: d.is_free(),
             smile_reports_inner: d.smile_reports,
             calendar_violations_inner: d.calendar_violations,
         }

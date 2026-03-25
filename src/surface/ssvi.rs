@@ -696,12 +696,9 @@ impl VolSurface for SsviSurface {
             }
         }
 
-        let is_free = smile_reports.iter().all(|r| r.is_free()) && calendar_violations.is_empty();
-
         Ok(SurfaceDiagnostics {
             smile_reports,
             calendar_violations,
-            is_free,
         })
     }
 }
@@ -1823,7 +1820,7 @@ mod tests {
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let diag = calibrated.diagnostics().unwrap();
         assert!(
-            diag.is_free,
+            diag.is_free(),
             "calibrated SSVI from conservative input should be arb-free"
         );
     }
@@ -2025,7 +2022,7 @@ mod tests {
         // eta * (1 + |rho|) = 0.5 * 1.3 = 0.65 < 2, and thetas strictly increasing.
         let s = equity_surface();
         let diag = s.diagnostics().unwrap();
-        assert!(diag.is_free, "conservative SSVI should be arb-free");
+        assert!(diag.is_free(), "conservative SSVI should be arb-free");
         assert!(diag.calendar_violations.is_empty());
         assert_eq!(diag.smile_reports.len(), 4);
         assert!(diag.smile_reports.iter().all(|r| r.is_free()));
@@ -2044,7 +2041,7 @@ mod tests {
         )
         .unwrap();
         let diag = s.diagnostics().unwrap();
-        assert!(!diag.is_free);
+        assert!(!diag.is_free());
         // At least one tenor should have butterfly violations
         assert!(diag.smile_reports.iter().any(|r| !r.is_free()));
     }
@@ -2170,7 +2167,7 @@ mod tests {
 
         let diag = surface.diagnostics().unwrap();
         assert!(
-            !diag.is_free,
+            !diag.is_free(),
             "inverted SSVI slices should have calendar violations"
         );
         assert!(

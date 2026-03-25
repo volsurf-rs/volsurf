@@ -155,7 +155,7 @@ assert!(report.is_free());
 
 // Surface-level diagnostics (butterfly + calendar)
 let diagnostics = surface.diagnostics()?;
-if !diagnostics.is_free {
+if !diagnostics.is_free() {
     for cal in &diagnostics.calendar_violations {
         println!("Calendar violation at K={}", cal.strike);
     }
