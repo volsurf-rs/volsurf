@@ -376,7 +376,7 @@ fn too_few_points_rejected() {
 
 #[wasm_bindgen_test]
 fn version_returns_string() {
-    assert_eq!(version(), "2.1.0");
+    assert_eq!(version(), "2.2.0");
 }
 
 // ── is_arbitrage_free on smiles ──
@@ -811,4 +811,184 @@ fn builder_with_weighting() {
     builder.add_tenor(0.25, strikes, vols).unwrap();
     let surface = builder.build().unwrap();
     assert!(surface.black_vol(0.25, 100.0).unwrap() > 0.0);
+}
+
+// ── Implied vol: price → IV round-trips (mirrors python/tests/test_implied.py) ──
+// NOTE: these smoke tests execute on the HOST via the rlib crate-type
+// (`cargo test -p volsurf-wasm`); #[wasm_bindgen_test] degrades to a plain test
+// off-wasm, so no wasm runtime / wasm-pack is required (see PAN-28 R-3).
+
+#[wasm_bindgen_test]
+fn black_iv_round_trip_call() {
+    let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
+    let price = black_price(f, k, sigma, t, WasmOptionType::Call).unwrap();
+    let iv = WasmBlackImpliedVol::compute(price, f, k, t, WasmOptionType::Call).unwrap();
+    assert!((iv - sigma).abs() < 1e-12, "black call iv={iv}");
+}
+
+#[wasm_bindgen_test]
+fn black_iv_round_trip_put() {
+    let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
+    let price = black_price(f, k, sigma, t, WasmOptionType::Put).unwrap();
+    let iv = WasmBlackImpliedVol::compute(price, f, k, t, WasmOptionType::Put).unwrap();
+    assert!((iv - sigma).abs() < 1e-12, "black put iv={iv}");
+}
+
+#[wasm_bindgen_test]
+fn normal_iv_round_trip_call() {
+    // normal vol is in price units, so sigma = 20.0
+    let (f, k, t, sigma) = (100.0, 100.0, 1.0, 20.0);
+    let price = normal_price(f, k, sigma, t, WasmOptionType::Call).unwrap();
+    let iv = WasmNormalImpliedVol::compute(price, f, k, t, WasmOptionType::Call).unwrap();
+    assert!((iv - sigma).abs() < 1e-10, "normal call iv={iv}");
+}
+
+#[wasm_bindgen_test]
+fn normal_iv_round_trip_put() {
+    let (f, k, t, sigma) = (100.0, 100.0, 1.0, 20.0);
+    let price = normal_price(f, k, sigma, t, WasmOptionType::Put).unwrap();
+    let iv = WasmNormalImpliedVol::compute(price, f, k, t, WasmOptionType::Put).unwrap();
+    assert!((iv - sigma).abs() < 1e-10, "normal put iv={iv}");
+}
+
+#[wasm_bindgen_test]
+fn displaced_iv_round_trip_call() {
+    let (f, k, t, sigma, beta) = (100.0, 100.0, 1.0, 0.20, 0.5);
+    let price = displaced_price(f, k, sigma, t, beta, WasmOptionType::Call).unwrap();
+    let calc = WasmDisplacedImpliedVol::new(beta).unwrap();
+    assert!(
+        (calc.beta() - beta).abs() < 1e-15,
+        "beta getter={}",
+        calc.beta()
+    );
+    let iv = calc.compute(price, f, k, t, WasmOptionType::Call).unwrap();
+    assert!((iv - sigma).abs() < 1e-10, "displaced call iv={iv}");
+}
+
+#[wasm_bindgen_test]
+fn displaced_iv_round_trip_put() {
+    let (f, k, t, sigma, beta) = (100.0, 90.0, 1.0, 0.20, 0.5);
+    let price = displaced_price(f, k, sigma, t, beta, WasmOptionType::Put).unwrap();
+    let calc = WasmDisplacedImpliedVol::new(beta).unwrap();
+    let iv = calc.compute(price, f, k, t, WasmOptionType::Put).unwrap();
+    assert!((iv - sigma).abs() < 1e-10, "displaced put iv={iv}");
+}
+
+#[wasm_bindgen_test]
+fn displaced_beta_one_equals_black() {
+    // At beta = 1.0 displaced diffusion collapses to Black: a Black price
+    // recovers its input sigma through the beta=1.0 displaced calculator.
+    let (f, k, t, sigma) = (100.0, 110.0, 1.0, 0.25);
+    let price = black_price(f, k, sigma, t, WasmOptionType::Call).unwrap();
+    let calc = WasmDisplacedImpliedVol::new(1.0).unwrap();
+    let iv = calc.compute(price, f, k, t, WasmOptionType::Call).unwrap();
+    assert!((iv - sigma).abs() < 1e-12, "displaced(beta=1) iv={iv}");
+}
+
+#[wasm_bindgen_test]
+fn displaced_rejects_beta_out_of_range() {
+    assert!(WasmDisplacedImpliedVol::new(1.1).is_err());
+    assert!(WasmDisplacedImpliedVol::new(-0.1).is_err());
+}
+
+// ── Conventions known-values (mirrors src/conventions.rs + test_implied.py) ──
+
+#[wasm_bindgen_test]
+fn convention_known_values() {
+    assert!(
+        log_moneyness(100.0, 100.0).unwrap().abs() < 1e-12,
+        "log_moneyness ATM"
+    );
+    assert!(
+        (moneyness(120.0, 100.0).unwrap() - 1.2).abs() < 1e-12,
+        "moneyness 120/100"
+    );
+    assert!(
+        (moneyness(100.0, 100.0).unwrap() - 1.0).abs() < 1e-12,
+        "moneyness ATM"
+    );
+    // 100 * e^0.05 = 105.127109637602 (same literal as src/conventions.rs test)
+    let fwd = forward_price(100.0, 0.05, 0.0, 1.0).unwrap();
+    assert!(
+        (fwd - 105.127109637602).abs() < 1e-10,
+        "forward_price={fwd}"
+    );
+    assert!((forward_price(100.0, 0.0, 0.0, 1.0).unwrap() - 100.0).abs() < 1e-12);
+}
+
+#[wasm_bindgen_test]
+fn convention_error_paths() {
+    assert!(log_moneyness(100.0, 0.0).is_err());
+    assert!(log_moneyness(0.0, 100.0).is_err());
+    assert!(forward_price(0.0, 0.05, 0.0, 1.0).is_err());
+    assert!(forward_price(100.0, 0.05, 0.0, -1.0).is_err());
+}
+
+// ── Local vol: Dupire + boundary adapter, reachable from WASM surfaces (PAN-28) ──
+
+// A perfectly flat cubic-spline surface (constant 0.20 vol at every strike and
+// tenor) reproduces the core FlatVolSurface invariant: σ_loc ≡ σ exactly, since
+// all strike derivatives vanish and total variance is linear in t.
+fn flat_spline_surface() -> WasmPiecewiseSurface {
+    let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
+    let vols = vec![0.20, 0.20, 0.20, 0.20, 0.20];
+    let mut builder = WasmSurfaceBuilder::new();
+    builder.spot(100.0).unwrap();
+    builder.rate(0.05).unwrap();
+    builder.model_cubic_spline().unwrap();
+    builder
+        .add_tenor(0.5, strikes.clone(), vols.clone())
+        .unwrap();
+    builder.add_tenor(1.0, strikes, vols).unwrap();
+    builder.build().unwrap()
+}
+
+#[wasm_bindgen_test]
+fn local_vol_flat_surface_equals_sigma() {
+    let surface = flat_spline_surface();
+    let lv = surface.dupire_local_vol(None).unwrap();
+    // Interior point, away from tenor edges; flat surface => σ_loc == σ.
+    let v = lv.local_vol(0.75, 100.0).unwrap();
+    assert!((v - 0.20).abs() < 1e-10, "flat σ_loc={v}");
+}
+
+#[wasm_bindgen_test]
+fn local_vol_reachable_from_ssvi() {
+    let surf = WasmSsviSurface::new(
+        -0.3,
+        1.5,
+        0.5,
+        vec![0.25, 0.5, 1.0],
+        vec![100.0, 100.0, 100.0],
+        vec![0.01, 0.025, 0.06],
+    )
+    .unwrap();
+    let v = surf
+        .dupire_local_vol(None)
+        .unwrap()
+        .local_vol(0.5, 100.0)
+        .unwrap();
+    assert!(v > 0.0 && v < 1.0, "ssvi σ_loc={v}");
+    // Boundary adapter is also reachable from SSVI.
+    let vb = surf
+        .dupire_local_vol_with_boundary(None)
+        .unwrap()
+        .local_vol(0.5, 100.0)
+        .unwrap();
+    assert!(vb > 0.0 && vb < 1.0, "ssvi boundary σ_loc={vb}");
+}
+
+#[wasm_bindgen_test]
+fn boundary_rescues_t0_where_raw_errors() {
+    // THE PAN-25 boundary: strict Dupire rejects t = 0; the boundary adapter
+    // clamps to the floor (default bump 0.01) and succeeds.
+    let surface = flat_spline_surface();
+    let raw = surface.dupire_local_vol(None).unwrap();
+    assert!(
+        raw.local_vol(0.0, 100.0).is_err(),
+        "strict path should reject t=0"
+    );
+    let bdy = surface.dupire_local_vol_with_boundary(None).unwrap();
+    let v = bdy.local_vol(0.0, 100.0).unwrap();
+    assert!((v - 0.20).abs() < 1e-10, "boundary t=0 rescued σ_loc={v}");
 }
