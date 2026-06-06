@@ -600,4 +600,136 @@ mod tests {
         let v = lv.local_vol(Tenor(0.015), Strike(100.0)).unwrap();
         assert!((v.0 - sigma).abs() < 1e-10, "short T: got {}", v.0);
     }
+
+    // ----- BoundaryLocalVol (PAN-25) -----
+
+    // SVI PiecewiseSurface fixture shared by the boundary tests below — same
+    // arb-free parameters as atm_matches_simplified_formula / svi_analytical_otm.
+    fn svi_surface() -> Arc<dyn VolSurface> {
+        use crate::smile::SviSmile;
+        use crate::surface::PiecewiseSurface;
+
+        let fwd = 100.0;
+        let (t1, t2) = (0.5, 1.5);
+        let (a1, a2) = (0.02, 0.06);
+        let (b, rho, m, sigma) = (0.3, -0.3, 0.0, 0.15);
+        let s1 = Box::new(SviSmile::new(fwd, t1, a1, b, rho, m, sigma).unwrap())
+            as Box<dyn SmileSection>;
+        let s2 = Box::new(SviSmile::new(fwd, t2, a2, b, rho, m, sigma).unwrap())
+            as Box<dyn SmileSection>;
+        Arc::new(PiecewiseSurface::new(vec![t1, t2], vec![s1, s2]).unwrap())
+    }
+
+    // Flat surface: sigma_loc == sigma exactly, so the clamped boundary value at
+    // t = 0, 0 < t < floor, and t == floor must all return sigma.
+    #[test]
+    fn boundary_flat_exact_at_and_below_floor() {
+        let sigma = 0.25;
+        let adapter = DupireLocalVol::new(flat_surface(sigma)).with_boundary();
+
+        // t = 0 is rejected by the strict path but rescued to floor here.
+        let v = adapter.local_vol(Tenor(0.0), Strike(100.0)).unwrap();
+        assert!((v.0 - sigma).abs() < 1e-10, "t=0: got {}", v.0);
+
+        // 0 < t < floor (= 0.01)
+        let v = adapter.local_vol(Tenor(0.005), Strike(120.0)).unwrap();
+        assert!((v.0 - sigma).abs() < 1e-10, "0<t<floor: got {}", v.0);
+
+        // exactly at the floor
+        let v = adapter.local_vol(Tenor(0.01), Strike(80.0)).unwrap();
+        assert!((v.0 - sigma).abs() < 1e-10, "t=floor: got {}", v.0);
+    }
+
+    // For t > floor the adapter must delegate to DupireLocalVol::local_vol with
+    // the original tenor: same code path, so the result is bit-identical.
+    #[test]
+    fn boundary_delegates_bit_identical_above_floor() {
+        let surf = svi_surface();
+        let raw = DupireLocalVol::new(surf.clone());
+        let adapter = DupireLocalVol::new(surf).with_boundary();
+
+        for (t, k) in [(0.5, 100.0), (1.0, 110.0), (1.2, 90.0)] {
+            let r = raw.local_vol(Tenor(t), Strike(k)).unwrap();
+            let a = adapter.local_vol(Tenor(t), Strike(k)).unwrap();
+            assert_eq!(r.0, a.0, "delegation drift at t={t}, K={k}");
+        }
+    }
+
+    // The boundary the adapter exists to fix: an OTM query at t=0 errors on the
+    // strict path (InvalidInput) but succeeds on the adapter (clamped to floor).
+    // NOTE: on the arb-free flat-extrapolation fixture a NumericalError baseline
+    // is not reproducible (w scales t/t1, so smaller t is more stable); the
+    // t=0 -> InvalidInput rescue is the real boundary (requirements FR-1/FR-5).
+    #[test]
+    fn boundary_succeeds_where_raw_errors_at_t0() {
+        let surf = svi_surface();
+        let raw = DupireLocalVol::new(surf.clone());
+        let adapter = DupireLocalVol::new(surf).with_boundary();
+        let k = Strike(110.0); // OTM
+
+        assert!(
+            raw.local_vol(Tenor(0.0), k).is_err(),
+            "strict path should reject t=0"
+        );
+        assert!(
+            adapter.local_vol(Tenor(0.0), k).is_ok(),
+            "adapter should rescue t=0 via the floor"
+        );
+    }
+
+    // Strike stays strict; t < 0 / NaN / inf still rejected (t = 0 is allowed).
+    #[test]
+    fn boundary_rejects_invalid_inputs() {
+        let a = DupireLocalVol::new(flat_surface(0.2)).with_boundary();
+        assert!(matches!(
+            a.local_vol(Tenor(-1.0), Strike(100.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            a.local_vol(Tenor(f64::NAN), Strike(100.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            a.local_vol(Tenor(f64::INFINITY), Strike(100.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            a.local_vol(Tenor(0.5), Strike(0.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            a.local_vol(Tenor(0.5), Strike(f64::NAN)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    // with_boundary()'s floor is the Dupire bump_size (single source of truth):
+    // default 0.01, and a custom bump propagates.
+    #[test]
+    fn boundary_floor_defaults_to_bump_size() {
+        let a = DupireLocalVol::new(flat_surface(0.2)).with_boundary();
+        assert_eq!(a.floor, 0.01);
+
+        let a2 = DupireLocalVol::new(flat_surface(0.2))
+            .with_bump_size(0.005)
+            .unwrap()
+            .with_boundary();
+        assert_eq!(a2.floor, 0.005);
+    }
+
+    // BoundaryLocalVol::new rejects a non-positive / non-finite floor, honors a
+    // valid custom floor, and into_inner() returns the wrapped LocalVol.
+    #[test]
+    fn boundary_new_validates_floor_and_into_inner() {
+        for bad in [0.0, -0.1, f64::NAN, f64::INFINITY] {
+            assert!(
+                BoundaryLocalVol::new(DupireLocalVol::new(stub_surface()), bad).is_err(),
+                "floor {bad} should be rejected"
+            );
+        }
+
+        let b = BoundaryLocalVol::new(DupireLocalVol::new(stub_surface()), 0.02).unwrap();
+        assert_eq!(b.floor, 0.02, "custom floor honored");
+        let _inner: DupireLocalVol = b.into_inner();
+    }
 }
