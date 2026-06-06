@@ -19,7 +19,7 @@ use crate::conventions::log_moneyness;
 use crate::error::{self, VolSurfError};
 use crate::surface::VolSurface;
 use crate::types::{Strike, Tenor, Vol};
-use crate::validate::validate_positive;
+use crate::validate::{validate_non_negative, validate_positive};
 
 use super::LocalVol;
 
@@ -60,6 +60,23 @@ impl DupireLocalVol {
         validate_positive(bump_size, "bump_size")?;
         self.bump_size = bump_size;
         Ok(self)
+    }
+
+    /// Wrap this Dupire local vol in a [`BoundaryLocalVol`] that handles the
+    /// small-time boundary, using the finite-difference [`bump_size`](Self::with_bump_size)
+    /// as the floor.
+    ///
+    /// For a query at `t ≤ bump_size` the wrapper evaluates `σ_loc` at
+    /// `t = bump_size` instead of erroring; for `t > bump_size` it delegates to
+    /// the strict [`local_vol`](LocalVol::local_vol) unchanged. This is the
+    /// opt-in way to keep total variance `w = σ²·T` bounded away from the
+    /// singular `1/w` and `k²/w²` terms in the Gatheral (2006) denominator as
+    /// `T → 0` (see [`BoundaryLocalVol`]).
+    pub fn with_boundary(self) -> BoundaryLocalVol<Self> {
+        // `bump_size` is validated positive on construction (default 0.01,
+        // `with_bump_size` rejects non-positive), so it is a valid floor.
+        let floor = self.bump_size;
+        BoundaryLocalVol { inner: self, floor }
     }
 }
 
@@ -146,6 +163,78 @@ impl LocalVol for DupireLocalVol {
         }
 
         Ok(Vol(v_local.sqrt()))
+    }
+}
+
+/// A [`LocalVol`] adapter that smooths the small-time boundary.
+///
+/// The Dupire formula (Gatheral 2006, Eq. 1.10) divides by total implied
+/// variance `w = σ²·T`; its denominator carries `−1/w` and `k²/w²` terms that
+/// are ill-conditioned as `T → 0`, and the strict
+/// [`DupireLocalVol`] rejects `T = 0` outright. Consumers that evaluate local
+/// vol at the calendar-time boundary — a backward PDE march whose last step is
+/// `t = 0`, or a Monte-Carlo path's first step — therefore have to clamp their
+/// queries away from zero by hand.
+///
+/// `BoundaryLocalVol` encapsulates that clamp: for a query at `T ≤ floor` it
+/// evaluates the inner local vol at `T = floor`; for `T > floor` it delegates
+/// **exactly** to the inner implementation. Evaluating at `floor` keeps `w`
+/// bounded away from zero, sidestepping the singular denominator entirely. On a
+/// flat surface the result is exact (`σ_loc ≡ σ`); on a smile it is an `O(floor)`
+/// short-maturity extrapolation.
+///
+/// This is opt-in and composes around any `L: LocalVol` (mirroring the
+/// `std::io::BufReader<R>` / `Take<R>` adapter pattern); the strict
+/// [`DupireLocalVol::local_vol`] path is left unchanged. The usual entry point is
+/// [`DupireLocalVol::with_boundary`], which sets `floor` to the Dupire bump size.
+///
+/// # References
+/// - Gatheral, J. "The Volatility Surface: A Practitioner's Guide" (2006), Ch. 2
+#[derive(Debug, Clone)]
+pub struct BoundaryLocalVol<L: LocalVol> {
+    inner: L,
+    floor: f64,
+}
+
+impl<L: LocalVol> BoundaryLocalVol<L> {
+    /// Wrap `inner`, treating any query at `expiry ≤ floor` as a query at
+    /// `expiry = floor`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VolSurfError::InvalidInput`] if `floor` is zero, negative, NaN,
+    /// or infinite.
+    pub fn new(inner: L, floor: f64) -> error::Result<Self> {
+        validate_positive(floor, "floor")?;
+        Ok(Self { inner, floor })
+    }
+
+    /// Consume the wrapper and return the inner [`LocalVol`].
+    pub fn into_inner(self) -> L {
+        self.inner
+    }
+}
+
+impl<L: LocalVol> LocalVol for BoundaryLocalVol<L> {
+    /// Local volatility with the small-time boundary handled.
+    ///
+    /// For `expiry ≤ floor` the inner local vol is evaluated at
+    /// `expiry = floor`; for `expiry > floor` the call delegates unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VolSurfError::InvalidInput`] if `strike` is non-positive or
+    /// `expiry` is negative, NaN, or infinite (`expiry = 0` is valid and maps to
+    /// `floor`). Otherwise propagates any error from the inner implementation.
+    fn local_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
+        validate_positive(strike.0, "strike")?;
+        validate_non_negative(expiry.0, "expiry")?;
+
+        if expiry.0 <= self.floor {
+            self.inner.local_vol(Tenor(self.floor), strike)
+        } else {
+            self.inner.local_vol(expiry, strike)
+        }
     }
 }
 
