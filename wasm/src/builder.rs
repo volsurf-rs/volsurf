@@ -188,4 +188,18 @@ impl WasmPiecewiseSurface {
             .map(WasmSurfaceDiagnostics::from)
             .map_err(to_js_err)
     }
+
+    pub fn dupire_local_vol(
+        &self,
+        bump_size: Option<f64>,
+    ) -> Result<crate::local_vol::WasmDupireLocalVol, JsValue> {
+        crate::local_vol::WasmDupireLocalVol::from_arc(Arc::clone(&self.inner), bump_size)
+    }
+
+    pub fn dupire_local_vol_with_boundary(
+        &self,
+        bump_size: Option<f64>,
+    ) -> Result<crate::local_vol::WasmBoundaryLocalVol, JsValue> {
+        crate::local_vol::WasmBoundaryLocalVol::from_arc(Arc::clone(&self.inner), bump_size)
+    }
 }
