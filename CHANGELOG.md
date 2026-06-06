@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-06
+
+### Added
+
+- `BoundaryLocalVol<L: LocalVol>` — opt-in adapter that smooths the Dupire small-time boundary: a query at `t ≤ floor` evaluates the inner local vol at `t = floor` (keeping total variance `w = σ²·T` away from the singular `1/w`, `k²/w²` terms in the Gatheral denominator as `T → 0`); `t > floor` delegates exactly to the strict path (PAN-25)
+- `DupireLocalVol::with_boundary()` — wraps a `DupireLocalVol` in a `BoundaryLocalVol` whose `floor` defaults to the finite-difference `bump_size`
+- `BoundaryLocalVol` and `DupireLocalVol` re-exported at the crate root
+
+## [2.1.0] "API Polish" - 2026-03-25
+
+### Added
+
+- `SmileSection::model_name()` — returns the model identifier (`"SVI"`, `"SABR"`, `"CubicSpline"`, `"SSVI"`, `"eSSVI"`)
+- `VolSurface::tenors()` — accessor returning the surface's tenors as `&[f64]`
+- `expiry` field on `ArbitrageReport` for per-tenor attribution
+- Configurable arbitrage scanning via `ArbitrageScanConfig`: `SmileSection::is_arbitrage_free_with(config)` and `VolSurface::diagnostics_with(config)`
+- Configurable calibration: `DataFilter`, `WeightingScheme`, and warm-starting via `calibrate_with_config` on smile models
+- `Clone` + `PartialEq` on `VolSurfError`
+
+### Changed
+
+- **BREAKING**: `is_arbitrage_free()` is now computed on demand from the smile/surface rather than stored at construction
+- SVI warm-start falls back to grid search when the seeded optimization diverges
+
 ## [2.0.0] "Type-Safe Inputs" - 2026-03-13
 
 ### Changed
@@ -130,7 +154,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/volsurf-rs/volsurf/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/volsurf-rs/volsurf/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/volsurf-rs/volsurf/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/volsurf-rs/volsurf/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/volsurf-rs/volsurf/compare/v0.3.0...v0.4.0

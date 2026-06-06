@@ -45,7 +45,7 @@ pub use calibration::{DataFilter, WeightingScheme, apply_filter};
 #[doc(inline)]
 pub use error::{Result, VolSurfError};
 #[doc(inline)]
-pub use local_vol::LocalVol;
+pub use local_vol::{BoundaryLocalVol, DupireLocalVol, LocalVol};
 #[doc(inline)]
 pub use smile::SmileSection;
 #[doc(inline)]

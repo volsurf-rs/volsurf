@@ -14,7 +14,7 @@
 
 pub mod dupire;
 
-pub use dupire::DupireLocalVol;
+pub use dupire::{BoundaryLocalVol, DupireLocalVol};
 
 use crate::error;
 use crate::types::{Strike, Tenor, Vol};
