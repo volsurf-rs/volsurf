@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-06
+
+### Added
+
+- WASM binding parity with the Python crate (PAN-28):
+  - Implied vol: `blackPrice`/`normalPrice`/`displacedPrice` undiscounted pricing fns, `WasmBlackImpliedVol`/`WasmNormalImpliedVol` (static `compute`) and `WasmDisplacedImpliedVol` (instance, with `beta`) for Black/Normal/displaced-diffusion IV extraction, and a `WasmOptionType` (`Call`/`Put`) enum
+  - Conventions: `logMoneyness`, `moneyness`, `forwardPrice` helpers
+  - Local vol: `WasmDupireLocalVol` and `WasmBoundaryLocalVol` (the v2.2 PAN-25 small-time boundary adapter), reachable from any surface via `dupireLocalVol(bumpSize?)` / `dupireLocalVolWithBoundary(bumpSize?)` on `WasmSsviSurface`, `WasmEssviSurface`, and `WasmPiecewiseSurface`
+  - WASM smoke tests covering price→IV round-trips, convention known-values, flat-surface `σ_loc ≡ σ`, and the `t = 0` boundary rescue
+- Lockstep version bump of all three crates (core, `volsurf-python`, `volsurf-wasm`) to 2.3.0; core `src/` is unchanged in this release
+
 ## [2.2.0] - 2026-06-06
 
 ### Added
@@ -154,7 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/volsurf-rs/volsurf/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/volsurf-rs/volsurf/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/volsurf-rs/volsurf/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/volsurf-rs/volsurf/compare/v1.0.0...v2.0.0

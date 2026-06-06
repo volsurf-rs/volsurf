@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use volsurf::VolSurface;
 use volsurf::surface::{EssviSurface, PerTenorFit, SsviSurface};
 use volsurf::{Strike, Tenor};
 use wasm_bindgen::prelude::*;
+
+use crate::local_vol::{WasmBoundaryLocalVol, WasmDupireLocalVol};
 
 use crate::arbitrage::WasmSurfaceDiagnostics;
 use crate::error::to_js_err;
@@ -125,6 +129,22 @@ macro_rules! impl_wasm_surface_methods {
                     <$inner>::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
                         .map_err(to_js_err)?;
                 Ok(Self { inner })
+            }
+
+            pub fn dupire_local_vol(
+                &self,
+                bump_size: Option<f64>,
+            ) -> Result<WasmDupireLocalVol, JsValue> {
+                let surface: Arc<dyn VolSurface> = Arc::new(self.inner.clone());
+                WasmDupireLocalVol::from_arc(surface, bump_size)
+            }
+
+            pub fn dupire_local_vol_with_boundary(
+                &self,
+                bump_size: Option<f64>,
+            ) -> Result<WasmBoundaryLocalVol, JsValue> {
+                let surface: Arc<dyn VolSurface> = Arc::new(self.inner.clone());
+                WasmBoundaryLocalVol::from_arc(surface, bump_size)
             }
         }
     };
