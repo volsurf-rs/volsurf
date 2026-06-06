@@ -33,6 +33,41 @@ Output in `wasm/pkg/`: `.wasm` binary, `.js` loader, `.d.ts` type definitions, `
 
 ## API
 
+### Implied Vol
+
+Undiscounted pricing and implied-vol extraction (Jäckel rational approximations).
+`WasmOptionType` is a `{ Call, Put }` enum passed into every pricer.
+
+```typescript
+import { WasmOptionType, blackPrice, WasmBlackImpliedVol,
+         normalPrice, WasmNormalImpliedVol,
+         displacedPrice, WasmDisplacedImpliedVol } from "volsurf-wasm";
+
+// Black (lognormal)
+const price = blackPrice(100, 100, 0.20, 1.0, WasmOptionType.Call);
+const iv = WasmBlackImpliedVol.compute(price, 100, 100, 1.0, WasmOptionType.Call);  // ~0.20
+
+// Normal (Bachelier) — vol is in price units
+const np = normalPrice(100, 100, 20.0, 1.0, WasmOptionType.Put);
+const niv = WasmNormalImpliedVol.compute(np, 100, 100, 1.0, WasmOptionType.Put);   // ~20.0
+
+// Displaced diffusion (interpolates normal ↔ Black); instance carries beta ∈ [0, 1]
+const dp = displacedPrice(100, 100, 0.20, 1.0, 0.5, WasmOptionType.Call);
+const calc = new WasmDisplacedImpliedVol(0.5);
+calc.beta;                                              // 0.5
+const div = calc.compute(dp, 100, 100, 1.0, WasmOptionType.Call);  // ~0.20
+```
+
+### Conventions
+
+```typescript
+import { logMoneyness, moneyness, forwardPrice } from "volsurf-wasm";
+
+logMoneyness(100, 100);        // ~0      (k = ln(K / F))
+moneyness(120, 100);           // ~1.2    (m = K / F)
+forwardPrice(100, 0.05, 0, 1); // ~105.127 (F = S·exp((r − q)·T))
+```
+
 ### Smiles
 
 **WasmSviSmile** — SVI parametric model (Gatheral 2004)
@@ -102,6 +137,23 @@ const surface = builder.build();  // returns WasmPiecewiseSurface
 
 surface.blackVol(0.5, 100.0)
 surface.blackVariance(0.5, 100.0)
+```
+
+### Local Vol
+
+Dupire local volatility (Gatheral 2006, Eq. 1.10) composed over any surface.
+Because WASM has no unified surface type, obtain a local-vol object by calling a
+method on the surface — available on `WasmSsviSurface`, `WasmEssviSurface`, and
+`WasmPiecewiseSurface`. `bumpSize` is optional (defaults to 0.01).
+
+```typescript
+const lv = surface.dupireLocalVol();        // WasmDupireLocalVol (optional bumpSize)
+lv.localVol(0.5, 100.0);                     // σ_loc at (expiry, strike)
+
+// Boundary adapter (v2.2 / PAN-25): a query at t ≤ floor (the bump size) is
+// evaluated at t = floor, rescuing the t → 0 singularity of the strict path.
+const bdy = surface.dupireLocalVolWithBoundary();  // WasmBoundaryLocalVol
+bdy.localVol(0.0, 100.0);                    // succeeds where dupireLocalVol throws at t = 0
 ```
 
 ### Error Handling

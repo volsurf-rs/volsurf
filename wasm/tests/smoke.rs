@@ -376,7 +376,7 @@ fn too_few_points_rejected() {
 
 #[wasm_bindgen_test]
 fn version_returns_string() {
-    assert_eq!(version(), "2.2.0");
+    assert_eq!(version(), "2.3.0");
 }
 
 // ── is_arbitrage_free on smiles ──
