@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `homepage` metadata in `Cargo.toml` — the site it pointed at no longer exists; crates.io falls back to `repository`
+
 ## [2.3.0] - 2026-06-06
 
 ### Added

@@ -7,7 +7,6 @@ description = "Production-ready volatility surface library for derivatives prici
 keywords = ["volatility", "finance", "quant", "options", "derivatives"]
 categories = ["mathematics", "finance"]
 repository = "https://github.com/volsurf-rs/volsurf"
-homepage = "https://volsurf-rs.github.io"
 documentation = "https://docs.rs/volsurf"
 readme = "README.md"
 
