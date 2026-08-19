@@ -8,5 +8,8 @@ version = "2.3.0"
 requires-python = ">=3.9"
 dependencies = ["numpy>=1.24"]
 
+[dependency-groups]
+dev = ["pytest>=8"]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
