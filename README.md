@@ -33,7 +33,7 @@ Volatility surface construction for equity and FX derivatives.
 **Calibration Control**
 - `DataFilter` drops wing strikes, sub-floor vols, and vol cliffs before fitting
 - `WeightingScheme` weights the least-squares fit by vega or uniformly (Zeliade 2009, Hagan 2002)
-- Warm-starting from prior parameters, with grid-search fallback when the fit diverges
+- Warm-starting from prior parameters; SVI falls back to grid search when a seeded fit diverges
 
 **Implied Volatility**
 - **Black** (lognormal) implied vol via Jackel rational approximation (near-machine-precision)

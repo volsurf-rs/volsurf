@@ -183,7 +183,8 @@ and `forward_price(spot, rate, dividend_yield, expiry)`.
 
 ## Local volatility
 
-`DupireLocalVol` wraps any surface and extracts local vol by finite differences.
+`DupireLocalVol` wraps a `Surface`, `SsviSurface`, or `EssviSurface` and extracts
+local vol by finite differences.
 
 ```python
 from volsurf import DupireLocalVol

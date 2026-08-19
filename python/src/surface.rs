@@ -46,7 +46,7 @@ macro_rules! impl_vol_grid {
 
 #[pyclass(frozen, name = "SsviSurface")]
 pub struct PySsviSurface {
-    inner: SsviSurface,
+    pub(crate) inner: SsviSurface,
 }
 
 #[pymethods]
@@ -208,7 +208,7 @@ impl PyPerTenorFit {
 
 #[pyclass(frozen, name = "EssviSurface")]
 pub struct PyEssviSurface {
-    inner: EssviSurface,
+    pub(crate) inner: EssviSurface,
 }
 
 #[pymethods]
