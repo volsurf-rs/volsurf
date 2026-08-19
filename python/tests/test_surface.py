@@ -397,6 +397,19 @@ class TestDupireLocalVol:
         lv = dupire.local_vol(0.5, 100.0)
         assert lv > 0 and math.isfinite(lv)
 
+    @pytest.mark.parametrize(
+        "surface",
+        [SsviSurface(**SSVI_EQUITY), EssviSurface(**ESSVI_EQUITY)],
+    )
+    def test_accepts_global_surfaces(self, surface):
+        dupire = DupireLocalVol(surface)
+        lv = dupire.local_vol(0.5, 100.0)
+        assert lv > 0 and math.isfinite(lv)
+
+    def test_rejects_unsupported_surface_type(self):
+        with pytest.raises(TypeError, match="Surface, SsviSurface, or EssviSurface"):
+            DupireLocalVol(object())
+
     def test_rejects_zero_expiry(self):
         surf = build_sabr_surface()
         dupire = DupireLocalVol(surf)

@@ -5,9 +5,9 @@
 [![docs.rs](https://docs.rs/volsurf/badge.svg)](https://docs.rs/volsurf)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Production-ready volatility surface construction for equity and FX derivatives.
+Volatility surface construction for equity and FX derivatives.
 
-`volsurf` builds implied volatility surfaces from market data, calibrates parametric smile models (SVI, SABR, SSVI), detects butterfly and calendar arbitrage, and provides sub-20ns vol queries suitable for real-time pricing engines.
+`volsurf` builds implied volatility surfaces from market data, calibrates parametric smile models (SVI, SABR, SSVI), and detects butterfly and calendar arbitrage. Vol queries take 20 ns or less, fast enough for real-time pricing engines.
 
 ## Features
 
@@ -28,6 +28,12 @@ Production-ready volatility surface construction for equity and FX derivatives.
 - Calendar spread arbitrage via cross-tenor variance monotonicity
 - Analytical calendar arbitrage for SSVI surfaces
 - Combined `SurfaceDiagnostics` report
+- Configurable scan grids via `ArbitrageScanConfig` on `is_arbitrage_free_with()` and `diagnostics_with()`
+
+**Calibration Control**
+- `DataFilter` drops wing strikes, sub-floor vols, and vol cliffs before fitting
+- `WeightingScheme` weights the least-squares fit by vega or uniformly (Zeliade 2009, Hagan 2002)
+- Warm-starting from prior parameters; SVI falls back to grid search when a seeded fit diverges
 
 **Implied Volatility**
 - **Black** (lognormal) implied vol via Jackel rational approximation (near-machine-precision)
@@ -36,6 +42,7 @@ Production-ready volatility surface construction for equity and FX derivatives.
 
 **Local Volatility**
 - **Dupire** local vol extraction (Dupire 1994) from any `VolSurface` via finite differences
+- **Boundary adapter** -- `with_boundary()` evaluates short expiries at a floor, avoiding the Dupire denominator blow-up as total variance goes to zero
 
 **Design**
 - No global state -- evaluation date is a parameter, not a singleton
@@ -49,13 +56,13 @@ Production-ready volatility surface construction for equity and FX derivatives.
 
 ```toml
 [dependencies]
-volsurf = "2.0"
+volsurf = "2.3"
 ```
 
 Optional features:
 
 ```toml
-volsurf = { version = "2.0", features = ["parallel", "logging"] }
+volsurf = { version = "2.3", features = ["parallel", "logging"] }
 ```
 
 | Feature | Description |
@@ -171,6 +178,8 @@ use volsurf::OptionType;
 let vol = BlackImpliedVol::compute(10.45, 100.0, 100.0, 1.0, OptionType::Call)?;
 ```
 
+Runnable programs for every layer live in [`examples/`](examples/). Run one with `cargo run --example local_vol`.
+
 ## Architecture
 
 Five-layer pipeline following the natural domain flow:
@@ -184,6 +193,7 @@ Option Prices -> Implied Vol -> Smile -> Surface -> Local Vol
 
 ```
 volsurf
+├── calibration    DataFilter, WeightingScheme, apply_filter
 ├── conventions    StickyKind, log_moneyness, forward_price
 ├── error          VolSurfError, Result<T>
 ├── implied
@@ -194,14 +204,14 @@ volsurf
 │   ├── svi        SviSmile (Gatheral 2006)
 │   ├── sabr       SabrSmile (Hagan 2002)
 │   ├── spline     SplineSmile (cubic on variance)
-│   └── arbitrage  ArbitrageReport, ButterflyViolation
+│   └── arbitrage  ArbitrageReport, ButterflyViolation, ArbitrageScanConfig
 ├── surface
 │   ├── ssvi       SsviSurface (Gatheral-Jacquier 2014)
 │   ├── essvi      EssviSurface, EssviSlice (Hendriks-Martini 2019)
 │   ├── piecewise  PiecewiseSurface (per-tenor interpolation)
 │   ├── builder    SurfaceBuilder, SmileModel
 │   └── arbitrage  SurfaceDiagnostics, CalendarViolation
-├── local_vol      LocalVol trait, DupireLocalVol (Dupire 1994)
+├── local_vol      LocalVol trait, DupireLocalVol (Dupire 1994), BoundaryLocalVol
 └── types          Strike, Tenor, Vol, Variance, OptionType
 ```
 
@@ -246,7 +256,7 @@ Measured with Criterion.rs on Apple Silicon. All performance targets exceeded.
 pip install volsurf
 ```
 
-Built with PyO3. See [`python/`](python/) for usage and API docs.
+Built with PyO3. See [`python/README.md`](python/README.md) for the API and usage examples.
 
 ### WebAssembly
 
@@ -254,19 +264,19 @@ Built with PyO3. See [`python/`](python/) for usage and API docs.
 wasm-pack build wasm/ --target web
 ```
 
-Built with wasm-bindgen. See [`wasm/README.md`](wasm/README.md) for JavaScript API and usage examples.
+Built with wasm-bindgen. v2.3 added implied vol, conventions, and local vol, so the WASM bindings now cover all five layers. See [`wasm/README.md`](wasm/README.md) for the JavaScript API and usage examples.
 
 ## Changelog
 
+See [CHANGELOG.md](CHANGELOG.md) for the full history. Recent releases:
+
 | Version | Name | Key Features |
 |---------|------|--------------|
-| **v2.0** | **Type-Safe Inputs** | **Strike/Tenor newtypes for all API inputs** |
+| **v2.3** | **WASM Parity** | **Implied vol, conventions, and local vol in the WASM bindings** |
+| v2.2 | Local Vol Boundary | `BoundaryLocalVol` small-time adapter, `with_boundary()` |
+| v2.1 | API Polish | `model_name()`, `tenors()`, configurable arbitrage scans and calibration |
+| v2.0 | Type-Safe Inputs | `Strike`/`Tenor` newtypes for all API inputs |
 | v1.0 | Stable | API stability, PyO3 bindings, WASM target |
-| v0.4 | Hardening | Coverage gaps, tracing diagnostics, dead code removal |
-| v0.3 | Production Grade | eSSVI surface + calibration, parallel construction, dividend yield |
-| v0.2.1 | | Normal/Displaced IV, Dupire local vol, serde validation, CI |
-| v0.2 | Market Ready | SABR, SSVI, calendar arbitrage, surface diagnostics |
-| v0.1 | First Light | SVI smile, cubic spline, ragged grid surface, builder API |
 
 ## References
 
