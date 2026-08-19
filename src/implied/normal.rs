@@ -50,8 +50,8 @@ impl NormalImpliedVol {
     /// * `option_type` — Call or Put
     ///
     /// # Errors
-    /// Returns [`VolSurfError::InvalidInput`] for invalid inputs,
-    /// [`VolSurfError::NumericalError`] if the price is outside the attainable range.
+    /// Returns [`crate::VolSurfError::InvalidInput`] for invalid inputs,
+    /// [`crate::VolSurfError::NumericalError`] if the price is outside the attainable range.
     pub fn compute(
         option_price: f64,
         forward: f64,
@@ -90,7 +90,7 @@ impl NormalImpliedVol {
 /// * `option_type` — Call or Put
 ///
 /// # Errors
-/// Returns [`VolSurfError::InvalidInput`] for invalid inputs.
+/// Returns [`crate::VolSurfError::InvalidInput`] for invalid inputs.
 pub fn normal_price(
     forward: f64,
     strike: f64,

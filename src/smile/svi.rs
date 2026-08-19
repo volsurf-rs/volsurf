@@ -642,7 +642,7 @@ impl SmileSection for SviSmile {
     /// Check butterfly arbitrage by scanning the Gatheral g-function.
     ///
     /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
-    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s
+    /// Points where g(k) < −tol are recorded as [`crate::smile::ButterflyViolation`]s
     /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
     ///
     /// # Reference
