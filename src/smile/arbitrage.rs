@@ -9,6 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error;
+use crate::smile::{ArbitrageScanConfig, BUTTERFLY_G_TOL, DENSITY_NEG_TOL};
+
 /// Report on arbitrage-freeness of a smile at a specific expiry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArbitrageReport {
@@ -65,6 +68,93 @@ pub struct ButterflyViolation {
     pub density: f64,
     /// Absolute magnitude of the violation.
     pub magnitude: f64,
+}
+
+/// Gatheral's g-function for a total-variance smile and its derivatives.
+pub(crate) fn gatheral_g(k: f64, w: f64, wp: f64, wpp: f64) -> f64 {
+    if w <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    let term1 = 1.0 - k * wp / (2.0 * w);
+    term1 * term1 - wp * wp / 4.0 * (1.0 / w + 0.25) + wpp / 2.0
+}
+
+/// Convert Gatheral's g-function value to risk-neutral density.
+pub(crate) fn density_from_g(strike: f64, k: f64, w: f64, g: f64) -> f64 {
+    let sqrt_w = w.sqrt();
+    let d2 = -k / sqrt_w - sqrt_w / 2.0;
+    let n_d2 = (-d2 * d2 / 2.0).exp() / (2.0 * std::f64::consts::PI).sqrt();
+    g * n_d2 / (strike * sqrt_w)
+}
+
+/// Scan a log-moneyness grid for negative risk-neutral density.
+pub(crate) fn scan_density<F>(
+    expiry: f64,
+    forward: f64,
+    config: &ArbitrageScanConfig,
+    density: F,
+) -> error::Result<ArbitrageReport>
+where
+    F: Fn(f64) -> error::Result<f64>,
+{
+    config.validate()?;
+    let mut violations = Vec::new();
+    for i in 0..config.n_points {
+        let k =
+            config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
+        let strike = forward * k.exp();
+        let d = match density(strike) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        if d < -DENSITY_NEG_TOL {
+            violations.push(ButterflyViolation {
+                strike,
+                density: d,
+                magnitude: d.abs(),
+            });
+        }
+    }
+    Ok(ArbitrageReport {
+        expiry,
+        butterfly_violations: violations,
+    })
+}
+
+/// Scan a log-moneyness grid for negative Gatheral g-function values.
+pub(crate) fn scan_g<G, D>(
+    expiry: f64,
+    forward: f64,
+    config: &ArbitrageScanConfig,
+    g_at_k: G,
+    density: D,
+) -> error::Result<ArbitrageReport>
+where
+    G: Fn(f64) -> f64,
+    D: Fn(f64) -> error::Result<f64>,
+{
+    config.validate()?;
+    let mut violations = Vec::new();
+    for i in 0..config.n_points {
+        let k =
+            config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
+        if g_at_k(k) < -BUTTERFLY_G_TOL {
+            let strike = forward * k.exp();
+            let d = match density(strike) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            violations.push(ButterflyViolation {
+                strike,
+                density: d,
+                magnitude: d.abs(),
+            });
+        }
+    }
+    Ok(ArbitrageReport {
+        expiry,
+        butterfly_violations: violations,
+    })
 }
 
 #[cfg(test)]

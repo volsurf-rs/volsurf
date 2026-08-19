@@ -13,16 +13,16 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
+use crate::calibration::{DataFilter, WeightingScheme, prepare_market_vols};
 use crate::error::{self, VolSurfError};
 use crate::smile::arbitrage::ArbitrageReport;
 use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
-use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
-use crate::surface::ssvi::{CALENDAR_CHECK_GRID_SIZE, SsviSlice, strike_grid};
+use crate::surface::arbitrage::{SurfaceDiagnostics, surface_diagnostics};
+use crate::surface::ssvi::{SsviSlice, ssvi_total_variance, ssvi_total_variance_with_phi_theta};
 use crate::types::{Strike, Tenor, Variance, Vol};
-use crate::validate::validate_positive;
+use crate::validate::{validate_positive, validate_surface_grid};
 
 /// A structural calendar no-arb violation (Thm 4.1, Eq 4.10).
 ///
@@ -378,72 +378,7 @@ impl EssviSurface {
             });
         }
 
-        if tenors.is_empty() {
-            return Err(VolSurfError::InvalidInput {
-                message: "at least one tenor is required".into(),
-            });
-        }
-        if tenors.len() != forwards.len() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors and forwards must have the same length, got {} and {}",
-                    tenors.len(),
-                    forwards.len()
-                ),
-            });
-        }
-        if tenors.len() != thetas.len() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors and thetas must have the same length, got {} and {}",
-                    tenors.len(),
-                    thetas.len()
-                ),
-            });
-        }
-
-        for (i, &t) in tenors.iter().enumerate() {
-            if !t.is_finite() || t <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("tenors must be positive and finite, got tenors[{i}]={t}"),
-                });
-            }
-        }
-        for (i, &f) in forwards.iter().enumerate() {
-            if !f.is_finite() || f <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("forwards must be positive and finite, got forwards[{i}]={f}"),
-                });
-            }
-        }
-        for (i, &th) in thetas.iter().enumerate() {
-            if !th.is_finite() || th <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("thetas must be positive and finite, got thetas[{i}]={th}"),
-                });
-            }
-        }
-
-        for w in tenors.windows(2) {
-            if w[1] <= w[0] {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "tenors must be strictly increasing, but {} >= {}",
-                        w[0], w[1]
-                    ),
-                });
-            }
-        }
-        for w in thetas.windows(2) {
-            if w[1] <= w[0] {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "thetas must be strictly increasing, but {} >= {}",
-                        w[0], w[1]
-                    ),
-                });
-            }
-        }
+        validate_surface_grid(&tenors, &forwards, &thetas)?;
 
         let theta_max = thetas[thetas.len() - 1];
 
@@ -562,12 +497,7 @@ impl EssviSurface {
             let theta = svi.variance(Strike(forwards[i]))?.0;
 
             // RMS on filtered data for consistency with calibration
-            let filtered = apply_filter(market_vols, forwards[i], filter);
-            let eval_data = if filtered.len() >= 5 {
-                &filtered
-            } else {
-                market_vols
-            };
+            let eval_data = prepare_market_vols(market_vols, forwards[i], filter, 5);
             let mut sum_sq = 0.0;
             for &(strike, market_vol) in eval_data.iter() {
                 let fitted_vol = svi.vol(Strike(strike))?.0;
@@ -712,22 +642,17 @@ impl EssviSurface {
         let rho_lo = (rho_min - 0.15).max(-0.99);
         let rho_hi = (rho_max + 0.15).min(0.99);
 
-        let mut best_r0 = rho_min.clamp(-0.999, 0.999);
-        let mut best_rm = rho_max.clamp(-0.999, 0.999);
-        let mut best_rho_rss = f64::MAX;
-
-        for ir0 in 0..GRID_N {
-            let r0 = rho_lo + (rho_hi - rho_lo) * (ir0 as f64) / ((GRID_N - 1) as f64);
-            for irm in 0..GRID_N {
-                let rm = rho_lo + (rho_hi - rho_lo) * (irm as f64) / ((GRID_N - 1) as f64);
-                let (_, rss) = fit_a(r0, rm);
-                if rss < best_rho_rss {
-                    best_rho_rss = rss;
-                    best_r0 = r0;
-                    best_rm = rm;
-                }
-            }
-        }
+        let (best_r0, best_rm, _best_rho_rss) = crate::optim::grid_search_2d(
+            GRID_N,
+            |ir0| rho_lo + (rho_hi - rho_lo) * ir0 as f64 / (GRID_N - 1) as f64,
+            |irm| rho_lo + (rho_hi - rho_lo) * irm as f64 / (GRID_N - 1) as f64,
+            |r0, rm| fit_a(r0, rm).1,
+        )
+        .unwrap_or((
+            rho_min.clamp(-0.999, 0.999),
+            rho_max.clamp(-0.999, 0.999),
+            f64::MAX,
+        ));
 
         let rho_step = (rho_hi - rho_lo) / (GRID_N as f64) * 0.5;
         let nm_config = crate::optim::NelderMeadConfig::calibration();
@@ -789,14 +714,10 @@ impl EssviSurface {
 
             let mut rss = 0.0;
             for &(theta, k, w_obs, ln_tr) in &all_points {
-                let theta_c = theta.max(1e-10);
                 let rho = (opt_rho_0 + (opt_rho_m - opt_rho_0) * (a_eff * ln_tr).exp())
                     .clamp(-0.999, 0.999);
-                let phi = eta / theta_c.powf(gamma);
-                let phi_k = phi * k;
-                let one_minus_rho_sq = 1.0 - rho * rho;
-                let w_pred = (theta / 2.0)
-                    * (1.0 + rho * phi_k + ((phi_k + rho).powi(2) + one_minus_rho_sq).sqrt());
+                let theta_c = theta.max(1e-10);
+                let w_pred = ssvi_total_variance_with_phi_theta(theta, theta_c, k, rho, eta, gamma);
                 if !w_pred.is_finite() {
                     return f64::MAX;
                 }
@@ -810,30 +731,17 @@ impl EssviSurface {
         let gamma_lo = 0.0_f64;
         let gamma_hi = 1.0_f64;
 
-        let mut best_eta = 0.5;
-        let mut best_gamma = 0.5;
-        let mut best_rss = f64::MAX;
-
-        for ie in 0..GRID_N {
-            let eta = eta_lo + (eta_hi - eta_lo) * (ie as f64) / ((GRID_N - 1) as f64);
-            for ig in 0..GRID_N {
-                let gamma = gamma_lo + (gamma_hi - gamma_lo) * (ig as f64) / ((GRID_N - 1) as f64);
-                let rss = objective(eta, gamma);
-                if rss < best_rss {
-                    best_rss = rss;
-                    best_eta = eta;
-                    best_gamma = gamma;
-                }
-            }
-        }
-
-        if best_rss >= f64::MAX {
-            return Err(VolSurfError::CalibrationError {
-                message: "grid search found no valid starting point".into(),
-                model: "eSSVI",
-                rms_error: None,
-            });
-        }
+        let (best_eta, best_gamma, _best_rss) = crate::optim::grid_search_2d(
+            GRID_N,
+            |ie| eta_lo + (eta_hi - eta_lo) * ie as f64 / (GRID_N - 1) as f64,
+            |ig| gamma_lo + (gamma_hi - gamma_lo) * ig as f64 / (GRID_N - 1) as f64,
+            objective,
+        )
+        .ok_or_else(|| VolSurfError::CalibrationError {
+            message: "grid search found no valid starting point".into(),
+            model: "eSSVI",
+            rms_error: None,
+        })?;
 
         let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
         let step_gamma = (gamma_hi - gamma_lo) / (GRID_N as f64) * 0.5;
@@ -989,10 +897,7 @@ impl EssviSurface {
     /// Evaluate eSSVI total variance at `(θ, k)` with maturity-dependent ρ.
     pub(crate) fn total_variance_at(&self, theta: f64, k: f64) -> f64 {
         let rho = self.rho(theta);
-        let phi = self.eta / theta.powf(self.gamma);
-        let phi_k = phi * k;
-        let one_minus_rho_sq = 1.0 - rho * rho;
-        (theta / 2.0) * (1.0 + rho * phi_k + ((phi_k + rho).powi(2) + one_minus_rho_sq).sqrt())
+        ssvi_total_variance(theta, k, rho, self.eta, self.gamma)
     }
 
     /// Interpolate `(θ, F)` at an arbitrary expiry.
@@ -1043,12 +948,6 @@ impl EssviSurface {
 }
 
 impl VolSurface for EssviSurface {
-    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
-        validate_positive(expiry.0, "expiry")?;
-        let var = self.black_variance(expiry, strike)?;
-        Ok(Vol((var.0 / expiry.0).sqrt()))
-    }
-
     fn black_variance(&self, expiry: Tenor, strike: Strike) -> error::Result<Variance> {
         validate_positive(expiry.0, "expiry")?;
         validate_positive(strike.0, "strike")?;
@@ -1076,46 +975,25 @@ impl VolSurface for EssviSurface {
     }
 
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
-        let mut smile_reports = Vec::with_capacity(self.tenors.len());
-        for (i, &tenor) in self.tenors.iter().enumerate() {
-            let rho = self.rho(self.thetas[i]);
-            let slice = EssviSlice::new(
-                self.forwards[i],
-                tenor,
-                rho,
-                self.eta,
-                self.gamma,
-                self.thetas[i],
-            )?;
-            smile_reports.push(slice.is_arbitrage_free_with(config)?);
-        }
-
-        let mut calendar_violations = Vec::new();
-        for i in 0..self.tenors.len().saturating_sub(1) {
-            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
-            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
-
-            for &strike in &grid {
-                let k_short = (strike / self.forwards[i]).ln();
-                let k_long = (strike / self.forwards[i + 1]).ln();
-                let w_short = self.total_variance_at(self.thetas[i], k_short);
-                let w_long = self.total_variance_at(self.thetas[i + 1], k_long);
-                if w_long < w_short - CALENDAR_ARB_TOL {
-                    calendar_violations.push(CalendarViolation {
-                        strike,
-                        tenor_short: self.tenors[i],
-                        tenor_long: self.tenors[i + 1],
-                        variance_short: w_short,
-                        variance_long: w_long,
-                    });
-                }
-            }
-        }
-
-        Ok(SurfaceDiagnostics {
-            smile_reports,
-            calendar_violations,
-        })
+        surface_diagnostics(
+            &self.tenors,
+            &self.forwards,
+            |i| {
+                EssviSlice::new(
+                    self.forwards[i],
+                    self.tenors[i],
+                    self.rho(self.thetas[i]),
+                    self.eta,
+                    self.gamma,
+                    self.thetas[i],
+                )?
+                .is_arbitrage_free_with(config)
+            },
+            |i, strike| {
+                let k = (strike / self.forwards[i]).ln();
+                Ok(self.total_variance_at(self.thetas[i], k))
+            },
+        )
     }
 
     fn tenors(&self) -> &[f64] {

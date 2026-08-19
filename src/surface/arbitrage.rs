@@ -3,7 +3,10 @@
 //! Extends the per-smile butterfly checks with cross-tenor calendar spread
 //! checks: total variance must be non-decreasing in time at every strike.
 
+use crate::error;
 use crate::smile::ArbitrageReport;
+use crate::surface::interp::strike_grid;
+use crate::surface::{CALENDAR_ARB_TOL, CALENDAR_CHECK_GRID_SIZE};
 use serde::{Deserialize, Serialize};
 
 /// Comprehensive diagnostics for a volatility surface.
@@ -35,6 +38,45 @@ pub struct CalendarViolation {
     pub variance_short: f64,
     /// Variance at longer tenor (should be larger).
     pub variance_long: f64,
+}
+
+/// Run common per-smile and adjacent-tenor surface diagnostics.
+pub(crate) fn surface_diagnostics<R, V>(
+    tenors: &[f64],
+    forwards: &[f64],
+    report_at: R,
+    variance_at: V,
+) -> error::Result<SurfaceDiagnostics>
+where
+    R: Fn(usize) -> error::Result<ArbitrageReport>,
+    V: Fn(usize, f64) -> error::Result<f64>,
+{
+    let smile_reports = (0..tenors.len())
+        .map(report_at)
+        .collect::<error::Result<Vec<_>>>()?;
+
+    let mut calendar_violations = Vec::new();
+    for i in 0..tenors.len().saturating_sub(1) {
+        let forward = 0.5 * (forwards[i] + forwards[i + 1]);
+        for strike in strike_grid(forward, CALENDAR_CHECK_GRID_SIZE) {
+            let variance_short = variance_at(i, strike)?;
+            let variance_long = variance_at(i + 1, strike)?;
+            if variance_long < variance_short - CALENDAR_ARB_TOL {
+                calendar_violations.push(CalendarViolation {
+                    strike,
+                    tenor_short: tenors[i],
+                    tenor_long: tenors[i + 1],
+                    variance_short,
+                    variance_long,
+                });
+            }
+        }
+    }
+
+    Ok(SurfaceDiagnostics {
+        smile_reports,
+        calendar_violations,
+    })
 }
 
 #[cfg(test)]

@@ -35,6 +35,73 @@ pub(crate) fn validate_finite(value: f64, name: &str) -> crate::error::Result<f6
     Ok(value)
 }
 
+/// Validate every element of a named collection as positive and finite.
+///
+/// The error format intentionally matches the surface constructors' historic
+/// messages because those diagnostics are part of the crate's observable API.
+pub(crate) fn validate_positive_slice(values: &[f64], name: &str) -> crate::error::Result<()> {
+    for (i, &value) in values.iter().enumerate() {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("{name} must be positive and finite, got {name}[{i}]={value}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Validate that a named collection is strictly increasing.
+pub(crate) fn validate_strictly_increasing(values: &[f64], name: &str) -> crate::error::Result<()> {
+    for pair in values.windows(2) {
+        if pair[1] <= pair[0] {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "{name} must be strictly increasing, but {} >= {}",
+                    pair[0], pair[1]
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Validate the common tenor/forward/theta grid used by parametric surfaces.
+pub(crate) fn validate_surface_grid(
+    tenors: &[f64],
+    forwards: &[f64],
+    thetas: &[f64],
+) -> crate::error::Result<()> {
+    if tenors.is_empty() {
+        return Err(VolSurfError::InvalidInput {
+            message: "at least one tenor is required".into(),
+        });
+    }
+    if tenors.len() != forwards.len() {
+        return Err(VolSurfError::InvalidInput {
+            message: format!(
+                "tenors and forwards must have the same length, got {} and {}",
+                tenors.len(),
+                forwards.len()
+            ),
+        });
+    }
+    if tenors.len() != thetas.len() {
+        return Err(VolSurfError::InvalidInput {
+            message: format!(
+                "tenors and thetas must have the same length, got {} and {}",
+                tenors.len(),
+                thetas.len()
+            ),
+        });
+    }
+
+    validate_positive_slice(tenors, "tenors")?;
+    validate_positive_slice(forwards, "forwards")?;
+    validate_positive_slice(thetas, "thetas")?;
+    validate_strictly_increasing(tenors, "tenors")?;
+    validate_strictly_increasing(thetas, "thetas")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +216,24 @@ mod tests {
         assert!(
             msg.contains("my_field"),
             "error should include field name: {msg}"
+        );
+    }
+
+    #[test]
+    fn surface_grid_preserves_indexed_validation_messages() {
+        let err = validate_surface_grid(&[0.5], &[f64::NAN], &[0.04]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid input: forwards must be positive and finite, got forwards[0]=NaN"
+        );
+    }
+
+    #[test]
+    fn strictly_increasing_reports_adjacent_values() {
+        let err = validate_strictly_increasing(&[0.5, 0.5], "tenors").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid input: tenors must be strictly increasing, but 0.5 >= 0.5"
         );
     }
 }

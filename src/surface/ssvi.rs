@@ -26,19 +26,37 @@
 //! # References
 //! - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014)
 
-use std::f64::consts::PI;
-
 use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme};
 use crate::error::{self, VolSurfError};
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
+use crate::smile::arbitrage::{ArbitrageReport, density_from_g, gatheral_g, scan_g};
 use crate::smile::{ArbitrageScanConfig, SmileSection};
-use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
-use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
+use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics, surface_diagnostics};
+use crate::surface::interp::strike_grid;
+use crate::surface::{CALENDAR_ARB_TOL, CALENDAR_CHECK_GRID_SIZE};
 use crate::types::{Strike, Tenor, Variance, Vol};
-use crate::validate::validate_positive;
+use crate::validate::{validate_positive, validate_surface_grid};
+
+/// Evaluate the shared SSVI/eSSVI total-variance kernel.
+pub(crate) fn ssvi_total_variance(theta: f64, k: f64, rho: f64, eta: f64, gamma: f64) -> f64 {
+    ssvi_total_variance_with_phi_theta(theta, theta, k, rho, eta, gamma)
+}
+
+pub(crate) fn ssvi_total_variance_with_phi_theta(
+    theta: f64,
+    phi_theta: f64,
+    k: f64,
+    rho: f64,
+    eta: f64,
+    gamma: f64,
+) -> f64 {
+    let phi = eta / phi_theta.powf(gamma);
+    let phi_k = phi * k;
+    let one_minus_rho_sq = 1.0 - rho * rho;
+    (theta / 2.0) * (1.0 + rho * phi_k + ((phi_k + rho).powi(2) + one_minus_rho_sq).sqrt())
+}
 
 /// SSVI volatility surface parameterized by Gatheral-Jacquier (2014).
 ///
@@ -150,75 +168,7 @@ impl SsviSurface {
             });
         }
 
-        // Vector length checks
-        if tenors.is_empty() {
-            return Err(VolSurfError::InvalidInput {
-                message: "at least one tenor is required".into(),
-            });
-        }
-        if tenors.len() != forwards.len() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors and forwards must have the same length, got {} and {}",
-                    tenors.len(),
-                    forwards.len()
-                ),
-            });
-        }
-        if tenors.len() != thetas.len() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors and thetas must have the same length, got {} and {}",
-                    tenors.len(),
-                    thetas.len()
-                ),
-            });
-        }
-
-        // Element-wise validation
-        for (i, &t) in tenors.iter().enumerate() {
-            if !t.is_finite() || t <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("tenors must be positive and finite, got tenors[{i}]={t}"),
-                });
-            }
-        }
-        for (i, &f) in forwards.iter().enumerate() {
-            if !f.is_finite() || f <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("forwards must be positive and finite, got forwards[{i}]={f}"),
-                });
-            }
-        }
-        for (i, &th) in thetas.iter().enumerate() {
-            if !th.is_finite() || th <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("thetas must be positive and finite, got thetas[{i}]={th}"),
-                });
-            }
-        }
-
-        // Monotonicity checks
-        for w in tenors.windows(2) {
-            if w[1] <= w[0] {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "tenors must be strictly increasing, but {} >= {}",
-                        w[0], w[1]
-                    ),
-                });
-            }
-        }
-        for w in thetas.windows(2) {
-            if w[1] <= w[0] {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "thetas must be strictly increasing, but {} >= {}",
-                        w[0], w[1]
-                    ),
-                });
-            }
-        }
+        validate_surface_grid(&tenors, &forwards, &thetas)?;
 
         Ok(Self {
             one_minus_rho_sq: 1.0 - rho * rho,
@@ -271,10 +221,7 @@ impl SsviSurface {
     ///
     /// This is the hot path — no allocations, no branching.
     pub(crate) fn total_variance_at(&self, theta: f64, k: f64) -> f64 {
-        let phi = self.eta / theta.powf(self.gamma);
-        let phi_k = phi * k;
-        (theta / 2.0)
-            * (1.0 + self.rho * phi_k + ((phi_k + self.rho).powi(2) + self.one_minus_rho_sq).sqrt())
+        ssvi_total_variance(theta, k, self.rho, self.eta, self.gamma)
     }
 
     /// Evaluate the power-law mixing function φ(θ) = η / θ^γ.
@@ -507,18 +454,12 @@ impl SsviSurface {
 
         // Average rho from per-tenor SVI fits, clamped to valid range
         let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
-        let one_minus_rho_sq = 1.0 - rho_global * rho_global;
 
         // Prepare observation triples from filtered data so Stage 2 optimizes
         // against the same points that Stage 1 SVI was calibrated on.
         let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
         for (i, market_vols) in market_data.iter().enumerate() {
-            let filtered = crate::calibration::apply_filter(market_vols, forwards[i], filter);
-            let data = if filtered.len() >= 5 {
-                &filtered
-            } else {
-                market_vols
-            };
+            let data = crate::calibration::prepare_market_vols(market_vols, forwards[i], filter, 5);
             for &(strike, vol) in data.iter() {
                 let k = (strike / forwards[i]).ln();
                 let w_obs = vol * vol * tenors[i];
@@ -535,12 +476,8 @@ impl SsviSurface {
             let mut rss = 0.0;
             for &(theta, k, w_obs) in &all_points {
                 let theta_c = theta.max(1e-10);
-                let phi = eta / theta_c.powf(gamma);
-                let phi_k = phi * k;
-                let w_pred = (theta / 2.0)
-                    * (1.0
-                        + rho_global * phi_k
-                        + ((phi_k + rho_global).powi(2) + one_minus_rho_sq).sqrt());
+                let w_pred =
+                    ssvi_total_variance_with_phi_theta(theta, theta_c, k, rho_global, eta, gamma);
                 if !w_pred.is_finite() {
                     return f64::MAX;
                 }
@@ -555,30 +492,17 @@ impl SsviSurface {
         let gamma_lo = 0.0_f64;
         let gamma_hi = 1.0_f64;
 
-        let mut best_eta = 0.5;
-        let mut best_gamma = 0.5;
-        let mut best_rss = f64::MAX;
-
-        for ie in 0..GRID_N {
-            let eta = eta_lo + (eta_hi - eta_lo) * (ie as f64) / ((GRID_N - 1) as f64);
-            for ig in 0..GRID_N {
-                let gamma = gamma_lo + (gamma_hi - gamma_lo) * (ig as f64) / ((GRID_N - 1) as f64);
-                let rss = objective(eta, gamma);
-                if rss < best_rss {
-                    best_rss = rss;
-                    best_eta = eta;
-                    best_gamma = gamma;
-                }
-            }
-        }
-
-        if best_rss >= f64::MAX {
-            return Err(VolSurfError::CalibrationError {
-                message: "grid search found no valid starting point".into(),
-                model: "SSVI",
-                rms_error: None,
-            });
-        }
+        let (best_eta, best_gamma, _best_rss) = crate::optim::grid_search_2d(
+            GRID_N,
+            |ie| eta_lo + (eta_hi - eta_lo) * ie as f64 / (GRID_N - 1) as f64,
+            |ig| gamma_lo + (gamma_hi - gamma_lo) * ig as f64 / (GRID_N - 1) as f64,
+            objective,
+        )
+        .ok_or_else(|| VolSurfError::CalibrationError {
+            message: "grid search found no valid starting point".into(),
+            model: "SSVI",
+            rms_error: None,
+        })?;
 
         // Nelder-Mead refinement
         let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
@@ -625,16 +549,7 @@ impl SsviSurface {
     }
 }
 
-/// Number of strikes for calendar arbitrage checks.
-pub(crate) const CALENDAR_CHECK_GRID_SIZE: usize = 41;
-
 impl VolSurface for SsviSurface {
-    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
-        validate_positive(expiry.0, "expiry")?;
-        let var = self.black_variance(expiry, strike)?;
-        Ok(Vol((var.0 / expiry.0).sqrt()))
-    }
-
     fn black_variance(&self, expiry: Tenor, strike: Strike) -> error::Result<Variance> {
         validate_positive(expiry.0, "expiry")?;
         validate_positive(strike.0, "strike")?;
@@ -661,59 +576,30 @@ impl VolSurface for SsviSurface {
     }
 
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
-        let mut smile_reports = Vec::with_capacity(self.tenors.len());
-        for (i, &tenor) in self.tenors.iter().enumerate() {
-            let slice = SsviSlice::new(
-                self.forwards[i],
-                tenor,
-                self.rho,
-                self.eta,
-                self.gamma,
-                self.thetas[i],
-            )?;
-            smile_reports.push(slice.is_arbitrage_free_with(config)?);
-        }
-
-        let mut calendar_violations = Vec::new();
-        for i in 0..self.tenors.len().saturating_sub(1) {
-            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
-            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
-
-            for &strike in &grid {
-                let k_short = (strike / self.forwards[i]).ln();
-                let k_long = (strike / self.forwards[i + 1]).ln();
-                let w_short = self.total_variance_at(self.thetas[i], k_short);
-                let w_long = self.total_variance_at(self.thetas[i + 1], k_long);
-                if w_long < w_short - CALENDAR_ARB_TOL {
-                    calendar_violations.push(CalendarViolation {
-                        strike,
-                        tenor_short: self.tenors[i],
-                        tenor_long: self.tenors[i + 1],
-                        variance_short: w_short,
-                        variance_long: w_long,
-                    });
-                }
-            }
-        }
-
-        Ok(SurfaceDiagnostics {
-            smile_reports,
-            calendar_violations,
-        })
+        surface_diagnostics(
+            &self.tenors,
+            &self.forwards,
+            |i| {
+                SsviSlice::new(
+                    self.forwards[i],
+                    self.tenors[i],
+                    self.rho,
+                    self.eta,
+                    self.gamma,
+                    self.thetas[i],
+                )?
+                .is_arbitrage_free_with(config)
+            },
+            |i, strike| {
+                let k = (strike / self.forwards[i]).ln();
+                Ok(self.total_variance_at(self.thetas[i], k))
+            },
+        )
     }
 
     fn tenors(&self) -> &[f64] {
         &self.tenors
     }
-}
-
-pub(crate) fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
-    let ln_lo = (0.5_f64).ln();
-    let ln_hi = (2.0_f64).ln();
-    let step = (ln_hi - ln_lo) / (n - 1) as f64;
-    (0..n)
-        .map(|i| forward * (ln_lo + step * i as f64).exp())
-        .collect()
 }
 
 /// A single-tenor slice through an SSVI surface.
@@ -877,10 +763,7 @@ impl SsviSlice {
     }
 
     fn total_variance(&self, k: f64) -> f64 {
-        let phi = self.phi();
-        let phi_k = phi * k;
-        (self.theta / 2.0)
-            * (1.0 + self.rho * phi_k + ((phi_k + self.rho).powi(2) + self.one_minus_rho_sq).sqrt())
+        ssvi_total_variance(self.theta, k, self.rho, self.eta, self.gamma)
     }
 
     // w'(k) = (θ/2) · [ρ·φ + φ·(φ·k + ρ) / R], R = √((φ·k + ρ)² + (1 − ρ²))
@@ -903,13 +786,9 @@ impl SsviSlice {
     // g(k) ≥ 0 ⟺ no butterfly arbitrage (Gatheral & Jacquier 2014, §4)
     fn g_function(&self, k: f64) -> f64 {
         let w = self.total_variance(k);
-        if w <= 0.0 {
-            return f64::NEG_INFINITY;
-        }
         let wp = self.w_prime(k);
         let wpp = self.w_double_prime(k);
-        let term1 = 1.0 - k * wp / (2.0 * w);
-        term1 * term1 - wp * wp / 4.0 * (1.0 / w + 0.25) + wpp / 2.0
+        gatheral_g(k, w, wp, wpp)
     }
 }
 
@@ -969,17 +848,13 @@ impl SmileSection for SsviSlice {
                 message: format!("SSVI total variance is non-positive at k={k}: w={w}"),
             });
         }
-        let g = self.g_function(k);
-        let sqrt_w = w.sqrt();
-        let d2 = -k / sqrt_w - sqrt_w / 2.0;
-        let n_d2 = (-d2 * d2 / 2.0).exp() / (2.0 * PI).sqrt();
-        Ok(g * n_d2 / (strike.0 * sqrt_w))
+        Ok(density_from_g(strike.0, k, w, self.g_function(k)))
     }
 
     /// Check butterfly arbitrage by scanning the Gatheral g-function.
     ///
     /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
-    /// Points where g(k) < −tol are recorded as [`ButterflyViolation`]s
+    /// Points where g(k) < −tol are recorded as [`crate::smile::ButterflyViolation`]s
     /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
     ///
     /// # Reference
@@ -992,31 +867,13 @@ impl SmileSection for SsviSlice {
         &self,
         config: &ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
-        config.validate()?;
-        let n = config.n_points;
-        let mut violations = Vec::new();
-
-        for i in 0..n {
-            let k = config.k_min + (config.k_max - config.k_min) * (i as f64) / ((n - 1) as f64);
-            let g = self.g_function(k);
-            if g < -crate::smile::BUTTERFLY_G_TOL {
-                let strike = self.forward * k.exp();
-                let d = match self.density(Strike(strike)) {
-                    Ok(d) => d,
-                    Err(_) => continue,
-                };
-                violations.push(ButterflyViolation {
-                    strike,
-                    density: d,
-                    magnitude: d.abs(),
-                });
-            }
-        }
-
-        Ok(ArbitrageReport {
-            expiry: self.expiry,
-            butterfly_violations: violations,
-        })
+        scan_g(
+            self.expiry,
+            self.forward,
+            config,
+            |k| self.g_function(k),
+            |strike| self.density(Strike(strike)),
+        )
     }
 }
 

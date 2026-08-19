@@ -1,5 +1,7 @@
 //! Calibration configuration types shared across smile models.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 /// Pre-calibration data filter for strike/vol cleaning.
@@ -75,6 +77,28 @@ pub fn apply_filter(
             true
         })
         .collect()
+}
+
+/// Apply a data filter, falling back to the validated original observations
+/// when too few points remain for a model calibration.
+pub(crate) fn prepare_market_vols<'a>(
+    market_vols: &'a [(f64, f64)],
+    forward: f64,
+    filter: &DataFilter,
+    min_points: usize,
+) -> Cow<'a, [(f64, f64)]> {
+    let filtered = apply_filter(market_vols, forward, filter);
+    if filtered.len() >= min_points {
+        Cow::Owned(filtered)
+    } else {
+        Cow::Borrowed(market_vols)
+    }
+}
+
+/// Black vega weight n(d1), omitting the common forward/sqrt(T) factor.
+pub(crate) fn black_vega_weight(forward: f64, strike: f64, vol: f64, expiry: f64) -> f64 {
+    let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * expiry.sqrt());
+    (-0.5 * d1 * d1).exp() / (2.0 * std::f64::consts::PI).sqrt()
 }
 
 #[cfg(test)]
@@ -253,5 +277,26 @@ mod tests {
         let data = vec![(110.0, 0.22), (90.0, 0.25), (100.0, 0.20)];
         let result = apply_filter(&data, 100.0, &DataFilter::default());
         assert_eq!(result, data);
+    }
+
+    #[test]
+    fn prepare_market_vols_borrows_when_filter_leaves_too_few_points() {
+        let data = vec![(80.0, 0.3), (100.0, 0.2), (120.0, 0.25)];
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.01),
+            ..Default::default()
+        };
+        assert!(matches!(
+            prepare_market_vols(&data, 100.0, &filter, 2),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn black_vega_weight_is_standard_normal_density_at_atm() {
+        let weight = black_vega_weight(100.0, 100.0, 0.2, 1.0);
+        let d1 = 0.1_f64;
+        let expected = (-0.5 * d1 * d1).exp() / (2.0 * std::f64::consts::PI).sqrt();
+        assert!((weight - expected).abs() < 1e-15);
     }
 }
