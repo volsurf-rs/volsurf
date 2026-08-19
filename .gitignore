@@ -4,3 +4,10 @@ Cargo.lock
 *.swp
 *.swo
 .DS_Store
+__pycache__/
+
+# Local-only: licensed market data and the scratch tooling that reads it.
+# This repo is public; neither may be published.
+/data/
+/tools/
+
