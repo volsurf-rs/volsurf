@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI job running the Python binding's pytest suite via `uv sync --locked` + `uv run pytest`, and a `dev` dependency group declaring pytest (PAN-129)
+
 ### Removed
 
 - `homepage` metadata in `Cargo.toml` — the site it pointed at no longer exists; crates.io falls back to `repository`

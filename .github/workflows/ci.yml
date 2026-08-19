@@ -55,6 +55,19 @@ jobs:
       - run: cargo clippy -p volsurf-wasm --target wasm32-unknown-unknown -- -D warnings
       - run: wasm-pack test --node wasm/
 
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group dev --locked
+        working-directory: python
+      - run: uv run pytest tests/ -q
+        working-directory: python
+
   doc:
     name: Documentation
     runs-on: ubuntu-latest
