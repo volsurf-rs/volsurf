@@ -408,4 +408,7 @@ dev = [
 requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
+dev = [
+    { name = "pytest", marker = "python_full_version < '3.10'", specifier = ">=8" },
+    { name = "pytest", marker = "python_full_version >= '3.10'", specifier = ">=9.0.3" },
+]

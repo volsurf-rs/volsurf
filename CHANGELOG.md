@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- PyO3 0.28 → 0.29 and `rust-numpy` 0.28 → 0.29, clearing RUSTSEC advisories for an
+  out-of-bounds read in `PyList`/`PyTuple` `nth`/`nth_back` and a missing `Sync`
+  bound on `PyCFunction::new_closure`. The two move together because `rust-numpy`
+  pins PyO3 and PyO3 sets `links = "python"`, so the graph admits one version.
+  Neither advisory affects the published `volsurf` crate, which has no PyO3
+  dependency; only the `volsurf-python` binding is impacted.
+- Require pytest ≥ 9.0.3 on Python 3.10+ for the tmpdir advisory
+
 ## [2.4.0] - 2026-08-19
 
 First release published to crates.io since 2.1.0. Versions 2.2.0 and 2.3.0
