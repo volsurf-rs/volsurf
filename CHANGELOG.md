@@ -7,13 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-19
+
+First release published to crates.io since 2.1.0. Versions 2.2.0 and 2.3.0
+were tagged and changelogged but never uploaded, so `volsurf = "2.3"` did not
+resolve; they remain git-only releases and their contents ship here (PAN-134).
+
 ### Added
 
-- CI job running the Python binding's pytest suite via `uv sync --locked` + `uv run pytest`, and a `dev` dependency group declaring pytest (PAN-129)
+- Python `DupireLocalVol` accepts `SsviSurface` and `EssviSurface` directly, not
+  only the opaque surface handle
+- CI job running the Python binding's pytest suite against Python 3.9 and 3.14
+  via `uv sync --locked` + `uv run pytest`, with pytest declared in a `dev`
+  dependency group (PAN-129)
+- CI job running the WASM tests via `wasm-pack test --node` (PAN-41)
+
+### Changed
+
+- Consolidated volatility model internals across smile, surface and implied-vol
+  modules — shared validation, optimizer and arbitrage-scan helpers, with no
+  change to the public Rust API (−77 net lines across 18 files)
 
 ### Removed
 
-- `homepage` metadata in `Cargo.toml` — the site it pointed at no longer exists; crates.io falls back to `repository`
+- `homepage` metadata in `Cargo.toml` — the site it pointed at no longer exists;
+  crates.io falls back to `repository`
 
 ## [2.3.0] - 2026-06-06
 
@@ -173,7 +191,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/volsurf-rs/volsurf/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/volsurf-rs/volsurf/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/volsurf-rs/volsurf/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/volsurf-rs/volsurf/compare/v2.0.0...v2.1.0
