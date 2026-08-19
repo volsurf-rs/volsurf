@@ -9,7 +9,11 @@ requires-python = ">=3.9"
 dependencies = ["numpy>=1.24"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    # 9.0.3 fixes the tmpdir advisory but needs 3.10+, so 3.9 stays on 8.x
+    "pytest>=9.0.3; python_version >= '3.10'",
+    "pytest>=8; python_version < '3.10'",
+]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
