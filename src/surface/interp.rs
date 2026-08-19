@@ -1,5 +1,15 @@
 use crate::surface::EXPIRY_MATCH_TOL;
 
+/// Construct the standard log-spaced strike grid from 0.5·F to 2.0·F.
+pub(crate) fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
+    let log_min = (0.5_f64).ln();
+    let log_max = (2.0_f64).ln();
+    let step = (log_max - log_min) / (n - 1) as f64;
+    (0..n)
+        .map(|i| forward * (log_min + step * i as f64).exp())
+        .collect()
+}
+
 /// Interpolate `(θ, F)` at an arbitrary expiry from stored tenor grids.
 ///
 /// - Exact matches (within 1e-10) return stored values directly.
@@ -43,7 +53,7 @@ pub(crate) fn interpolate_theta_forward(
 
 #[cfg(test)]
 mod tests {
-    use super::interpolate_theta_forward;
+    use super::{interpolate_theta_forward, strike_grid};
     use approx::assert_abs_diff_eq;
 
     fn multi_tenor() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -51,6 +61,14 @@ mod tests {
         let thetas = vec![0.04, 0.08, 0.16, 0.32];
         let forwards = vec![100.0, 102.0, 105.0, 110.0];
         (tenors, thetas, forwards)
+    }
+
+    #[test]
+    fn strike_grid_has_expected_endpoints_and_atm_midpoint() {
+        let grid = strike_grid(100.0, 3);
+        assert_abs_diff_eq!(grid[0], 50.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(grid[1], 100.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(grid[2], 200.0, epsilon = 1e-12);
     }
 
     #[test]

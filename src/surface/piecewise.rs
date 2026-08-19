@@ -25,23 +25,18 @@
 use std::fmt;
 
 use crate::error::{self, VolSurfError};
-use crate::smile::arbitrage::ArbitrageReport;
 use crate::smile::spline::SplineSmile;
 use crate::smile::{ArbitrageScanConfig, SmileSection};
+use crate::surface::EXPIRY_MATCH_TOL;
 use crate::surface::VolSurface;
-use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics};
-use crate::surface::{CALENDAR_ARB_TOL, EXPIRY_MATCH_TOL};
-use crate::types::{Strike, Tenor, Variance, Vol};
-use crate::validate::validate_positive;
+use crate::surface::arbitrage::{SurfaceDiagnostics, surface_diagnostics};
+use crate::types::{Strike, Tenor, Variance};
+use crate::validate::{validate_positive, validate_positive_slice, validate_strictly_increasing};
 
 /// Number of strikes used when sampling smiles for interpolation.
 /// Log-spaced grid from 0.5·F to 2.0·F provides adequate density for
 /// accurate spline construction while keeping memory usage reasonable.
 const SMILE_GRID_SIZE: usize = 51;
-
-/// Number of strikes used for calendar arbitrage checks.
-/// Grid for scanning cross-tenor variance monotonicity between adjacent tenors.
-const CALENDAR_CHECK_GRID_SIZE: usize = 41;
 
 /// Piecewise volatility surface composed of per-tenor smile sections.
 ///
@@ -111,23 +106,8 @@ impl PiecewiseSurface {
                 message: "at least one tenor is required".into(),
             });
         }
-        for (i, t) in tenors.iter().enumerate() {
-            if !t.is_finite() || *t <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("tenors must be positive and finite, got tenors[{i}]={t}"),
-                });
-            }
-        }
-        for w in tenors.windows(2) {
-            if w[1] <= w[0] {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!(
-                        "tenors must be strictly increasing, but {} >= {}",
-                        w[0], w[1]
-                    ),
-                });
-            }
-        }
+        validate_positive_slice(&tenors, "tenors")?;
+        validate_strictly_increasing(&tenors, "tenors")?;
 
         Ok(Self { tenors, smiles })
     }
@@ -136,12 +116,7 @@ impl PiecewiseSurface {
     ///
     /// Uses log-spaced strikes from `0.5·F` to `2.0·F`.
     fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
-        let ln_lo = (0.5_f64).ln();
-        let ln_hi = (2.0_f64).ln();
-        let step = (ln_hi - ln_lo) / (n - 1) as f64;
-        (0..n)
-            .map(|i| forward * (ln_lo + step * i as f64).exp())
-            .collect()
+        super::interp::strike_grid(forward, n)
     }
 
     /// Find the bracketing tenor indices for a given expiry.
@@ -182,47 +157,7 @@ enum TenorPosition {
     Between(usize, usize),
 }
 
-impl PiecewiseSurface {
-    fn diagnostics_from_smile_reports(
-        &self,
-        smile_reports: Vec<ArbitrageReport>,
-    ) -> error::Result<SurfaceDiagnostics> {
-        let mut calendar_violations = Vec::new();
-        for i in 0..self.tenors.len().saturating_sub(1) {
-            let f1 = self.smiles[i].forward();
-            let f2 = self.smiles[i + 1].forward();
-            let fwd_avg = 0.5 * (f1 + f2);
-            let grid = Self::strike_grid(fwd_avg, CALENDAR_CHECK_GRID_SIZE);
-
-            for &k in &grid {
-                let w_short = self.smiles[i].variance(Strike(k))?;
-                let w_long = self.smiles[i + 1].variance(Strike(k))?;
-                if w_long.0 < w_short.0 - CALENDAR_ARB_TOL {
-                    calendar_violations.push(CalendarViolation {
-                        strike: k,
-                        tenor_short: self.tenors[i],
-                        tenor_long: self.tenors[i + 1],
-                        variance_short: w_short.0,
-                        variance_long: w_long.0,
-                    });
-                }
-            }
-        }
-
-        Ok(SurfaceDiagnostics {
-            smile_reports,
-            calendar_violations,
-        })
-    }
-}
-
 impl VolSurface for PiecewiseSurface {
-    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
-        validate_positive(expiry.0, "expiry")?;
-        let var = self.black_variance(expiry, strike)?;
-        Ok(Vol((var.0 / expiry.0).sqrt()))
-    }
-
     fn black_variance(&self, expiry: Tenor, strike: Strike) -> error::Result<Variance> {
         validate_positive(expiry.0, "expiry")?;
         validate_positive(strike.0, "strike")?;
@@ -319,19 +254,31 @@ impl VolSurface for PiecewiseSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        let mut smile_reports = Vec::with_capacity(self.smiles.len());
-        for smile in &self.smiles {
-            smile_reports.push(smile.is_arbitrage_free()?);
-        }
-        self.diagnostics_from_smile_reports(smile_reports)
+        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
+        surface_diagnostics(
+            &self.tenors,
+            &forwards,
+            |i| self.smiles[i].is_arbitrage_free(),
+            |i, strike| {
+                self.smiles[i]
+                    .variance(Strike(strike))
+                    .map(|variance| variance.0)
+            },
+        )
     }
 
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
-        let mut smile_reports = Vec::with_capacity(self.smiles.len());
-        for smile in &self.smiles {
-            smile_reports.push(smile.is_arbitrage_free_with(config)?);
-        }
-        self.diagnostics_from_smile_reports(smile_reports)
+        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
+        surface_diagnostics(
+            &self.tenors,
+            &forwards,
+            |i| self.smiles[i].is_arbitrage_free_with(config),
+            |i, strike| {
+                self.smiles[i]
+                    .variance(Strike(strike))
+                    .map(|variance| variance.0)
+            },
+        )
     }
 
     fn tenors(&self) -> &[f64] {

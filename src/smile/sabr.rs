@@ -16,11 +16,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
+use crate::calibration::{DataFilter, WeightingScheme, black_vega_weight, prepare_market_vols};
 use crate::error::{self, VolSurfError};
 use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
+use crate::smile::arbitrage::ArbitrageReport;
 use crate::types::{Strike, Vol};
 use crate::validate::{validate_non_negative, validate_positive};
 
@@ -358,12 +358,7 @@ impl SabrSmile {
         }
 
         // Apply DataFilter after validation
-        let filtered = apply_filter(market_vols, forward, filter);
-        let market_vols = if filtered.len() >= MIN_POINTS {
-            &filtered[..]
-        } else {
-            market_vols
-        };
+        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS);
 
         // Resolve weighting: ModelDefault for SABR → Uniform.
         // Uses n(d₁) directly (not sqrt) because weight multiplies diff² in the
@@ -373,19 +368,15 @@ impl SabrSmile {
             WeightingScheme::Uniform | WeightingScheme::ModelDefault => false,
         };
         let weights: Vec<f64> = if use_vega {
-            let sqrt_t = expiry.sqrt();
             market_vols
                 .iter()
-                .map(|&(strike, vol)| {
-                    let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * sqrt_t);
-                    ((-0.5 * d1 * d1).exp() / (2.0 * std::f64::consts::PI).sqrt()).max(1e-8)
-                })
+                .map(|&(strike, vol)| black_vega_weight(forward, strike, vol, expiry).max(1e-8))
                 .collect()
         } else {
             vec![1.0; market_vols.len()]
         };
 
-        let sigma_atm = interpolate_atm_vol(forward, market_vols);
+        let sigma_atm = interpolate_atm_vol(forward, &market_vols);
         let f_beta = forward.powf(1.0 - beta);
 
         let solve_alpha = |rho: f64, nu: f64| -> Option<f64> {
@@ -467,30 +458,17 @@ impl SabrSmile {
             let y_lo = (-2.0_f64).max((0.01_f64).ln());
             let y_hi = (2.0_f64).ln();
 
-            let mut best_x = 0.0;
-            let mut best_y = 0.0;
-            let mut best_rss = f64::MAX;
-
-            for ix in 0..GRID_N {
-                let x = x_lo + (x_hi - x_lo) * (ix as f64) / ((GRID_N - 1) as f64);
-                for iy in 0..GRID_N {
-                    let y = y_lo + (y_hi - y_lo) * (iy as f64) / ((GRID_N - 1) as f64);
-                    let rss = objective(x, y);
-                    if rss < best_rss {
-                        best_rss = rss;
-                        best_x = x;
-                        best_y = y;
-                    }
-                }
-            }
-
-            if best_rss >= f64::MAX {
-                return Err(VolSurfError::CalibrationError {
-                    message: "grid search found no valid starting point".into(),
-                    model: "SABR",
-                    rms_error: None,
-                });
-            }
+            let (best_x, best_y, _best_rss) = crate::optim::grid_search_2d(
+                GRID_N,
+                |ix| x_lo + (x_hi - x_lo) * ix as f64 / (GRID_N - 1) as f64,
+                |iy| y_lo + (y_hi - y_lo) * iy as f64 / (GRID_N - 1) as f64,
+                &objective,
+            )
+            .ok_or_else(|| VolSurfError::CalibrationError {
+                message: "grid search found no valid starting point".into(),
+                model: "SABR",
+                rms_error: None,
+            })?;
 
             let step_x = (x_hi - x_lo) / (GRID_N as f64) * 0.5;
             let step_y = (y_hi - y_lo) / (GRID_N as f64) * 0.5;
@@ -595,35 +573,6 @@ impl SmileSection for SabrSmile {
     /// Hagan et al. (2002), "Managing Smile Risk".
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
         self.is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
-    }
-
-    fn is_arbitrage_free_with(
-        &self,
-        config: &ArbitrageScanConfig,
-    ) -> error::Result<ArbitrageReport> {
-        config.validate()?;
-        let n = config.n_points;
-        let mut violations = Vec::new();
-        for i in 0..n {
-            let k = config.k_min + (config.k_max - config.k_min) * (i as f64) / ((n - 1) as f64);
-            let strike = self.forward * k.exp();
-            let d = match self.density(Strike(strike)) {
-                Ok(d) => d,
-                Err(_) => continue,
-            };
-            if d < -super::DENSITY_NEG_TOL {
-                violations.push(ButterflyViolation {
-                    strike,
-                    density: d,
-                    magnitude: d.abs(),
-                });
-            }
-        }
-
-        Ok(ArbitrageReport {
-            expiry: self.expiry,
-            butterfly_violations: violations,
-        })
     }
 }
 

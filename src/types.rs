@@ -98,29 +98,19 @@ pub enum OptionType {
     Put,
 }
 
-impl fmt::Display for Strike {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
+macro_rules! impl_numeric_display {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl fmt::Display for $type {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.0.fmt(f)
+                }
+            }
+        )+
+    };
 }
 
-impl fmt::Display for Tenor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl fmt::Display for Vol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl fmt::Display for Variance {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
+impl_numeric_display!(Strike, Tenor, Vol, Variance);
 
 impl fmt::Display for OptionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

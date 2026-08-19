@@ -317,14 +317,15 @@ impl SurfaceBuilder {
                     None => conventions::forward_price(spot, rate, q, tenor.expiry)?,
                 };
 
+                let market_vols: Vec<(f64, f64)> = tenor
+                    .strikes
+                    .iter()
+                    .zip(&tenor.vols)
+                    .map(|(&strike, &vol)| (strike, vol))
+                    .collect();
+
                 let smile: Box<dyn SmileSection> = match model {
                     SmileModel::Svi => {
-                        let market_vols: Vec<(f64, f64)> = tenor
-                            .strikes
-                            .iter()
-                            .zip(tenor.vols.iter())
-                            .map(|(&k, &v)| (k, v))
-                            .collect();
                         let svi = SviSmile::calibrate_with_config(
                             forward,
                             tenor.expiry,
@@ -336,19 +337,12 @@ impl SurfaceBuilder {
                         Box::new(svi)
                     }
                     SmileModel::CubicSpline => {
-                        let market_vols: Vec<(f64, f64)> = tenor
-                            .strikes
-                            .iter()
-                            .zip(tenor.vols.iter())
-                            .map(|(&k, &v)| (k, v))
-                            .collect();
-                        let filtered =
-                            crate::calibration::apply_filter(&market_vols, forward, &filter);
-                        let data = if filtered.len() >= 3 {
-                            &filtered
-                        } else {
-                            &market_vols
-                        };
+                        let data = crate::calibration::prepare_market_vols(
+                            &market_vols,
+                            forward,
+                            &filter,
+                            3,
+                        );
                         let mut pairs: Vec<(f64, f64)> = data
                             .iter()
                             .map(|&(k, v)| (k, v * v * tenor.expiry))
@@ -359,12 +353,6 @@ impl SurfaceBuilder {
                         Box::new(spline)
                     }
                     SmileModel::Sabr { beta } => {
-                        let market_vols: Vec<(f64, f64)> = tenor
-                            .strikes
-                            .iter()
-                            .zip(tenor.vols.iter())
-                            .map(|(&k, &v)| (k, v))
-                            .collect();
                         let sabr = SabrSmile::calibrate_with_config(
                             forward,
                             tenor.expiry,

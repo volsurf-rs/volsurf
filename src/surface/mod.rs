@@ -23,6 +23,7 @@ pub use piecewise::PiecewiseSurface;
 pub use ssvi::{SsviSlice, SsviSurface};
 
 pub(crate) const CALENDAR_ARB_TOL: f64 = 1e-10;
+pub(crate) const CALENDAR_CHECK_GRID_SIZE: usize = 41;
 pub(crate) const EXPIRY_MATCH_TOL: f64 = 1e-10;
 
 use crate::error;
@@ -72,7 +73,11 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// which also maps (T, K) → σ but means the instantaneous diffusion
     /// coefficient. [`SmileSection::vol`] omits the prefix because there is
     /// no ambiguity at the single-tenor level.
-    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol>;
+    fn black_vol(&self, expiry: Tenor, strike: Strike) -> error::Result<Vol> {
+        crate::validate::validate_positive(expiry.0, "expiry")?;
+        let variance = self.black_variance(expiry, strike)?;
+        Ok(Vol((variance.0 / expiry.0).sqrt()))
+    }
 
     /// Black total variance σ²(T, K) · T.
     ///

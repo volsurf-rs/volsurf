@@ -30,6 +30,35 @@ pub(crate) struct NelderMeadResult {
     pub fval: f64,
 }
 
+/// Find the best point on a row-major Cartesian grid.
+///
+/// Coordinate callbacks support linear, logarithmic, or model-specific grid
+/// spacing. Strict comparison preserves the first point when objectives tie.
+pub(crate) fn grid_search_2d<F, X, Y>(
+    n: usize,
+    x_at: X,
+    y_at: Y,
+    objective: F,
+) -> Option<(f64, f64, f64)>
+where
+    F: Fn(f64, f64) -> f64,
+    X: Fn(usize) -> f64,
+    Y: Fn(usize) -> f64,
+{
+    let mut best: Option<(f64, f64, f64)> = None;
+    for ix in 0..n {
+        let x = x_at(ix);
+        for iy in 0..n {
+            let y = y_at(iy);
+            let value = objective(x, y);
+            if value < best.map_or(f64::MAX, |(_, _, best_value)| best_value) {
+                best = Some((x, y, value));
+            }
+        }
+    }
+    best
+}
+
 /// Minimize `objective(x, y)` using the Nelder-Mead simplex method in 2D.
 ///
 /// Starts from `(x0, y0)` with initial perturbations `(step_x, step_y)`
@@ -151,6 +180,29 @@ mod tests {
             diameter_tol: 1e-12,
             fvalue_tol: 1e-14,
         }
+    }
+
+    #[test]
+    fn grid_search_is_row_major_and_keeps_first_tie() {
+        let result = grid_search_2d(
+            3,
+            |i| i as f64,
+            |i| i as f64,
+            |x, y| {
+                if (x == 0.0 && y == 2.0) || (x == 1.0 && y == 0.0) {
+                    0.0
+                } else {
+                    1.0
+                }
+            },
+        );
+        assert_eq!(result, Some((0.0, 2.0, 0.0)));
+    }
+
+    #[test]
+    fn grid_search_rejects_non_finite_or_maximum_result() {
+        assert!(grid_search_2d(2, |_| 0.0, |_| 0.0, |_, _| f64::MAX).is_none());
+        assert!(grid_search_2d(2, |_| 0.0, |_| 0.0, |_, _| f64::NAN).is_none());
     }
 
     #[test]

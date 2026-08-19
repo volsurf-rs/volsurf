@@ -16,9 +16,11 @@
 
 use implied_vol::{DefaultSpecialFn, ImpliedNormalVolatility, PriceBachelier};
 
-use crate::error::VolSurfError;
+use super::{
+    PriceDomain, finish_implied, finish_price, is_call, validate_implied_inputs,
+    validate_pricing_inputs,
+};
 use crate::types::{OptionType, Vol};
-use crate::validate::{validate_finite, validate_non_negative, validate_positive};
 
 /// Bachelier (normal) implied volatility calculator.
 ///
@@ -57,31 +59,17 @@ impl NormalImpliedVol {
         expiry: f64,
         option_type: OptionType,
     ) -> crate::error::Result<Vol> {
-        validate_non_negative(option_price, "option_price")?;
-        validate_finite(forward, "forward")?;
-        validate_finite(strike, "strike")?;
-        validate_positive(expiry, "expiry")?;
-
-        let is_call = matches!(option_type, OptionType::Call);
+        validate_implied_inputs(option_price, forward, strike, expiry, PriceDomain::Finite)?;
 
         let iv = ImpliedNormalVolatility::builder()
             .option_price(option_price)
             .forward(forward)
             .strike(strike)
             .expiry(expiry)
-            .is_call(is_call)
-            .build()
-            .ok_or_else(|| VolSurfError::InvalidInput {
-                message: "implied-vol rejected inputs as outside model domain".into(),
-            })?;
+            .is_call(is_call(option_type))
+            .build();
 
-        let sigma =
-            iv.calculate::<DefaultSpecialFn>()
-                .ok_or_else(|| VolSurfError::NumericalError {
-                    message: "option price is outside the attainable range".into(),
-                })?;
-
-        Ok(Vol(sigma))
+        finish_implied(iv, |calculator| calculator.calculate::<DefaultSpecialFn>())
     }
 }
 
@@ -110,31 +98,25 @@ pub fn normal_price(
     expiry: f64,
     option_type: OptionType,
 ) -> crate::error::Result<f64> {
-    validate_finite(forward, "forward")?;
-    validate_finite(strike, "strike")?;
-    validate_non_negative(vol, "volatility")?;
-    validate_non_negative(expiry, "expiry")?;
-
-    let is_call = matches!(option_type, OptionType::Call);
+    validate_pricing_inputs(forward, strike, vol, expiry, PriceDomain::Finite)?;
 
     let price = PriceBachelier::builder()
         .forward(forward)
         .strike(strike)
         .volatility(vol)
         .expiry(expiry)
-        .is_call(is_call)
-        .build()
-        .ok_or_else(|| VolSurfError::InvalidInput {
-            message: "implied-vol rejected pricing inputs as outside model domain".into(),
-        })?
-        .calculate::<DefaultSpecialFn>();
+        .is_call(is_call(option_type))
+        .build();
 
-    Ok(price)
+    finish_price(price, |calculator| {
+        calculator.calculate::<DefaultSpecialFn>()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::VolSurfError;
     use approx::assert_abs_diff_eq;
 
     #[test]

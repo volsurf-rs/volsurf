@@ -15,15 +15,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use std::f64::consts::PI;
-
 use nalgebra::{DMatrix, DVector};
 
-use crate::calibration::{DataFilter, WeightingScheme, apply_filter};
+use crate::calibration::{DataFilter, WeightingScheme, black_vega_weight, prepare_market_vols};
 use crate::error::{self, VolSurfError};
 use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
+use crate::smile::arbitrage::{ArbitrageReport, density_from_g, gatheral_g, scan_g};
 use crate::types::{Strike, Vol};
 use crate::validate::validate_positive;
 
@@ -246,12 +244,7 @@ impl SviSmile {
         }
 
         // Apply DataFilter after validation (on known-good inputs)
-        let filtered = apply_filter(market_vols, forward, filter);
-        let market_vols = if filtered.len() >= MIN_POINTS {
-            &filtered[..]
-        } else {
-            market_vols
-        };
+        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS);
 
         let k_vals: Vec<f64> = market_vols
             .iter()
@@ -266,13 +259,11 @@ impl SviSmile {
             WeightingScheme::ModelDefault | WeightingScheme::Vega => true,
             WeightingScheme::Uniform => false,
         };
-        let sqrt_t = expiry.sqrt();
         let sqrt_vega: Vec<f64> = if use_vega {
             market_vols
                 .iter()
                 .map(|&(strike, vol)| {
-                    let d1 = (-(strike / forward).ln() + 0.5 * vol * vol * expiry) / (vol * sqrt_t);
-                    ((-0.5 * d1 * d1).exp() / (2.0 * PI).sqrt())
+                    black_vega_weight(forward, strike, vol, expiry)
                         .sqrt()
                         .max(1e-8)
                 })
@@ -463,27 +454,17 @@ impl SviSmile {
             ];
 
             for &(m_lo, m_hi, sigma_lo, sigma_hi) in &starts {
-                let mut start_m = 0.0;
-                let mut start_sigma = 0.1;
-                let mut start_rss = f64::MAX;
-
-                for im in 0..GRID_N {
-                    let m = m_lo + (m_hi - m_lo) * (im as f64) / ((GRID_N - 1) as f64);
-                    for is in 0..GRID_N {
+                let Some((start_m, start_sigma, _start_rss)) = crate::optim::grid_search_2d(
+                    GRID_N,
+                    |im| m_lo + (m_hi - m_lo) * im as f64 / (GRID_N - 1) as f64,
+                    |is| {
                         let t = is as f64 / (GRID_N - 1) as f64;
-                        let sigma = sigma_lo * (sigma_hi / sigma_lo).powf(t);
-                        let rss = objective(m, sigma);
-                        if rss < start_rss {
-                            start_rss = rss;
-                            start_m = m;
-                            start_sigma = sigma;
-                        }
-                    }
-                }
-
-                if start_rss >= f64::MAX {
+                        sigma_lo * (sigma_hi / sigma_lo).powf(t)
+                    },
+                    &objective,
+                ) else {
                     continue;
-                }
+                };
 
                 let step_m = (m_hi - m_lo) / (GRID_N as f64) * 0.5;
                 let step_s = (start_sigma * (sigma_hi / sigma_lo).ln() / ((GRID_N - 1) as f64)
@@ -604,13 +585,9 @@ impl SviSmile {
     /// Gatheral & Jacquier (2014), Definition 4.1.
     fn g_function(&self, k: f64) -> f64 {
         let w = self.total_variance_at_k(k);
-        if w <= 0.0 {
-            return f64::NEG_INFINITY;
-        }
         let wp = self.w_prime(k);
         let wpp = self.w_double_prime(k);
-        let term1 = 1.0 - k * wp / (2.0 * w);
-        term1 * term1 - wp * wp / 4.0 * (1.0 / w + 0.25) + wpp / 2.0
+        gatheral_g(k, w, wp, wpp)
     }
 }
 
@@ -647,11 +624,7 @@ impl SmileSection for SviSmile {
                 message: format!("SVI total variance is non-positive at k={k}: w={w}"),
             });
         }
-        let g = self.g_function(k);
-        let sqrt_w = w.sqrt();
-        let d2 = -k / sqrt_w - sqrt_w / 2.0;
-        let n_d2 = (-d2 * d2 / 2.0).exp() / (2.0 * PI).sqrt();
-        Ok(g * n_d2 / (strike.0 * sqrt_w))
+        Ok(density_from_g(strike.0, k, w, self.g_function(k)))
     }
 
     fn forward(&self) -> f64 {
@@ -682,31 +655,13 @@ impl SmileSection for SviSmile {
         &self,
         config: &ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
-        config.validate()?;
-        let n = config.n_points;
-        let mut violations = Vec::new();
-
-        for i in 0..n {
-            let k = config.k_min + (config.k_max - config.k_min) * (i as f64) / ((n - 1) as f64);
-            let g = self.g_function(k);
-            if g < -super::BUTTERFLY_G_TOL {
-                let strike = self.forward * k.exp();
-                let d = match self.density(Strike(strike)) {
-                    Ok(d) => d,
-                    Err(_) => continue,
-                };
-                violations.push(ButterflyViolation {
-                    strike,
-                    density: d,
-                    magnitude: d.abs(),
-                });
-            }
-        }
-
-        Ok(ArbitrageReport {
-            expiry: self.expiry,
-            butterfly_violations: violations,
-        })
+        scan_g(
+            self.expiry,
+            self.forward,
+            config,
+            |k| self.g_function(k),
+            |strike| self.density(Strike(strike)),
+        )
     }
 }
 

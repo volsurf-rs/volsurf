@@ -206,28 +206,8 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
         &self,
         config: &ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
-        config.validate()?;
-        let fwd = self.forward();
-        let n = config.n_points;
-        let mut violations = Vec::new();
-        for i in 0..n {
-            let k = config.k_min + (config.k_max - config.k_min) * (i as f64) / ((n - 1) as f64);
-            let strike = fwd * k.exp();
-            let d = match self.density(Strike(strike)) {
-                Ok(d) => d,
-                Err(_) => continue,
-            };
-            if d < -DENSITY_NEG_TOL {
-                violations.push(ButterflyViolation {
-                    strike,
-                    density: d,
-                    magnitude: d.abs(),
-                });
-            }
-        }
-        Ok(ArbitrageReport {
-            expiry: self.expiry(),
-            butterfly_violations: violations,
+        arbitrage::scan_density(self.expiry(), self.forward(), config, |strike| {
+            self.density(Strike(strike))
         })
     }
 }
