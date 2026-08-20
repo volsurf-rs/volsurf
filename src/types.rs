@@ -5,8 +5,9 @@
 //!
 //! # Newtype Strategy
 //!
-//! **Both inputs and outputs use newtypes.** [`Vol`], [`Variance`] wrap return
-//! values so callers can't accidentally mix a volatility with a variance.
+//! **Both inputs and outputs use newtypes.** [`Vol`], [`NormalVol`] and
+//! [`Variance`] wrap return values so callers can't accidentally mix a Black
+//! volatility with a Bachelier one, or either with a variance.
 //! [`Strike`] and [`Tenor`] wrap inputs to prevent parameter swapping — e.g.,
 //! `black_vol(Tenor(0.5), Strike(100.0))` cannot be accidentally transposed.
 //! The ceremony of `Strike(100.0)` is a small cost for compile-time safety
@@ -30,7 +31,7 @@
 //!
 //! # Why no `Neg` on `Vol` and `Variance`?
 //!
-//! Negative volatility and negative variance are physically meaningless.
+//! Negative Black volatility and negative variance are physically meaningless.
 //! `Strike` and `Tenor` omit `Neg` for consistency, though negative values
 //! are representable via direct construction.
 
@@ -61,9 +62,10 @@ pub struct Strike(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Tenor(pub f64);
 
-/// Implied volatility `σ`, measured as annualized standard deviation.
+/// Black (lognormal) implied volatility `σ`, an annualized proportion.
 ///
-/// A vol of 0.20 represents 20% annualized volatility.
+/// A vol of 0.20 represents 20% annualized volatility. Bachelier volatility is
+/// quoted in price units and has its own type, [`NormalVol`].
 ///
 /// # Examples
 /// ```
@@ -72,6 +74,19 @@ pub struct Tenor(pub f64);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Vol(pub f64);
+
+/// Bachelier (normal) implied volatility `σ_N`, in price units per √year.
+///
+/// Distinct from [`Vol`] because the two are not interchangeable: a normal vol
+/// of 20.0 on a forward of 100 is the same smile point as a Black vol of 0.20.
+///
+/// # Examples
+/// ```
+/// use volsurf::types::NormalVol;
+/// let vol = NormalVol(20.0);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct NormalVol(pub f64);
 
 /// Total variance `σ²T` or instantaneous variance `σ²`.
 ///
@@ -110,7 +125,7 @@ macro_rules! impl_numeric_display {
     };
 }
 
-impl_numeric_display!(Strike, Tenor, Vol, Variance);
+impl_numeric_display!(Strike, Tenor, Vol, NormalVol, Variance);
 
 impl fmt::Display for OptionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -148,6 +163,14 @@ mod tests {
         let v = Vol(0.20);
         let json = serde_json::to_string(&v).unwrap();
         let v2: Vol = serde_json::from_str(&json).unwrap();
+        assert_eq!(v, v2);
+    }
+
+    #[test]
+    fn normal_vol_serde_round_trip() {
+        let v = NormalVol(20.0);
+        let json = serde_json::to_string(&v).unwrap();
+        let v2: NormalVol = serde_json::from_str(&json).unwrap();
         assert_eq!(v, v2);
     }
 

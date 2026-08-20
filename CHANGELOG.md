@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING**: `conventions::StickyKind`. The enum had no consumer anywhere in the
+  crate — nothing accepted it and nothing returned it — so the sticky-strike /
+  sticky-delta choice its docs described could not actually be applied. It will
+  return alongside an API that honours it.
+
+### Changed
+
+- **BREAKING**: `NormalImpliedVol::compute` returns the new `types::NormalVol` rather
+  than `Vol`. Bachelier volatility is quoted in price units per √year while `Vol` is an
+  annualized proportion, so the newtype that exists to stop unit mixing was itself
+  mixing units. The Python and WASM bindings are unaffected — both return a bare float.
+- **BREAKING**: `ButterflyViolation::magnitude` is now a method rather than a public
+  field, and is computed as `density.abs()`. As two public fields they could disagree.
+  Serialized violations lose the redundant `magnitude` key as a result.
+
 ### Fixed
 
 - **BREAKING**: a `DataFilter` that leaves fewer points than the model needs is now a

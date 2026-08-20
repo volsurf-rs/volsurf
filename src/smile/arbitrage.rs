@@ -45,17 +45,17 @@ impl ArbitrageReport {
     /// let report = ArbitrageReport {
     ///     expiry: 1.0,
     ///     butterfly_violations: vec![
-    ///         ButterflyViolation { strike: 80.0, density: -0.001, magnitude: 0.001 },
-    ///         ButterflyViolation { strike: 90.0, density: -0.005, magnitude: 0.005 },
+    ///         ButterflyViolation { strike: 80.0, density: -0.001 },
+    ///         ButterflyViolation { strike: 90.0, density: -0.005 },
     ///     ],
     /// };
     /// let worst = report.worst_violation().unwrap();
-    /// assert!((worst.magnitude - 0.005).abs() < 1e-12);
+    /// assert!((worst.magnitude() - 0.005).abs() < 1e-12);
     /// ```
     pub fn worst_violation(&self) -> Option<&ButterflyViolation> {
         self.butterfly_violations
             .iter()
-            .max_by(|a, b| a.magnitude.total_cmp(&b.magnitude))
+            .max_by(|a, b| a.magnitude().total_cmp(&b.magnitude()))
     }
 }
 
@@ -66,8 +66,13 @@ pub struct ButterflyViolation {
     pub strike: f64,
     /// Risk-neutral density value (negative indicates violation).
     pub density: f64,
+}
+
+impl ButterflyViolation {
     /// Absolute magnitude of the violation.
-    pub magnitude: f64,
+    pub fn magnitude(&self) -> f64 {
+        self.density.abs()
+    }
 }
 
 /// Gatheral's g-function for a total-variance smile and its derivatives.
@@ -110,11 +115,7 @@ where
             message: format!("arbitrage scan failed to evaluate density at strike {strike}: {e}"),
         })?;
         if d < -DENSITY_NEG_TOL {
-            violations.push(ButterflyViolation {
-                strike,
-                density: d,
-                magnitude: d.abs(),
-            });
+            violations.push(ButterflyViolation { strike, density: d });
         }
     }
     Ok(ArbitrageReport {
@@ -150,11 +151,7 @@ where
                     "arbitrage scan failed to evaluate density at strike {strike}: {e}"
                 ),
             })?;
-            violations.push(ButterflyViolation {
-                strike,
-                density: d,
-                magnitude: d.abs(),
-            });
+            violations.push(ButterflyViolation { strike, density: d });
         }
     }
     Ok(ArbitrageReport {
@@ -169,11 +166,7 @@ mod tests {
     use crate::smile::SmileSection;
 
     fn make_violation(strike: f64, density: f64) -> ButterflyViolation {
-        ButterflyViolation {
-            strike,
-            density,
-            magnitude: density.abs(),
-        }
+        ButterflyViolation { strike, density }
     }
 
     #[test]
@@ -213,7 +206,7 @@ mod tests {
         };
         let worst = report.worst_violation().unwrap();
         assert_eq!(worst.strike, 80.0);
-        assert_eq!(worst.magnitude, 0.003);
+        assert_eq!(worst.magnitude(), 0.003);
     }
 
     #[test]
@@ -228,28 +221,17 @@ mod tests {
         };
         let worst = report.worst_violation().unwrap();
         assert_eq!(worst.strike, 85.0);
-        assert_eq!(worst.magnitude, 0.010);
+        assert_eq!(worst.magnitude(), 0.010);
     }
 
     #[test]
     fn worst_violation_tied_magnitudes() {
         let report = ArbitrageReport {
             expiry: 1.0,
-            butterfly_violations: vec![
-                ButterflyViolation {
-                    strike: 90.0,
-                    density: -0.01,
-                    magnitude: 0.005,
-                },
-                ButterflyViolation {
-                    strike: 110.0,
-                    density: -0.02,
-                    magnitude: 0.005,
-                },
-            ],
+            butterfly_violations: vec![make_violation(90.0, -0.005), make_violation(110.0, -0.005)],
         };
         let worst = report.worst_violation().unwrap();
-        assert!((worst.magnitude - 0.005).abs() < 1e-15);
+        assert!((worst.magnitude() - 0.005).abs() < 1e-15);
         assert_eq!(worst.strike, 110.0);
     }
 
@@ -263,7 +245,7 @@ mod tests {
             "extreme nu should produce butterfly violations"
         );
         assert!(!report.butterfly_violations.is_empty());
-        assert!(report.worst_violation().unwrap().magnitude > 0.0);
+        assert!(report.worst_violation().unwrap().magnitude() > 0.0);
     }
 
     #[test]
@@ -284,7 +266,7 @@ mod tests {
             !report.is_free(),
             "extreme SSVI params should detect violations"
         );
-        assert!(report.worst_violation().unwrap().magnitude > 0.0);
+        assert!(report.worst_violation().unwrap().magnitude() > 0.0);
     }
 
     #[test]

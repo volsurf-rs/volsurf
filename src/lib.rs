@@ -15,8 +15,8 @@
 //!
 //! ## Design
 //!
-//! - **Newtypes for inputs and outputs.** [`Vol`], [`Variance`] wrap return
-//!   values to prevent accidental mixing. [`Strike`], [`Tenor`] wrap inputs
+//! - **Newtypes for inputs and outputs.** [`Vol`], [`NormalVol`], [`Variance`]
+//!   wrap return values to prevent accidental mixing. [`Strike`], [`Tenor`] wrap inputs
 //!   for compile-time parameter-swap safety — e.g.,
 //!   `black_vol(Tenor(0.5), Strike(100.0))` cannot be transposed.
 //! - **No panics.** Every fallible operation returns [`Result`]. Library code
@@ -51,4 +51,4 @@ pub use smile::SmileSection;
 #[doc(inline)]
 pub use surface::VolSurface;
 #[doc(inline)]
-pub use types::{OptionType, Strike, Tenor, Variance, Vol};
+pub use types::{NormalVol, OptionType, Strike, Tenor, Variance, Vol};

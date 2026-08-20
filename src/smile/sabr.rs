@@ -1468,7 +1468,7 @@ mod tests {
         if !report.is_free() {
             for v in &report.butterfly_violations {
                 assert!(v.density < 0.0);
-                assert!(v.magnitude > 0.0);
+                assert!(v.magnitude() > 0.0);
                 assert!(v.strike > 0.0);
             }
         }
@@ -1484,7 +1484,7 @@ mod tests {
             assert!(v.strike > 0.0, "violation strike should be positive");
             assert!(v.density < 0.0, "violation density should be negative");
             assert!(
-                (v.magnitude - v.density.abs()) < 1e-15,
+                (v.magnitude() - v.density.abs()) < 1e-15,
                 "magnitude should equal |density|"
             );
         }

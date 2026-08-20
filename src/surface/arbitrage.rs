@@ -102,7 +102,6 @@ mod tests {
             butterfly_violations: vec![ButterflyViolation {
                 strike: 90.0,
                 density: -0.001,
-                magnitude: 0.001,
             }],
         };
         let diag = SurfaceDiagnostics {
@@ -146,7 +145,6 @@ mod tests {
             butterfly_violations: vec![ButterflyViolation {
                 strike: 85.0,
                 density: -0.002,
-                magnitude: 0.002,
             }],
         };
         let cal_violation = CalendarViolation {
@@ -178,7 +176,6 @@ mod tests {
                     butterfly_violations: vec![ButterflyViolation {
                         strike: 95.0,
                         density: -0.0005,
-                        magnitude: 0.0005,
                     }],
                 },
             ],

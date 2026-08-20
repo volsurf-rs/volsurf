@@ -1071,7 +1071,10 @@ mod tests {
         );
         for v in &report.butterfly_violations {
             assert!(v.density < 0.0, "violation density should be negative");
-            assert!(v.magnitude > 0.0, "violation magnitude should be positive");
+            assert!(
+                v.magnitude() > 0.0,
+                "violation magnitude should be positive"
+            );
             assert!(v.strike > 0.0, "violation strike should be positive");
         }
     }
@@ -1084,7 +1087,7 @@ mod tests {
         for v in &report.butterfly_violations {
             let expected = smile.density(Strike(v.strike)).unwrap();
             assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
-            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
+            assert_abs_diff_eq!(v.magnitude(), expected.abs(), epsilon = 1e-14);
         }
     }
 

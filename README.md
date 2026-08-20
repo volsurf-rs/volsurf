@@ -49,7 +49,7 @@ Volatility surface construction for equity and FX derivatives.
 - Immutable surfaces -- no observer pattern
 - Thread-safe -- all types are `Send + Sync`
 - Zero-alloc vol queries after construction
-- Newtypes for type safety (`Vol`, `Variance`, `Strike`, `Tenor`)
+- Newtypes for type safety (`Vol`, `NormalVol`, `Variance`, `Strike`, `Tenor`)
 - Serde serialization on all model structs and value types
 
 ## Installation
@@ -194,7 +194,7 @@ Option Prices -> Implied Vol -> Smile -> Surface -> Local Vol
 ```
 volsurf
 ├── calibration    DataFilter, WeightingScheme, apply_filter
-├── conventions    StickyKind, log_moneyness, forward_price
+├── conventions    log_moneyness, moneyness, forward_price
 ├── error          VolSurfError, Result<T>
 ├── implied
 │   ├── black      BlackImpliedVol, black_price
@@ -212,7 +212,7 @@ volsurf
 │   ├── builder    SurfaceBuilder, SmileModel
 │   └── arbitrage  SurfaceDiagnostics, CalendarViolation
 ├── local_vol      LocalVol trait, DupireLocalVol (Dupire 1994), BoundaryLocalVol
-└── types          Strike, Tenor, Vol, Variance, OptionType
+└── types          Strike, Tenor, Vol, NormalVol, Variance, OptionType
 ```
 
 ## Benchmarks
