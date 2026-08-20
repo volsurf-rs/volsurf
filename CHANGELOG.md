@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BREAKING**: butterfly arbitrage scans no longer skip grid points whose density
+  cannot be evaluated. `is_arbitrage_free()` and `is_arbitrage_free_with()` now
+  return `NumericalError` naming the offending strike, so a returned report always
+  covers the whole configured grid. Previously a smile with non-positive total
+  variance reported as arbitrage-free — and in the g-function path (SVI, SSVI,
+  eSSVI) the skipped points were violations that had already been detected.
+  Behaviour is unchanged for models built through their validated constructors.
 - The release workflow now skips `cargo publish` when the tagged version is
   already on crates.io, so tagging a version that was published by hand no
   longer fails the run. It also selects the workspace package by name rather

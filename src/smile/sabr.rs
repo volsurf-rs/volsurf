@@ -566,8 +566,9 @@ impl SmileSection for SabrSmile {
     ///
     /// Evaluates density on a grid of 200 points over k ∈ \[−2, 2\].
     /// The range is narrower than SVI's \[−3, 3\] because the Hagan
-    /// approximation breaks down in deep wings; points where `density()`
-    /// returns `Err` are skipped rather than flagged.
+    /// approximation breaks down in deep wings. A point where `density()`
+    /// returns `Err` fails the whole scan, so a returned report always
+    /// covers every grid point.
     ///
     /// # Reference
     /// Hagan et al. (2002), "Managing Smile Risk".

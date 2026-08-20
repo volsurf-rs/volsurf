@@ -202,6 +202,9 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// over `config.n_points` equally-spaced log-moneyness points in
     /// `[config.k_min, config.k_max]`. Models with analytical g-functions
     /// (SVI, SSVI) override this for better accuracy.
+    ///
+    /// A returned report covers the whole configured grid: if the density cannot
+    /// be evaluated at any point, this returns `Err` rather than a partial scan.
     fn is_arbitrage_free_with(
         &self,
         config: &ArbitrageScanConfig,

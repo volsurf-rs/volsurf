@@ -88,6 +88,9 @@ pub(crate) fn density_from_g(strike: f64, k: f64, w: f64, g: f64) -> f64 {
 }
 
 /// Scan a log-moneyness grid for negative risk-neutral density.
+///
+/// Returns `Err` if any grid point cannot be evaluated, so `Ok` guarantees the
+/// whole configured grid was checked.
 pub(crate) fn scan_density<F>(
     expiry: f64,
     forward: f64,
@@ -103,10 +106,9 @@ where
         let k =
             config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
         let strike = forward * k.exp();
-        let d = match density(strike) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
+        let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
+            message: format!("arbitrage scan failed to evaluate density at strike {strike}: {e}"),
+        })?;
         if d < -DENSITY_NEG_TOL {
             violations.push(ButterflyViolation {
                 strike,
@@ -122,6 +124,9 @@ where
 }
 
 /// Scan a log-moneyness grid for negative Gatheral g-function values.
+///
+/// Returns `Err` if the density at a flagged point cannot be evaluated, so `Ok`
+/// guarantees no detected violation was dropped.
 pub(crate) fn scan_g<G, D>(
     expiry: f64,
     forward: f64,
@@ -140,10 +145,11 @@ where
             config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
         if g_at_k(k) < -BUTTERFLY_G_TOL {
             let strike = forward * k.exp();
-            let d = match density(strike) {
-                Ok(d) => d,
-                Err(_) => continue,
-            };
+            let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
+                message: format!(
+                    "arbitrage scan failed to evaluate density at strike {strike}: {e}"
+                ),
+            })?;
             violations.push(ButterflyViolation {
                 strike,
                 density: d,
@@ -288,6 +294,31 @@ mod tests {
         let report = slice.is_arbitrage_free().unwrap();
         assert!(report.is_free(), "conservative SSVI should be arb-free");
         assert!(report.worst_violation().is_none());
+    }
+
+    #[test]
+    fn scan_density_fails_when_a_grid_point_cannot_be_evaluated() {
+        // One unevaluable point in an otherwise clean grid must sink the scan:
+        // skipping it would report "arbitrage-free" over a grid never fully checked.
+        let config = ArbitrageScanConfig {
+            n_points: 3,
+            k_min: -1.0,
+            k_max: 1.0,
+        };
+        let scanned = scan_density(1.0, 100.0, &config, |strike| {
+            if (50.0..200.0).contains(&strike) {
+                Err(error::VolSurfError::NumericalError {
+                    message: "model breakdown".into(),
+                })
+            } else {
+                Ok(1.0)
+            }
+        });
+        let err = scanned.unwrap_err();
+        assert!(
+            err.to_string().contains("100") && err.to_string().contains("model breakdown"),
+            "error should name the failing strike and preserve the cause: {err}"
+        );
     }
 
     // ========== ArbitrageScanConfig ==========
