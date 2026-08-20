@@ -2115,20 +2115,7 @@ mod tests {
         )
         .expect("opting out must fit the same dip");
         assert_eq!(
-            (
-                filtered.a,
-                filtered.b,
-                filtered.rho,
-                filtered.m,
-                filtered.sigma
-            ),
-            (
-                opted_out.a,
-                opted_out.b,
-                opted_out.rho,
-                opted_out.m,
-                opted_out.sigma
-            ),
+            filtered, opted_out,
             "the dip quote must reach the fit unchanged"
         );
     }
