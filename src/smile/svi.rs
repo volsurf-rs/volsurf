@@ -2090,17 +2090,46 @@ mod tests {
             (110.0, 0.35),
             (115.0, 0.34),
         ];
-        assert!(
-            SviSmile::calibrate_with_config(
-                100.0,
-                0.25,
-                &market,
-                &DataFilter::default(),
-                &WeightingScheme::default(),
-                None,
-            )
-            .is_ok(),
-            "a dip must reach the fit, not be trimmed as a cliff"
+        let filtered = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+        .expect("a dip must reach the fit, not be trimmed as a cliff");
+
+        // Opting out fits every point by construction, so an identical fit is
+        // what "passed through untouched" means.
+        let opted_out = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter {
+                vol_cliff_filter: Some(false),
+                ..Default::default()
+            },
+            &WeightingScheme::default(),
+            None,
+        )
+        .expect("opting out must fit the same dip");
+        assert_eq!(
+            (
+                filtered.a,
+                filtered.b,
+                filtered.rho,
+                filtered.m,
+                filtered.sigma
+            ),
+            (
+                opted_out.a,
+                opted_out.b,
+                opted_out.rho,
+                opted_out.m,
+                opted_out.sigma
+            ),
+            "the dip quote must reach the fit unchanged"
         );
     }
 
