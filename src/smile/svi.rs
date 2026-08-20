@@ -2078,6 +2078,33 @@ mod tests {
     }
 
     #[test]
+    fn vol_cliff_filter_passes_a_dip_through_untouched() {
+        // One depressed quote is a dip, not a cliff: it drops by more than half
+        // and recovers by more than 2x. Trimming at the drop would keep only 3
+        // points and error, so this also pins the rise guard.
+        let market = vec![
+            (90.0, 0.40),
+            (95.0, 0.38),
+            (100.0, 0.36),
+            (105.0, 0.10),
+            (110.0, 0.35),
+            (115.0, 0.34),
+        ];
+        assert!(
+            SviSmile::calibrate_with_config(
+                100.0,
+                0.25,
+                &market,
+                &DataFilter::default(),
+                &WeightingScheme::default(),
+                None,
+            )
+            .is_ok(),
+            "a dip must reach the fit, not be trimmed as a cliff"
+        );
+    }
+
+    #[test]
     fn calibrate_bad_seed_falls_back_to_grid_search() {
         let strikes: Vec<f64> = (80..=120).map(|k| k as f64).collect();
         let svi = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
