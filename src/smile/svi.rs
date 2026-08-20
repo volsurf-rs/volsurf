@@ -317,7 +317,7 @@ impl SviSmile {
                 } else {
                     return Err(VolSurfError::CalibrationError {
                         message: format!(
-                            "vol-cliff filter left {} of {} filtered points, fewer than the {MIN_POINTS} required; set `vol_cliff_filter: Some(false)` to fit across the cliff",
+                            "vol-cliff filter left {} of {} filtered points, fewer than the {MIN_POINTS} required; set `vol_cliff_filter` to false on the `DataFilter` to fit across the cliff",
                             keep.len(),
                             order.len()
                         ),
@@ -2054,7 +2054,7 @@ mod tests {
             "error should name the vol-cliff filter: {err}"
         );
         assert!(
-            err.to_string().contains("vol_cliff_filter: Some(false)"),
+            err.to_string().contains("`vol_cliff_filter` to false"),
             "error should name the opt-out: {err}"
         );
 

@@ -19,11 +19,14 @@ pub struct DataFilter {
     pub max_log_moneyness: Option<f64>,
     /// Exclude quotes with implied vol below this floor.
     pub min_vol: Option<f64>,
-    /// Toggle the vol-cliff heuristic (>50% consecutive drop detection).
-    /// Applied by SVI only, where `None` means `true`; other models ignore it.
+    /// Toggle the vol-cliff heuristic (>50% consecutive drop detection), where
+    /// `None` means `true`. Honoured by SVI and by the per-tenor SVI stage of
+    /// SSVI/eSSVI; SABR and spline ignore it.
     /// When on, SVI keeps only the larger side of the cliff and fails with
     /// [`VolSurfError::CalibrationError`] if that side holds fewer than the 5
-    /// points a fit needs; set `Some(false)` to fit across the cliff instead.
+    /// points a fit needs; set to `false` to fit across the cliff instead.
+    /// It fires only on a one-sided drop — a smile that also rises by more than
+    /// 2× somewhere is a dip or a glitch, and is passed through untouched.
     pub vol_cliff_filter: Option<bool>,
 }
 
