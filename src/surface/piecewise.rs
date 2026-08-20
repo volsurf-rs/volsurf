@@ -113,11 +113,11 @@ impl PiecewiseSurface {
         // Queries locate smiles by the tenor grid, so a smile calibrated to a
         // different expiry would be evaluated at the wrong maturity.
         for (i, (&tenor, smile)) in tenors.iter().zip(&smiles).enumerate() {
-            if (smile.expiry() - tenor).abs() >= EXPIRY_MATCH_TOL {
+            let expiry = smile.expiry();
+            if !expiry.is_finite() || (expiry - tenor).abs() >= EXPIRY_MATCH_TOL {
                 return Err(VolSurfError::InvalidInput {
                     message: format!(
-                        "smiles[{i}] has expiry {} but is paired with tenor {tenor}",
-                        smile.expiry()
+                        "smiles[{i}] has expiry {expiry} but is paired with tenor {tenor}"
                     ),
                 });
             }
@@ -304,8 +304,28 @@ impl VolSurface for PiecewiseSurface {
 mod tests {
     use super::*;
     use crate::smile::spline::SplineSmile;
-    use crate::types::{Strike, Tenor};
+    use crate::types::{Strike, Tenor, Vol};
     use approx::assert_abs_diff_eq;
+
+    /// Test-only smile with an arbitrary `expiry()`. No validated constructor
+    /// yields a non-finite expiry, but `SmileSection` is a public trait.
+    #[derive(Debug)]
+    struct FixedExpirySmile(f64);
+
+    impl SmileSection for FixedExpirySmile {
+        fn vol(&self, _strike: Strike) -> error::Result<Vol> {
+            Ok(Vol(0.20))
+        }
+        fn forward(&self) -> f64 {
+            100.0
+        }
+        fn expiry(&self) -> f64 {
+            self.0
+        }
+        fn model_name(&self) -> &'static str {
+            "FixedExpiry"
+        }
+    }
 
     /// Helper: create a flat-vol SplineSmile at a given tenor.
     fn flat_smile(forward: f64, expiry: f64, vol: f64) -> Box<dyn SmileSection> {
@@ -378,6 +398,17 @@ mod tests {
             err.to_string().contains("smiles[1]"),
             "error should identify the mismatched pair: {err}"
         );
+    }
+
+    #[test]
+    fn rejects_non_finite_smile_expiry() {
+        for expiry in [f64::NAN, f64::INFINITY] {
+            let result = PiecewiseSurface::new(vec![0.5], vec![Box::new(FixedExpirySmile(expiry))]);
+            assert!(
+                matches!(result, Err(VolSurfError::InvalidInput { .. })),
+                "expiry {expiry} must not pair with tenor 0.5"
+            );
+        }
     }
 
     #[test]

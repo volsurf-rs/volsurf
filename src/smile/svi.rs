@@ -310,7 +310,15 @@ impl SviSmile {
                     let vw_f: Vec<f64> = keep.iter().map(|&i| sqrt_vega[i]).collect();
                     (k_f, w_f, vw_f)
                 } else {
-                    (k_vals, w_vals, sqrt_vega)
+                    return Err(VolSurfError::CalibrationError {
+                        message: format!(
+                            "vol-cliff filter left {} of {} points, fewer than the {MIN_POINTS} required",
+                            keep.len(),
+                            order.len()
+                        ),
+                        model: "SVI",
+                        rms_error: None,
+                    });
                 }
             } else {
                 (k_vals, w_vals, sqrt_vega)
@@ -2008,6 +2016,55 @@ mod tests {
         assert!(
             result.is_ok(),
             "disabling vol-cliff should still work on clean data"
+        );
+    }
+
+    #[test]
+    fn vol_cliff_filter_starving_the_fit_errors() {
+        // A genuine cliff on a thin tenor retains 3 points; fitting the full
+        // set instead would fit across the cliff with no signal to the caller.
+        let market = vec![
+            (90.0, 0.40),
+            (95.0, 0.38),
+            (100.0, 0.36),
+            (105.0, 0.10),
+            (110.0, 0.09),
+            (115.0, 0.085),
+        ];
+        let err = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, VolSurfError::CalibrationError { .. }),
+            "expected a calibration error, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("vol-cliff"),
+            "error should name the vol-cliff filter: {err}"
+        );
+
+        // Opting out is what the fallback used to do implicitly.
+        let filter = DataFilter {
+            vol_cliff_filter: Some(false),
+            ..Default::default()
+        };
+        assert!(
+            SviSmile::calibrate_with_config(
+                100.0,
+                0.25,
+                &market,
+                &filter,
+                &WeightingScheme::default(),
+                None,
+            )
+            .is_ok(),
+            "fitting across the cliff must be an explicit opt-out"
         );
     }
 

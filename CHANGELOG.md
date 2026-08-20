@@ -13,10 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CalibrationError` instead of a silent fallback to the unfiltered data. Calibrating on
   the full set gave a fit the caller never asked for and had no way to detect. Affects
   SVI, SABR, SSVI, eSSVI and the builder's cubic-spline path; the remedy is to widen the
-  filter, and the error reports how many points survived out of how many.
+  filter, and the error reports how many points survived out of how many. The same now
+  holds for `DataFilter::vol_cliff_filter`, which is on by default for SVI: a cliff that
+  leaves fewer than five points on the retained side is a `CalibrationError` rather than
+  a fit across the cliff.
 - **BREAKING**: `PiecewiseSurface::new` now rejects a smile whose `expiry()` disagrees
-  with the tenor it is paired with. Queries locate smiles by the tenor grid, so a
-  mismatched pair was evaluated at the wrong maturity.
+  with the tenor it is paired with, including a non-finite `expiry()`. Queries locate
+  smiles by the tenor grid, so a mismatched pair was evaluated at the wrong maturity.
 - `SurfaceBuilder::build` no longer requires `spot` and `rate` when every tenor was added
   through `add_tenor_with_forward`. Futures-options surfaces, where the forward is the
   futures price and there is no spot to quote, previously had to pass placeholder values —

@@ -550,6 +550,34 @@ mod tests {
     }
 
     #[test]
+    fn mixed_forwards_still_need_spot_for_the_derived_tenor() {
+        let result = SurfaceBuilder::new()
+            .add_tenor_with_forward(0.25, &sample_strikes(), &sample_vols(), 101.0)
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build();
+        match result {
+            Err(VolSurfError::InvalidInput { message }) => {
+                assert!(
+                    message.contains("spot"),
+                    "expected a spot error, got: {message}"
+                );
+            }
+            other => panic!("expected InvalidInput about spot, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mixed_forwards_build_once_carry_is_supplied() {
+        let result = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .add_tenor_with_forward(0.25, &sample_strikes(), &sample_vols(), 101.0)
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build();
+        assert!(result.is_ok(), "mixed forwards with carry should build");
+    }
+
+    #[test]
     fn missing_rate_returns_invalid_input() {
         let result = SurfaceBuilder::new()
             .spot(100.0)

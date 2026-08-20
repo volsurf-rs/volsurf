@@ -20,7 +20,7 @@ pub struct DataFilter {
     /// Exclude quotes with implied vol below this floor.
     pub min_vol: Option<f64>,
     /// Toggle the vol-cliff heuristic (>50% consecutive drop detection).
-    /// `None` uses the model default: `true` for SVI, `false` for SABR.
+    /// Applied by SVI only, where `None` means `true`; other models ignore it.
     pub vol_cliff_filter: Option<bool>,
 }
 
