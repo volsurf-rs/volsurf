@@ -175,7 +175,9 @@ impl SviSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for insufficient data,
-    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    /// [`VolSurfError::CalibrationError`] if filtering — including the
+    /// default-on vol-cliff heuristic — leaves fewer than 5 points, or if the
+    /// optimizer fails.
     ///
     /// # References
     /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
@@ -203,7 +205,10 @@ impl SviSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for insufficient data,
-    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    /// [`VolSurfError::CalibrationError`] if `filter` leaves fewer than 5
+    /// points, if the vol-cliff heuristic — on unless
+    /// [`DataFilter::vol_cliff_filter`] is `Some(false)` — trims the smile
+    /// below that floor, or if the optimizer fails.
     ///
     /// # References
     /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
@@ -312,7 +317,7 @@ impl SviSmile {
                 } else {
                     return Err(VolSurfError::CalibrationError {
                         message: format!(
-                            "vol-cliff filter left {} of {} points, fewer than the {MIN_POINTS} required",
+                            "vol-cliff filter left {} of {} filtered points, fewer than the {MIN_POINTS} required; set `vol_cliff_filter: Some(false)` to fit across the cliff",
                             keep.len(),
                             order.len()
                         ),
@@ -2047,6 +2052,10 @@ mod tests {
         assert!(
             err.to_string().contains("vol-cliff"),
             "error should name the vol-cliff filter: {err}"
+        );
+        assert!(
+            err.to_string().contains("vol_cliff_filter: Some(false)"),
+            "error should name the opt-out: {err}"
         );
 
         // Opting out is what the fallback used to do implicitly.

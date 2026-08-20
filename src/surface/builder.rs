@@ -568,13 +568,26 @@ mod tests {
 
     #[test]
     fn mixed_forwards_build_once_carry_is_supplied() {
-        let result = SurfaceBuilder::new()
+        // With carry available, the explicit forward still wins for its own
+        // tenor; only the tenor without one derives from spot and rate.
+        let surface = SurfaceBuilder::new()
             .spot(100.0)
             .rate(0.05)
             .add_tenor_with_forward(0.25, &sample_strikes(), &sample_vols(), 101.0)
             .add_tenor(1.0, &sample_strikes(), &sample_vols())
-            .build();
-        assert!(result.is_ok(), "mixed forwards with carry should build");
+            .build()
+            .unwrap();
+
+        assert_abs_diff_eq!(
+            surface.smile_at(Tenor(0.25)).unwrap().forward(),
+            101.0,
+            epsilon = 1e-12
+        );
+        assert_abs_diff_eq!(
+            surface.smile_at(Tenor(1.0)).unwrap().forward(),
+            100.0 * 0.05_f64.exp(),
+            epsilon = 1e-12
+        );
     }
 
     #[test]

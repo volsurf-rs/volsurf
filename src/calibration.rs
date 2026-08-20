@@ -21,6 +21,9 @@ pub struct DataFilter {
     pub min_vol: Option<f64>,
     /// Toggle the vol-cliff heuristic (>50% consecutive drop detection).
     /// Applied by SVI only, where `None` means `true`; other models ignore it.
+    /// When on, SVI keeps only the larger side of the cliff and fails with
+    /// [`VolSurfError::CalibrationError`] if that side holds fewer than the 5
+    /// points a fit needs; set `Some(false)` to fit across the cliff instead.
     pub vol_cliff_filter: Option<bool>,
 }
 
