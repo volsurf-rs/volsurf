@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The release workflow now skips `cargo publish` when the tagged version is
+  already on crates.io, so tagging a version that was published by hand no
+  longer fails the run. It also selects the workspace package by name rather
+  than by position when checking the tag against the manifest.
+
 ### Security
 
 - PyO3 0.28 → 0.29 and `rust-numpy` 0.28 → 0.29, clearing RUSTSEC advisories for an

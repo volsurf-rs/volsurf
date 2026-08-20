@@ -20,15 +20,40 @@ jobs:
       # The tag is the release's identity; a manifest that disagrees with it
       # produced PAN-134, where two tagged versions were never published.
       - name: Check tag matches Cargo.toml version
+        id: version
         run: |
           manifest=$(cargo metadata --no-deps --format-version 1 \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "volsurf"))')
           tag="${GITHUB_REF_NAME#v}"
           if [ "$manifest" != "$tag" ]; then
             echo "tag $tag does not match Cargo.toml version $manifest" >&2
             exit 1
           fi
+          echo "version=$manifest" >> "$GITHUB_OUTPUT"
 
-      - run: cargo publish
+      # A version can reach crates.io before its tag does — 2.4.0 was published
+      # by hand. Re-publishing is a hard error, so the tag has to be a no-op.
+      - name: Check whether the version is already published
+        id: crates_io
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          http_status=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: volsurf-release" \
+            "https://crates.io/api/v1/crates/volsurf/$VERSION")
+          case "$http_status" in
+            200) published=true ;;
+            404) published=false ;;
+            *)
+              echo "failed to check volsurf $VERSION on crates.io: HTTP $http_status" >&2
+              exit 1
+              ;;
+          esac
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+          echo "volsurf $VERSION already on crates.io: $published" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish
+        if: steps.crates_io.outputs.published == 'false'
+        run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
