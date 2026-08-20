@@ -38,9 +38,17 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          published=$(curl -sS -H "User-Agent: volsurf-release" \
-            "https://crates.io/api/v1/crates/volsurf/$VERSION" \
-            | python3 -c 'import json,sys; print("true" if "version" in json.load(sys.stdin) else "false")')
+          http_status=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: volsurf-release" \
+            "https://crates.io/api/v1/crates/volsurf/$VERSION")
+          case "$http_status" in
+            200) published=true ;;
+            404) published=false ;;
+            *)
+              echo "failed to check volsurf $VERSION on crates.io: HTTP $http_status" >&2
+              exit 1
+              ;;
+          esac
           echo "published=$published" >> "$GITHUB_OUTPUT"
           echo "volsurf $VERSION already on crates.io: $published" >> "$GITHUB_STEP_SUMMARY"
 
