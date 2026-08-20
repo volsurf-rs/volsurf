@@ -244,7 +244,7 @@ impl SviSmile {
         }
 
         // Apply DataFilter after validation (on known-good inputs)
-        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS);
+        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS, "SVI")?;
 
         let k_vals: Vec<f64> = market_vols
             .iter()
@@ -1906,6 +1906,33 @@ mod tests {
         let atm_diff =
             (fitted.vol(Strike(100.0)).unwrap().0 - svi.vol(Strike(100.0)).unwrap().0).abs();
         assert!(atm_diff < 0.001, "ATM vol should match, diff={atm_diff}");
+    }
+
+    #[test]
+    fn calibrate_errors_when_filter_starves_the_fit() {
+        // Enough raw points to pass the pre-filter length check, but the filter
+        // leaves too few. Calibrating on all 41 instead would ignore the filter.
+        let smile = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+        let market: Vec<(f64, f64)> = (80..=120)
+            .map(|k| (k as f64, smile.vol(Strike(k as f64)).unwrap().0))
+            .collect();
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.005),
+            ..Default::default()
+        };
+        let err = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &filter,
+            &WeightingScheme::default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, VolSurfError::CalibrationError { model: "SVI", .. }),
+            "starved filter should fail calibration, not silently unfilter: {err}"
+        );
     }
 
     #[test]

@@ -86,11 +86,13 @@ impl PiecewiseSurface {
     ///
     /// # Arguments
     /// * `tenors` — Strictly increasing positive tenors (years)
-    /// * `smiles` — One calibrated [`SmileSection`] per tenor
+    /// * `smiles` — One calibrated [`SmileSection`] per tenor, each with an
+    ///   `expiry()` matching its paired tenor
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if lengths mismatch, tenors
-    /// are empty, not strictly increasing, or not positive.
+    /// are empty, not strictly increasing, or not positive, or if any smile's
+    /// `expiry()` disagrees with the tenor it is paired with.
     pub fn new(tenors: Vec<f64>, smiles: Vec<Box<dyn SmileSection>>) -> error::Result<Self> {
         if tenors.len() != smiles.len() {
             return Err(VolSurfError::InvalidInput {
@@ -108,6 +110,18 @@ impl PiecewiseSurface {
         }
         validate_positive_slice(&tenors, "tenors")?;
         validate_strictly_increasing(&tenors, "tenors")?;
+        // Queries locate smiles by the tenor grid, so a smile calibrated to a
+        // different expiry would be evaluated at the wrong maturity.
+        for (i, (&tenor, smile)) in tenors.iter().zip(&smiles).enumerate() {
+            if (smile.expiry() - tenor).abs() >= EXPIRY_MATCH_TOL {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!(
+                        "smiles[{i}] has expiry {} but is paired with tenor {tenor}",
+                        smile.expiry()
+                    ),
+                });
+            }
+        }
 
         Ok(Self { tenors, smiles })
     }
@@ -353,6 +367,24 @@ mod tests {
         let s1 = flat_smile(100.0, 0.25, 0.20);
         let result = PiecewiseSurface::new(vec![0.0], vec![s1]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn rejects_smile_expiry_disagreeing_with_tenor() {
+        let s1 = flat_smile(100.0, 0.5, 0.20);
+        let s2 = flat_smile(100.0, 2.0, 0.20);
+        let err = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap_err();
+        assert!(
+            err.to_string().contains("smiles[1]"),
+            "error should identify the mismatched pair: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_expiry_within_match_tolerance() {
+        let s1 = flat_smile(100.0, 0.5, 0.20);
+        let result = PiecewiseSurface::new(vec![0.5 + EXPIRY_MATCH_TOL / 2.0], vec![s1]);
+        assert!(result.is_ok(), "sub-tolerance drift is the same tenor");
     }
 
     #[test]

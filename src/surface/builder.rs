@@ -232,9 +232,11 @@ impl SurfaceBuilder {
     /// persistence is needed.
     ///
     /// # Errors
-    /// Returns [`VolSurfError::InvalidInput`] if required fields are missing
-    /// or tenor data is invalid. Returns [`VolSurfError::CalibrationError`]
-    /// if calibration fails for any tenor.
+    /// Returns [`VolSurfError::InvalidInput`] if tenor data is invalid, or if
+    /// `spot`/`rate` are missing while a tenor still needs its forward derived
+    /// — tenors added via [`add_tenor_with_forward`](Self::add_tenor_with_forward)
+    /// need neither. Returns [`VolSurfError::CalibrationError`] if calibration
+    /// fails for any tenor.
     pub fn build(self) -> crate::error::Result<PiecewiseSurface> {
         #[cfg(feature = "logging")]
         tracing::debug!(
@@ -243,18 +245,13 @@ impl SurfaceBuilder {
             "surface build started"
         );
 
-        // Validate required fields
-        let spot = self.spot.ok_or_else(|| VolSurfError::InvalidInput {
-            message: "spot price is required".into(),
-        })?;
-        let rate = self.rate.ok_or_else(|| VolSurfError::InvalidInput {
-            message: "risk-free rate is required".into(),
-        })?;
+        // spot and rate are only needed to derive forwards, so they are
+        // required per-tenor rather than here — see the forward resolution below.
+        let spot = self.spot;
+        let rate = self.rate;
 
         let q = self.dividend_yield.unwrap_or(0.0);
 
-        validate_positive(spot, "spot")?;
-        validate_finite(rate, "rate")?;
         validate_finite(q, "dividend_yield")?;
         if self.tenor_data.is_empty() {
             return Err(VolSurfError::InvalidInput {
@@ -309,12 +306,22 @@ impl SurfaceBuilder {
                     });
                 }
 
-                if let Some(fwd) = tenor.forward {
-                    validate_positive(fwd, "per-tenor forward")?;
-                }
                 let forward = match tenor.forward {
-                    Some(fwd) => fwd,
-                    None => conventions::forward_price(spot, rate, q, tenor.expiry)?,
+                    Some(fwd) => {
+                        validate_positive(fwd, "per-tenor forward")?;
+                        fwd
+                    }
+                    None => {
+                        let spot = spot.ok_or_else(|| VolSurfError::InvalidInput {
+                            message: "spot price is required".into(),
+                        })?;
+                        let rate = rate.ok_or_else(|| VolSurfError::InvalidInput {
+                            message: "risk-free rate is required".into(),
+                        })?;
+                        validate_positive(spot, "spot")?;
+                        validate_finite(rate, "rate")?;
+                        conventions::forward_price(spot, rate, q, tenor.expiry)?
+                    }
                 };
 
                 let market_vols: Vec<(f64, f64)> = tenor
@@ -342,7 +349,8 @@ impl SurfaceBuilder {
                             forward,
                             &filter,
                             3,
-                        );
+                            "CubicSpline",
+                        )?;
                         let mut pairs: Vec<(f64, f64)> = data
                             .iter()
                             .map(|&(k, v)| (k, v * v * tenor.expiry))
@@ -528,6 +536,20 @@ mod tests {
     }
 
     #[test]
+    fn all_explicit_forwards_need_no_spot_or_rate() {
+        // Futures options: the forward is the futures price, so there is no
+        // carry to compute and no spot to quote.
+        let result = SurfaceBuilder::new()
+            .add_tenor_with_forward(0.25, &sample_strikes(), &sample_vols(), 101.0)
+            .add_tenor_with_forward(1.0, &sample_strikes(), &sample_vols(), 105.0)
+            .build();
+        assert!(
+            result.is_ok(),
+            "explicit forwards should not need carry inputs"
+        );
+    }
+
+    #[test]
     fn missing_rate_returns_invalid_input() {
         let result = SurfaceBuilder::new()
             .spot(100.0)
@@ -669,7 +691,7 @@ mod tests {
             .model(SmileModel::CubicSpline)
             .add_tenor(0.25, &strikes, &vols)
             .build();
-        // SplineSmile::new rejects NaN strikes
+        // The filter drops the NaN strike, leaving too few points to calibrate
         assert!(result.is_err(), "NaN strike should cause build to fail");
     }
 

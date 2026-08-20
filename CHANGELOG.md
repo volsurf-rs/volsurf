@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BREAKING**: a `DataFilter` that leaves fewer points than the model needs is now a
+  `CalibrationError` instead of a silent fallback to the unfiltered data. Calibrating on
+  the full set gave a fit the caller never asked for and had no way to detect. Affects
+  SVI, SABR, SSVI, eSSVI and the builder's cubic-spline path; the remedy is to widen the
+  filter, and the error reports how many points survived out of how many.
+- **BREAKING**: `PiecewiseSurface::new` now rejects a smile whose `expiry()` disagrees
+  with the tenor it is paired with. Queries locate smiles by the tenor grid, so a
+  mismatched pair was evaluated at the wrong maturity.
+- `SurfaceBuilder::build` no longer requires `spot` and `rate` when every tenor was added
+  through `add_tenor_with_forward`. Futures-options surfaces, where the forward is the
+  futures price and there is no spot to quote, previously had to pass placeholder values —
+  and `spot` had to be positive, so even that was awkward.
 - **BREAKING**: butterfly arbitrage scans no longer skip grid points whose density
   cannot be evaluated. `is_arbitrage_free()` and `is_arbitrage_free_with()` now
   return `NumericalError` naming the offending strike, so a returned report always

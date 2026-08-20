@@ -358,7 +358,7 @@ impl SabrSmile {
         }
 
         // Apply DataFilter after validation
-        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS);
+        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS, "SABR")?;
 
         // Resolve weighting: ModelDefault for SABR → Uniform.
         // Uses n(d₁) directly (not sqrt) because weight multiplies diff² in the
