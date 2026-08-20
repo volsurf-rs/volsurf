@@ -1076,12 +1076,16 @@ mod tests {
     }
 
     #[test]
-    fn is_arbitrage_free_skips_density_errors() {
-        // make_invalid_svi has w < 0 everywhere, so g = NEG_INFINITY at all
-        // grid points but density() returns Err — violations get skipped.
+    fn is_arbitrage_free_errors_on_density_failure() {
+        // make_invalid_svi has w < 0 everywhere, so g = NEG_INFINITY flags every
+        // grid point. Reporting those as arbitrage-free would be the worst
+        // possible answer, so the scan must fail instead.
         let smile = make_invalid_svi();
-        let report = smile.is_arbitrage_free().unwrap();
-        assert!(report.butterfly_violations.is_empty());
+        let err = smile.is_arbitrage_free().unwrap_err();
+        assert!(
+            err.to_string().contains("strike"),
+            "error should name the strike that failed: {err}"
+        );
     }
 
     #[test]
