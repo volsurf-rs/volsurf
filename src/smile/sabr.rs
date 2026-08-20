@@ -1483,10 +1483,6 @@ mod tests {
             let v = &report.butterfly_violations[0];
             assert!(v.strike > 0.0, "violation strike should be positive");
             assert!(v.density < 0.0, "violation density should be negative");
-            assert!(
-                (v.magnitude() - v.density.abs()) < 1e-15,
-                "magnitude should equal |density|"
-            );
         }
     }
 

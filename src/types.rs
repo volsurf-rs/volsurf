@@ -77,8 +77,9 @@ pub struct Vol(pub f64);
 
 /// Bachelier (normal) implied volatility `σ_N`, in price units per √year.
 ///
-/// Distinct from [`Vol`] because the two are not interchangeable: a normal vol
-/// of 20.0 on a forward of 100 is the same smile point as a Black vol of 0.20.
+/// Distinct from [`Vol`] because the two are not interchangeable: at the money
+/// on a forward of 100, a normal vol of 20.0 corresponds approximately to a
+/// Black vol of 0.20, and the relation does not hold away from the money.
 ///
 /// # Examples
 /// ```

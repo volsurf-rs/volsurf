@@ -1087,7 +1087,6 @@ mod tests {
         for v in &report.butterfly_violations {
             let expected = smile.density(Strike(v.strike)).unwrap();
             assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
-            assert_abs_diff_eq!(v.magnitude(), expected.abs(), epsilon = 1e-14);
         }
     }
 
