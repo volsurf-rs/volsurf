@@ -459,7 +459,13 @@ impl SsviSurface {
         // against the same points that Stage 1 SVI was calibrated on.
         let mut all_points: Vec<(f64, f64, f64)> = Vec::new();
         for (i, market_vols) in market_data.iter().enumerate() {
-            let data = crate::calibration::prepare_market_vols(market_vols, forwards[i], filter, 5);
+            let data = crate::calibration::prepare_market_vols(
+                market_vols,
+                forwards[i],
+                filter,
+                5,
+                "SSVI",
+            )?;
             for &(strike, vol) in data.iter() {
                 let k = (strike / forwards[i]).ln();
                 let w_obs = vol * vol * tenors[i];
@@ -2258,7 +2264,6 @@ mod tests {
         for v in &report.butterfly_violations {
             let expected = s.density(Strike(v.strike)).unwrap();
             assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
-            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
         }
     }
 

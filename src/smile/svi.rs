@@ -175,7 +175,9 @@ impl SviSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for insufficient data,
-    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    /// [`VolSurfError::CalibrationError`] if filtering — including the
+    /// default-on vol-cliff heuristic — leaves fewer than 5 points, or if the
+    /// optimizer fails.
     ///
     /// # References
     /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
@@ -203,7 +205,10 @@ impl SviSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for insufficient data,
-    /// [`VolSurfError::CalibrationError`] if the optimizer fails.
+    /// [`VolSurfError::CalibrationError`] if `filter` leaves fewer than 5
+    /// points, if the vol-cliff heuristic — on unless
+    /// [`DataFilter::vol_cliff_filter`] is `Some(false)` — trims the smile
+    /// below that floor, or if the optimizer fails.
     ///
     /// # References
     /// - Zeliade Systems, "Quasi-Explicit Calibration of Gatheral's SVI Model" (2009)
@@ -244,7 +249,7 @@ impl SviSmile {
         }
 
         // Apply DataFilter after validation (on known-good inputs)
-        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS);
+        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS, "SVI")?;
 
         let k_vals: Vec<f64> = market_vols
             .iter()
@@ -310,7 +315,15 @@ impl SviSmile {
                     let vw_f: Vec<f64> = keep.iter().map(|&i| sqrt_vega[i]).collect();
                     (k_f, w_f, vw_f)
                 } else {
-                    (k_vals, w_vals, sqrt_vega)
+                    return Err(VolSurfError::CalibrationError {
+                        message: format!(
+                            "vol-cliff filter left {} of {} filtered points, fewer than the {MIN_POINTS} required; set `vol_cliff_filter` to false on the `DataFilter` to fit across the cliff",
+                            keep.len(),
+                            order.len()
+                        ),
+                        model: "SVI",
+                        rms_error: None,
+                    });
                 }
             } else {
                 (k_vals, w_vals, sqrt_vega)
@@ -1058,7 +1071,10 @@ mod tests {
         );
         for v in &report.butterfly_violations {
             assert!(v.density < 0.0, "violation density should be negative");
-            assert!(v.magnitude > 0.0, "violation magnitude should be positive");
+            assert!(
+                v.magnitude() > 0.0,
+                "violation magnitude should be positive"
+            );
             assert!(v.strike > 0.0, "violation strike should be positive");
         }
     }
@@ -1071,7 +1087,6 @@ mod tests {
         for v in &report.butterfly_violations {
             let expected = smile.density(Strike(v.strike)).unwrap();
             assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
-            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
         }
     }
 
@@ -1909,6 +1924,33 @@ mod tests {
     }
 
     #[test]
+    fn calibrate_errors_when_filter_starves_the_fit() {
+        // Enough raw points to pass the pre-filter length check, but the filter
+        // leaves too few. Calibrating on all 41 instead would ignore the filter.
+        let smile = SviSmile::new(100.0, 0.25, 0.04, 0.4, -0.3, 0.02, 0.15).unwrap();
+        let market: Vec<(f64, f64)> = (80..=120)
+            .map(|k| (k as f64, smile.vol(Strike(k as f64)).unwrap().0))
+            .collect();
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.005),
+            ..Default::default()
+        };
+        let err = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &filter,
+            &WeightingScheme::default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, VolSurfError::CalibrationError { model: "SVI", .. }),
+            "starved filter should fail calibration, not silently unfilter: {err}"
+        );
+    }
+
+    #[test]
     fn calibrate_with_filter_reduces_input() {
         let mut market: Vec<(f64, f64)> = (80..=120)
             .map(|k| {
@@ -1981,6 +2023,102 @@ mod tests {
         assert!(
             result.is_ok(),
             "disabling vol-cliff should still work on clean data"
+        );
+    }
+
+    #[test]
+    fn vol_cliff_filter_starving_the_fit_errors() {
+        // A genuine cliff on a thin tenor retains 3 points; fitting the full
+        // set instead would fit across the cliff with no signal to the caller.
+        let market = vec![
+            (90.0, 0.40),
+            (95.0, 0.38),
+            (100.0, 0.36),
+            (105.0, 0.10),
+            (110.0, 0.09),
+            (115.0, 0.085),
+        ];
+        let err = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, VolSurfError::CalibrationError { .. }),
+            "expected a calibration error, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("vol-cliff"),
+            "error should name the vol-cliff filter: {err}"
+        );
+        assert!(
+            err.to_string().contains("`vol_cliff_filter` to false"),
+            "error should name the opt-out: {err}"
+        );
+
+        // Opting out is what the fallback used to do implicitly.
+        let filter = DataFilter {
+            vol_cliff_filter: Some(false),
+            ..Default::default()
+        };
+        assert!(
+            SviSmile::calibrate_with_config(
+                100.0,
+                0.25,
+                &market,
+                &filter,
+                &WeightingScheme::default(),
+                None,
+            )
+            .is_ok(),
+            "fitting across the cliff must be an explicit opt-out"
+        );
+    }
+
+    #[test]
+    fn vol_cliff_filter_passes_a_dip_through_untouched() {
+        // One depressed quote is a dip, not a cliff: it drops by more than half
+        // and recovers by more than 2x. Trimming at the drop would keep only 3
+        // points and error, so this also pins the rise guard.
+        let market = vec![
+            (90.0, 0.40),
+            (95.0, 0.38),
+            (100.0, 0.36),
+            (105.0, 0.10),
+            (110.0, 0.35),
+            (115.0, 0.34),
+        ];
+        let filtered = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+        .expect("a dip must reach the fit, not be trimmed as a cliff");
+
+        // Opting out fits every point by construction, so an identical fit is
+        // what "passed through untouched" means.
+        let opted_out = SviSmile::calibrate_with_config(
+            100.0,
+            0.25,
+            &market,
+            &DataFilter {
+                vol_cliff_filter: Some(false),
+                ..Default::default()
+            },
+            &WeightingScheme::default(),
+            None,
+        )
+        .expect("opting out must fit the same dip");
+        assert_eq!(
+            filtered, opted_out,
+            "the dip quote must reach the fit unchanged"
         );
     }
 

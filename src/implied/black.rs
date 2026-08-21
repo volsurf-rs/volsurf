@@ -50,7 +50,7 @@ impl BlackImpliedVol {
             .is_call(is_call(option_type))
             .build();
 
-        finish_implied(iv, |calculator| calculator.calculate::<DefaultSpecialFn>())
+        finish_implied(iv, |calculator| calculator.calculate::<DefaultSpecialFn>()).map(Vol)
     }
 }
 

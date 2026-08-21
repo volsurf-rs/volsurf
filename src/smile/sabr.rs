@@ -358,7 +358,7 @@ impl SabrSmile {
         }
 
         // Apply DataFilter after validation
-        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS);
+        let market_vols = prepare_market_vols(market_vols, forward, filter, MIN_POINTS, "SABR")?;
 
         // Resolve weighting: ModelDefault for SABR → Uniform.
         // Uses n(d₁) directly (not sqrt) because weight multiplies diff² in the
@@ -1468,7 +1468,7 @@ mod tests {
         if !report.is_free() {
             for v in &report.butterfly_violations {
                 assert!(v.density < 0.0);
-                assert!(v.magnitude > 0.0);
+                assert!(v.magnitude() > 0.0);
                 assert!(v.strike > 0.0);
             }
         }
@@ -1483,10 +1483,6 @@ mod tests {
             let v = &report.butterfly_violations[0];
             assert!(v.strike > 0.0, "violation strike should be positive");
             assert!(v.density < 0.0, "violation density should be negative");
-            assert!(
-                (v.magnitude - v.density.abs()) < 1e-15,
-                "magnitude should equal |density|"
-            );
         }
     }
 

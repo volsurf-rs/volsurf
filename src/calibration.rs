@@ -1,8 +1,8 @@
 //! Calibration configuration types shared across smile models.
 
-use std::borrow::Cow;
-
 use serde::{Deserialize, Serialize};
+
+use crate::error::VolSurfError;
 
 /// Pre-calibration data filter for strike/vol cleaning.
 ///
@@ -19,8 +19,14 @@ pub struct DataFilter {
     pub max_log_moneyness: Option<f64>,
     /// Exclude quotes with implied vol below this floor.
     pub min_vol: Option<f64>,
-    /// Toggle the vol-cliff heuristic (>50% consecutive drop detection).
-    /// `None` uses the model default: `true` for SVI, `false` for SABR.
+    /// Toggle the vol-cliff heuristic (>50% consecutive drop detection), where
+    /// `None` means `true`. Honoured by SVI and by the per-tenor SVI stage of
+    /// SSVI/eSSVI; SABR and spline ignore it.
+    /// When on, SVI keeps only the larger side of the cliff and fails with
+    /// [`VolSurfError::CalibrationError`] if that side holds fewer than the 5
+    /// points a fit needs; set to `false` to fit across the cliff instead.
+    /// It fires only on a one-sided drop — a smile that also rises by more than
+    /// 2× somewhere is a dip or a glitch, and is passed through untouched.
     pub vol_cliff_filter: Option<bool>,
 }
 
@@ -79,20 +85,30 @@ pub fn apply_filter(
         .collect()
 }
 
-/// Apply a data filter, falling back to the validated original observations
-/// when too few points remain for a model calibration.
-pub(crate) fn prepare_market_vols<'a>(
-    market_vols: &'a [(f64, f64)],
+/// Apply a data filter, failing when too few points remain to calibrate.
+///
+/// Calibrating on the unfiltered set instead would silently ignore the filter
+/// the caller asked for, so a starved filter is a structural failure.
+pub(crate) fn prepare_market_vols(
+    market_vols: &[(f64, f64)],
     forward: f64,
     filter: &DataFilter,
     min_points: usize,
-) -> Cow<'a, [(f64, f64)]> {
+    model: &'static str,
+) -> crate::error::Result<Vec<(f64, f64)>> {
     let filtered = apply_filter(market_vols, forward, filter);
-    if filtered.len() >= min_points {
-        Cow::Owned(filtered)
-    } else {
-        Cow::Borrowed(market_vols)
+    if filtered.len() < min_points {
+        return Err(VolSurfError::CalibrationError {
+            message: format!(
+                "data filter left {} of {} points, fewer than the {min_points} required",
+                filtered.len(),
+                market_vols.len()
+            ),
+            model,
+            rms_error: None,
+        });
     }
+    Ok(filtered)
 }
 
 /// Black vega weight n(d1), omitting the common forward/sqrt(T) factor.
@@ -280,16 +296,39 @@ mod tests {
     }
 
     #[test]
-    fn prepare_market_vols_borrows_when_filter_leaves_too_few_points() {
+    fn prepare_market_vols_errors_when_filter_leaves_too_few_points() {
         let data = vec![(80.0, 0.3), (100.0, 0.2), (120.0, 0.25)];
         let filter = DataFilter {
             max_log_moneyness: Some(0.01),
             ..Default::default()
         };
-        assert!(matches!(
-            prepare_market_vols(&data, 100.0, &filter, 2),
-            Cow::Borrowed(_)
-        ));
+        let err = prepare_market_vols(&data, 100.0, &filter, 2, "SVI").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                VolSurfError::CalibrationError {
+                    model: "SVI",
+                    rms_error: None,
+                    ..
+                }
+            ),
+            "starved filter is a structural failure: {err}"
+        );
+        assert!(
+            err.to_string().contains("1 of 3"),
+            "error should report survivors and input size: {err}"
+        );
+    }
+
+    #[test]
+    fn prepare_market_vols_returns_filtered_points() {
+        let data = vec![(80.0, 0.3), (100.0, 0.2), (120.0, 0.25)];
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.01),
+            ..Default::default()
+        };
+        let kept = prepare_market_vols(&data, 100.0, &filter, 1, "SVI").unwrap();
+        assert_eq!(kept, vec![(100.0, 0.2)]);
     }
 
     #[test]

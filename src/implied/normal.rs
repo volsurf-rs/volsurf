@@ -20,15 +20,15 @@ use super::{
     PriceDomain, finish_implied, finish_price, is_call, validate_implied_inputs,
     validate_pricing_inputs,
 };
-use crate::types::{OptionType, Vol};
+use crate::types::{NormalVol, OptionType};
 
 /// Bachelier (normal) implied volatility calculator.
 ///
 /// Extracts implied volatility under the normal model:
 /// `dF = σ_N · dW` (arithmetic Brownian motion).
 ///
-/// The returned volatility `σ_N` is in **absolute price units** per √year,
-/// unlike Black implied vol which is a dimensionless annualized proportion.
+/// The returned [`NormalVol`] is in **absolute price units** per √year, unlike
+/// Black implied vol which is a dimensionless annualized proportion.
 ///
 /// Uses Jäckel's algorithm from the [`implied_vol`] crate for
 /// near-machine-precision extraction.
@@ -58,7 +58,7 @@ impl NormalImpliedVol {
         strike: f64,
         expiry: f64,
         option_type: OptionType,
-    ) -> crate::error::Result<Vol> {
+    ) -> crate::error::Result<NormalVol> {
         validate_implied_inputs(option_price, forward, strike, expiry, PriceDomain::Finite)?;
 
         let iv = ImpliedNormalVolatility::builder()
@@ -69,7 +69,7 @@ impl NormalImpliedVol {
             .is_call(is_call(option_type))
             .build();
 
-        finish_implied(iv, |calculator| calculator.calculate::<DefaultSpecialFn>())
+        finish_implied(iv, |calculator| calculator.calculate::<DefaultSpecialFn>()).map(NormalVol)
     }
 }
 

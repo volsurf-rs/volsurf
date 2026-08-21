@@ -7,8 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING**: `conventions::StickyKind`. The enum had no consumer anywhere in the
+  crate — nothing accepted it and nothing returned it — so the sticky-strike /
+  sticky-delta choice its docs described could not actually be applied. It will
+  return alongside an API that honours it.
+
+### Changed
+
+- **BREAKING**: `NormalImpliedVol::compute` returns the new `types::NormalVol` rather
+  than `Vol`. Bachelier volatility is quoted in price units per √year while `Vol` is an
+  annualized proportion, so the newtype that exists to stop unit mixing was itself
+  mixing units. The Python and WASM bindings are unaffected — both return a bare float.
+- **BREAKING**: `ButterflyViolation::magnitude` is now a method rather than a public
+  field, and is computed as `density.abs()`. As two public fields they could disagree.
+  Serialized violations lose the redundant `magnitude` key as a result.
+
 ### Fixed
 
+- **BREAKING**: a `DataFilter` that leaves fewer points than the model needs is now a
+  `CalibrationError` instead of a silent fallback to the unfiltered data. Calibrating on
+  the full set gave a fit the caller never asked for and had no way to detect. Affects
+  SVI, SABR, SSVI, eSSVI and the builder's cubic-spline path; the remedy is to widen the
+  filter, and the error reports how many points survived out of how many. The same now
+  holds for `DataFilter::vol_cliff_filter`, which is on by default for SVI and for the
+  per-tenor SVI stage of SSVI/eSSVI: a cliff that leaves fewer than five points on the
+  retained side is a `CalibrationError` rather than a fit across the cliff.
+- **BREAKING**: `PiecewiseSurface::new` now rejects a smile whose `expiry()` disagrees
+  with the tenor it is paired with, including a non-finite `expiry()`. Queries locate
+  smiles by the tenor grid, so a mismatched pair was evaluated at the wrong maturity.
+- `SurfaceBuilder::build` no longer requires `spot` and `rate` when every tenor was added
+  through `add_tenor_with_forward`. Futures-options surfaces, where the forward is the
+  futures price and there is no spot to quote, previously had to pass placeholder values —
+  and `spot` had to be positive, so even that was awkward.
 - **BREAKING**: butterfly arbitrage scans no longer skip grid points whose density
   cannot be evaluated. `is_arbitrage_free()` and `is_arbitrage_free_with()` now
   return `NumericalError` naming the offending strike, so a returned report always

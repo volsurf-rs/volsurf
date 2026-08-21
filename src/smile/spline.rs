@@ -296,7 +296,6 @@ impl SmileSection for SplineSmile {
                 violations.push(ButterflyViolation {
                     strike: k,
                     density: d,
-                    magnitude: d.abs(),
                 });
             }
         }

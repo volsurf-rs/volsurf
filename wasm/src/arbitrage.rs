@@ -57,7 +57,7 @@ impl WasmArbitrageReport {
             .map(|v| WasmButterflyViolation {
                 strike: v.strike,
                 density: v.density,
-                magnitude: v.magnitude,
+                magnitude: v.magnitude(),
             })
             .collect()
     }

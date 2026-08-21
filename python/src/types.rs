@@ -388,7 +388,7 @@ impl From<&ButterflyViolation> for PyButterflyViolation {
         Self {
             strike: v.strike,
             density: v.density,
-            magnitude: v.magnitude,
+            magnitude: v.magnitude(),
         }
     }
 }
@@ -417,8 +417,8 @@ impl PyArbitrageReport {
         self.violations
             .iter()
             .max_by(|a, b| {
-                a.magnitude
-                    .partial_cmp(&b.magnitude)
+                a.magnitude()
+                    .partial_cmp(&b.magnitude())
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(PyButterflyViolation::from)

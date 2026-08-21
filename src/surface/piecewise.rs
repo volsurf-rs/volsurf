@@ -86,11 +86,13 @@ impl PiecewiseSurface {
     ///
     /// # Arguments
     /// * `tenors` — Strictly increasing positive tenors (years)
-    /// * `smiles` — One calibrated [`SmileSection`] per tenor
+    /// * `smiles` — One calibrated [`SmileSection`] per tenor, each with an
+    ///   `expiry()` matching its paired tenor
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if lengths mismatch, tenors
-    /// are empty, not strictly increasing, or not positive.
+    /// are empty, not strictly increasing, or not positive, or if any smile's
+    /// `expiry()` disagrees with the tenor it is paired with.
     pub fn new(tenors: Vec<f64>, smiles: Vec<Box<dyn SmileSection>>) -> error::Result<Self> {
         if tenors.len() != smiles.len() {
             return Err(VolSurfError::InvalidInput {
@@ -108,6 +110,18 @@ impl PiecewiseSurface {
         }
         validate_positive_slice(&tenors, "tenors")?;
         validate_strictly_increasing(&tenors, "tenors")?;
+        // Queries locate smiles by the tenor grid, so a smile calibrated to a
+        // different expiry would be evaluated at the wrong maturity.
+        for (i, (&tenor, smile)) in tenors.iter().zip(&smiles).enumerate() {
+            let expiry = smile.expiry();
+            if !expiry.is_finite() || (expiry - tenor).abs() >= EXPIRY_MATCH_TOL {
+                return Err(VolSurfError::InvalidInput {
+                    message: format!(
+                        "smiles[{i}] has expiry {expiry} but is paired with tenor {tenor}"
+                    ),
+                });
+            }
+        }
 
         Ok(Self { tenors, smiles })
     }
@@ -290,8 +304,28 @@ impl VolSurface for PiecewiseSurface {
 mod tests {
     use super::*;
     use crate::smile::spline::SplineSmile;
-    use crate::types::{Strike, Tenor};
+    use crate::types::{Strike, Tenor, Vol};
     use approx::assert_abs_diff_eq;
+
+    /// Test-only smile with an arbitrary `expiry()`. No validated constructor
+    /// yields a non-finite expiry, but `SmileSection` is a public trait.
+    #[derive(Debug)]
+    struct FixedExpirySmile(f64);
+
+    impl SmileSection for FixedExpirySmile {
+        fn vol(&self, _strike: Strike) -> error::Result<Vol> {
+            Ok(Vol(0.20))
+        }
+        fn forward(&self) -> f64 {
+            100.0
+        }
+        fn expiry(&self) -> f64 {
+            self.0
+        }
+        fn model_name(&self) -> &'static str {
+            "FixedExpiry"
+        }
+    }
 
     /// Helper: create a flat-vol SplineSmile at a given tenor.
     fn flat_smile(forward: f64, expiry: f64, vol: f64) -> Box<dyn SmileSection> {
@@ -353,6 +387,35 @@ mod tests {
         let s1 = flat_smile(100.0, 0.25, 0.20);
         let result = PiecewiseSurface::new(vec![0.0], vec![s1]);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    #[test]
+    fn rejects_smile_expiry_disagreeing_with_tenor() {
+        let s1 = flat_smile(100.0, 0.5, 0.20);
+        let s2 = flat_smile(100.0, 2.0, 0.20);
+        let err = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap_err();
+        assert!(
+            err.to_string().contains("smiles[1]"),
+            "error should identify the mismatched pair: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_non_finite_smile_expiry() {
+        for expiry in [f64::NAN, f64::INFINITY] {
+            let result = PiecewiseSurface::new(vec![0.5], vec![Box::new(FixedExpirySmile(expiry))]);
+            assert!(
+                matches!(result, Err(VolSurfError::InvalidInput { .. })),
+                "expiry {expiry} must not pair with tenor 0.5"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_expiry_within_match_tolerance() {
+        let s1 = flat_smile(100.0, 0.5, 0.20);
+        let result = PiecewiseSurface::new(vec![0.5 + EXPIRY_MATCH_TOL / 2.0], vec![s1]);
+        assert!(result.is_ok(), "sub-tolerance drift is the same tenor");
     }
 
     #[test]

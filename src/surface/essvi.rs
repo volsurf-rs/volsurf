@@ -497,7 +497,7 @@ impl EssviSurface {
             let theta = svi.variance(Strike(forwards[i]))?.0;
 
             // RMS on filtered data for consistency with calibration
-            let eval_data = prepare_market_vols(market_vols, forwards[i], filter, 5);
+            let eval_data = prepare_market_vols(market_vols, forwards[i], filter, 5, "eSSVI")?;
             let mut sum_sq = 0.0;
             for &(strike, market_vol) in eval_data.iter() {
                 let fitted_vol = svi.vol(Strike(strike))?.0;
@@ -1156,7 +1156,6 @@ mod tests {
         for v in &report.butterfly_violations {
             let expected = s.density(Strike(v.strike)).unwrap();
             assert_abs_diff_eq!(v.density, expected, epsilon = 1e-14);
-            assert_abs_diff_eq!(v.magnitude, expected.abs(), epsilon = 1e-14);
         }
     }
 
