@@ -390,7 +390,7 @@ wheels = [
 
 [[package]]
 name = "volsurf"
-version = "2.4.0"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },

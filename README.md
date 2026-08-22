@@ -56,13 +56,13 @@ Volatility surface construction for equity and FX derivatives.
 
 ```toml
 [dependencies]
-volsurf = "2.4"
+volsurf = "3.0"
 ```
 
 Optional features:
 
 ```toml
-volsurf = { version = "2.4", features = ["parallel", "logging"] }
+volsurf = { version = "3.0", features = ["parallel", "logging"] }
 ```
 
 | Feature | Description |
@@ -272,7 +272,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history. Recent releases:
 
 | Version | Name | Key Features |
 |---------|------|--------------|
-| **v2.4** | **Published** | **Internal consolidation, Python/WASM CI, first crates.io release since 2.1** |
+| **v3.0** | **Strict Contracts** | **Silent calibration and arbitrage-scan fallbacks are now errors; `StickyKind` removed, `NormalVol` newtype** |
+| v2.4 | Published | Internal consolidation, Python/WASM CI, first crates.io release since 2.1 |
 | v2.3 | WASM Parity | Implied vol, conventions, and local vol in the WASM bindings |
 | v2.2 | Local Vol Boundary | `BoundaryLocalVol` small-time adapter, `with_boundary()` |
 | v2.1 | API Polish | `model_name()`, `tenors()`, configurable arbitrage scans and calibration |
