@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>volsurf — Interactive Vol Surface</title>
+<script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #0b0e11;
+    --panel: #0e1117;
+    --border: #21262d;
+    --grid: #161b22;
+    --dim: #6e7681;
+    --mid: #9da5b0;
+    --bright: #d4dae2;
+    --white: #e6edf3;
+    --amber: #d29922;
+    --gold: #e3b341;
+    --green: #3fb950;
+    --red: #f85149;
+    --cyan: #58a6ff;
+    --l1: #f0883e;
+    --l2: #d2a038;
+    --l3: #3fb950;
+    --l4: #58a6ff;
+    --l5: #bc8cff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--bright);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* header */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 16px;
+    background: #0d1117;
+    border-bottom: 1px solid var(--amber);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header .logo {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 18px;
+    color: var(--amber);
+  }
+  .header .subtitle {
+    color: var(--dim);
+    font-size: 13px;
+  }
+  .header .spacer { flex: 1; }
+  .header .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--mid);
+    background: var(--border);
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+  .header .status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--green);
+  }
+
+  /* layout */
+  .main {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* sidebar */
+  .sidebar {
+    background: #0d1117;
+    border-right: 1px solid var(--border);
+    padding: 12px 14px;
+    overflow-y: auto;
+  }
+  .sidebar h3 {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--amber);
+    margin: 14px 0 6px;
+  }
+  .sidebar h3:first-child { margin-top: 0; }
+
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+  }
+  .field label {
+    font-size: 10px;
+    color: var(--mid);
+    min-width: 55px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .field input, .field select {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--white);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 4px 7px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus {
+    border-color: var(--amber);
+  }
+
+  .tenor-row {
+    display: grid;
+    grid-template-columns: 32px 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 3px;
+    align-items: center;
+  }
+  .tenor-row .tenor-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--mid);
+  }
+  .tenor-row input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--white);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 3px 5px;
+    border-radius: 3px;
+    outline: none;
+    width: 100%;
+  }
+  .tenor-row input:focus { border-color: var(--amber); }
+  .tenor-header {
+    display: grid;
+    grid-template-columns: 32px 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 3px;
+  }
+  .tenor-header span {
+    font-size: 8px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  button.primary {
+    width: 100%;
+    padding: 7px 14px;
+    background: var(--amber);
+    color: var(--bg);
+    border: none;
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: opacity 0.15s;
+  }
+  button.primary:hover { opacity: 0.85; }
+  button.primary:disabled { opacity: 0.4; cursor: default; }
+
+  .param-readout {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    line-height: 1.7;
+    color: var(--mid);
+    display: none;
+  }
+  .param-readout .val { color: var(--white); }
+  .param-readout .label { color: var(--dim); min-width: 0; }
+
+  /* mini-charts */
+  .mini-charts {
+    display: grid;
+    gap: 1px;
+    width: 100%;
+    height: 100%;
+    background: var(--border);
+  }
+  .mini-charts.cols-2 { grid-template-columns: 1fr 1fr; }
+  .mini-charts.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .mini-chart {
+    background: var(--panel);
+    position: relative;
+    min-height: 0;
+  }
+  .mini-chart .mini-label {
+    position: absolute;
+    top: 3px;
+    left: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  /* charts area */
+  .charts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .chart-panel {
+    background: var(--panel);
+    position: relative;
+    min-height: 0;
+  }
+  .chart-panel .panel-title {
+    position: absolute;
+    top: 6px;
+    left: 10px;
+    font-family: 'Inter', sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--amber);
+    z-index: 10;
+    pointer-events: none;
+  }
+  .chart-panel .plotly-chart {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* footer */
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3px 16px;
+    height: 24px;
+    background: #0d1117;
+    border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--dim);
+    flex-shrink: 0;
+  }
+
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(11,14,17,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--amber);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    z-index: 50;
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="logo">volsurf</span>
+  <span class="subtitle">Interactive Vol Surface Explorer</span>
+  <span class="spacer"></span>
+  <span class="tag" id="version-tag">loading wasm...</span>
+  <span class="status" id="status">&#x25CF; ready</span>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <h3>Market Data</h3>
+    <div class="field">
+      <label>Spot</label>
+      <input type="number" id="spot" value="5000" step="10">
+    </div>
+    <div class="field">
+      <label>Rate</label>
+      <input type="number" id="rate" value="0.045" step="0.005">
+    </div>
+
+    <h3>Model</h3>
+    <div class="field">
+      <label>Type</label>
+      <select id="model">
+        <option value="svi" selected>SVI</option>
+        <option value="sabr">SABR (β=0.5)</option>
+      </select>
+    </div>
+
+    <h3>Tenor Data (strike, vol)</h3>
+    <div class="tenor-header">
+      <span>Tenor</span><span>Strikes</span><span>Vols</span>
+    </div>
+    <div id="tenor-inputs"></div>
+
+    <button class="primary" id="btn-build" disabled>Build Surface</button>
+
+    <h3>Calibrated Parameters</h3>
+    <div class="param-readout" id="params"></div>
+
+    <h3>Preset Datasets</h3>
+    <div class="field">
+      <select id="preset" style="flex:1">
+        <option value="spx">SPX-like (equity skew)</option>
+        <option value="fx">EUR/USD (FX smile)</option>
+        <option value="flat">Flat vol (20%)</option>
+      </select>
+    </div>
+    <button class="primary" id="btn-preset" style="background:var(--border);color:var(--bright);margin-top:6px">Load Preset</button>
+  </div>
+
+  <div class="charts">
+    <div class="chart-panel">
+      <span class="panel-title" style="left:auto;right:10px">Per-Tenor Smile</span>
+      <div class="mini-charts" id="chart-smile-grid"></div>
+    </div>
+    <div class="chart-panel">
+      <span class="panel-title">Term Structure</span>
+      <div class="plotly-chart" id="chart-term"></div>
+    </div>
+    <div class="chart-panel">
+      <span class="panel-title">Risk-Neutral Density</span>
+      <div class="plotly-chart" id="chart-density"></div>
+    </div>
+    <div class="chart-panel">
+      <span class="panel-title">Delta-Space Smile</span>
+      <div class="plotly-chart" id="chart-delta"></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <span id="footer-version">volsurf — Rust → WebAssembly</span>
+  <span>SVI: Gatheral (2004) · SABR: Hagan (2002) · Density: Breeden-Litzenberger (1978)</span>
+  <span id="perf"></span>
+</div>
+
+<script type="module">
+import init, {
+  WasmSviSmile, WasmSabrSmile, WasmSurfaceBuilder, version
+} from './pkg/volsurf_wasm.js';
+
+const COLORS = ['#f0883e','#d2a038','#3fb950','#58a6ff','#bc8cff'];
+const AXIS_COMMON = {
+  gridcolor: '#161b22', zerolinecolor: '#21262d', gridwidth: 1,
+  tickfont: { size: 9, color: '#9da5b0' },
+  titlefont: { size: 10, color: '#d4dae2' },
+};
+const LAYOUT_BASE = {
+  paper_bgcolor: '#0e1117',
+  plot_bgcolor: '#0e1117',
+  font: { family: 'JetBrains Mono, monospace', size: 9, color: '#9da5b0' },
+  margin: { t: 28, r: 12, b: 36, l: 46 },
+  xaxis: { ...AXIS_COMMON },
+  yaxis: { ...AXIS_COMMON },
+  showlegend: true,
+  legend: {
+    font: { size: 8, color: '#9da5b0' },
+    bgcolor: 'rgba(14,17,23,0.85)',
+    bordercolor: '#21262d', borderwidth: 1,
+    x: 1, xanchor: 'right', y: 1, yanchor: 'top',
+  },
+};
+
+const PRESETS = {
+  spx: {
+    spot: 5000, rate: 0.045,
+    tenors: [
+      { expiry: 0.08, label: '1M', strikes: [4500,4600,4700,4800,4850,4900,4950,5000,5050,5100,5150,5200,5300,5400,5500], vols: [0.32,0.29,0.265,0.24,0.232,0.224,0.217,0.21,0.205,0.202,0.20,0.199,0.20,0.205,0.215] },
+      { expiry: 0.17, label: '2M', strikes: [4400,4500,4600,4700,4800,4900,5000,5100,5200,5300,5400,5500,5600], vols: [0.30,0.28,0.262,0.245,0.23,0.218,0.21,0.205,0.203,0.203,0.206,0.212,0.22] },
+      { expiry: 0.25, label: '3M', strikes: [4300,4500,4600,4700,4800,4900,5000,5100,5200,5300,5400,5500,5700], vols: [0.295,0.27,0.255,0.24,0.228,0.218,0.212,0.208,0.207,0.208,0.212,0.218,0.235] },
+      { expiry: 0.50, label: '6M', strikes: [4000,4250,4500,4700,4800,4900,5000,5100,5200,5300,5500,5750,6000], vols: [0.30,0.275,0.255,0.24,0.233,0.225,0.22,0.217,0.216,0.217,0.222,0.232,0.245] },
+      { expiry: 0.75, label: '9M', strikes: [3900,4125,4375,4600,4775,4950,5125,5300,5475,5625,5875], vols: [0.30,0.278,0.26,0.245,0.235,0.225,0.221,0.220,0.222,0.228,0.24] },
+      { expiry: 1.00, label: '1Y', strikes: [3750,4000,4250,4500,4750,5000,5250,5500,5750,6000,6250], vols: [0.30,0.28,0.265,0.25,0.238,0.23,0.225,0.224,0.225,0.23,0.238] },
+    ]
+  },
+  fx: {
+    spot: 1.08, rate: 0.03,
+    tenors: [
+      { expiry: 0.08, label: '1M', strikes: [1.02,1.04,1.06,1.07,1.08,1.09,1.10,1.12,1.14], vols: [0.105,0.095,0.085,0.08,0.078,0.08,0.085,0.095,0.108] },
+      { expiry: 0.25, label: '3M', strikes: [1.00,1.02,1.04,1.06,1.08,1.10,1.12,1.14,1.16], vols: [0.11,0.10,0.092,0.086,0.082,0.084,0.09,0.098,0.11] },
+      { expiry: 0.50, label: '6M', strikes: [0.98,1.00,1.02,1.04,1.06,1.08,1.10,1.12,1.14,1.16,1.18], vols: [0.115,0.108,0.10,0.094,0.088,0.085,0.086,0.09,0.096,0.104,0.115] },
+      { expiry: 1.00, label: '1Y', strikes: [0.95,0.98,1.00,1.04,1.08,1.12,1.16,1.20], vols: [0.12,0.11,0.105,0.095,0.09,0.092,0.098,0.11] },
+    ]
+  },
+  flat: {
+    spot: 100, rate: 0.02,
+    tenors: [
+      { expiry: 0.25, label: '3M', strikes: [85,90,95,100,105,110,115], vols: [0.20,0.20,0.20,0.20,0.20,0.20,0.20] },
+      { expiry: 0.50, label: '6M', strikes: [80,85,90,95,100,105,110,115,120], vols: [0.20,0.20,0.20,0.20,0.20,0.20,0.20,0.20,0.20] },
+      { expiry: 1.00, label: '1Y', strikes: [75,80,85,90,95,100,105,110,115,120,125], vols: [0.20,0.20,0.20,0.20,0.20,0.20,0.20,0.20,0.20,0.20,0.20] },
+    ]
+  }
+};
+
+// ── delta utilities ──
+
+function cdf(x) {
+  const a = Math.abs(x);
+  const t = 1 / (1 + 0.2316419 * a);
+  const d = 0.3989422804 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.8212560 + t * 1.3302744))));
+  return x > 0 ? 1 - p : p;
+}
+
+function bsDelta(fwd, strike, vol, expiry) {
+  const sqrtT = Math.sqrt(expiry);
+  const d1 = (Math.log(fwd / strike) + 0.5 * vol * vol * expiry) / (vol * sqrtT);
+  return cdf(d1);
+}
+
+function strikeAtDelta(fwd, targetDelta, vol, expiry) {
+  let lo = fwd * 0.01, hi = fwd * 5.0;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const d = bsDelta(fwd, mid, vol, expiry);
+    if (d > targetDelta) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+function strikeAtDeltaSmile(fwd, targetDelta, volFn, expiry) {
+  let lo = fwd * 0.01, hi = fwd * 5.0;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const v = volFn(mid);
+    const d = bsDelta(fwd, mid, v, expiry);
+    if (d > targetDelta) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+let wasmReady = false;
+
+// ── init ──
+async function startup() {
+  await init();
+  wasmReady = true;
+  document.getElementById('version-tag').textContent = `wasm v${version()}`;
+  document.getElementById('footer-version').textContent = `volsurf ${version()} — Rust → WebAssembly`;
+  document.getElementById('btn-build').disabled = false;
+  loadPreset('spx');
+  buildSurface();
+}
+
+function loadPreset(name) {
+  const p = PRESETS[name];
+  document.getElementById('spot').value = p.spot;
+  document.getElementById('rate').value = p.rate;
+  renderTenorInputs(p.tenors);
+}
+
+function renderTenorInputs(tenors) {
+  const container = document.getElementById('tenor-inputs');
+  container.innerHTML = '';
+  tenors.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'tenor-row';
+    row.innerHTML = `
+      <span class="tenor-label" style="color:${COLORS[i % COLORS.length]}">${t.label}</span>
+      <input type="text" data-field="strikes" data-idx="${i}" value="${t.strikes.join(',')}">
+      <input type="text" data-field="vols" data-idx="${i}" value="${t.vols.join(',')}">
+    `;
+    container.appendChild(row);
+    // store expiry
+    row.dataset.expiry = t.expiry;
+    row.dataset.label = t.label;
+  });
+}
+
+function getTenorData() {
+  const rows = document.querySelectorAll('.tenor-row');
+  return Array.from(rows).map((row, i) => {
+    const expiry = parseFloat(row.dataset.expiry);
+    const label = row.dataset.label;
+    const strikes = row.querySelector('[data-field="strikes"]').value.split(',').map(Number);
+    const vols = row.querySelector('[data-field="vols"]').value.split(',').map(Number);
+    return { expiry, label, strikes, vols };
+  });
+}
+
+function buildSurface() {
+  if (!wasmReady) return;
+  const t0 = performance.now();
+
+  const spot = parseFloat(document.getElementById('spot').value);
+  const rate = parseFloat(document.getElementById('rate').value);
+  const model = document.getElementById('model').value;
+  const tenorData = getTenorData();
+
+  const smiles = [];
+  const atmVols = [];
+  const failed = [];
+
+  for (const t of tenorData) {
+    const fwd = spot * Math.exp(rate * t.expiry);
+    const flat = new Float64Array(t.strikes.length * 2);
+    for (let i = 0; i < t.strikes.length; i++) {
+      flat[i * 2] = t.strikes[i];
+      flat[i * 2 + 1] = t.vols[i];
+    }
+
+    let smile;
+    try {
+      if (model === 'svi') {
+        smile = WasmSviSmile.calibrate(fwd, t.expiry, flat);
+      } else {
+        smile = WasmSabrSmile.calibrate(fwd, t.expiry, 0.5, flat);
+      }
+      smiles.push({ smile, fwd, expiry: t.expiry, label: t.label, strikes: t.strikes, vols: t.vols });
+      atmVols.push(smile.vol(fwd) * 100);
+    } catch (e) {
+      console.error(`Calibration failed for ${t.label}:`, e);
+      failed.push(t.label);
+      smiles.push(null);
+      atmVols.push(null);
+    }
+  }
+
+  setStatus(failed);
+
+  const elapsed = (performance.now() - t0).toFixed(1);
+  document.getElementById('perf').textContent = `built in ${elapsed}ms`;
+
+  plotSmile(smiles);
+  plotTermStructure(smiles, atmVols);
+  plotDensity(smiles, spot, rate);
+  plotDeltaSmile(smiles);
+  showParams(smiles);
+}
+
+function setStatus(failed) {
+  const el = document.getElementById('status');
+  if (!failed.length) {
+    el.textContent = '\u25CF ready';
+    el.style.color = '';
+  } else {
+    el.textContent = `\u25CF calibration failed: ${failed.join(', ')}`;
+    el.style.color = '#f85149';
+  }
+}
+
+// ── charts ──
+
+function plotSmile(smiles) {
+  const grid = document.getElementById('chart-smile-grid');
+  // purge old mini-charts
+  Array.from(grid.children).forEach(el => {
+    if (el.classList.contains('mini-chart')) Plotly.purge(el.querySelector('.mini-plot'));
+  });
+  grid.innerHTML = '';
+
+  const valid = smiles.map((s, i) => s ? { s, i } : null).filter(Boolean);
+  grid.className = 'mini-charts ' + (valid.length <= 4 ? 'cols-2' : 'cols-3');
+
+  const miniLayout = {
+    paper_bgcolor: '#0e1117',
+    plot_bgcolor: '#0e1117',
+    font: { family: 'JetBrains Mono, monospace', size: 7, color: '#9da5b0' },
+    margin: { t: 18, r: 6, b: 24, l: 34 },
+    xaxis: { ...AXIS_COMMON, tickfont: { size: 7, color: '#9da5b0' }, range: [85, 115] },
+    yaxis: { ...AXIS_COMMON, tickfont: { size: 7, color: '#9da5b0' } },
+    showlegend: false,
+    shapes: [{ type: 'line', x0: 100, x1: 100, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.5, dash: 'dot' } }],
+  };
+
+  valid.forEach(({ s, i }) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'mini-chart';
+    const label = document.createElement('span');
+    label.className = 'mini-label';
+    label.style.color = COLORS[i % COLORS.length];
+    label.textContent = s.label;
+    wrap.appendChild(label);
+    const plotDiv = document.createElement('div');
+    plotDiv.className = 'mini-plot';
+    plotDiv.style.width = '100%';
+    plotDiv.style.height = '100%';
+    wrap.appendChild(plotDiv);
+    grid.appendChild(wrap);
+
+    const fwd = s.fwd;
+    const nPts = 150;
+    const xs = [], ys = [], xm = [], ym = [];
+    for (let j = 0; j <= nPts; j++) {
+      const m = 0.85 + (0.30 * j / nPts);
+      xs.push(m * 100);
+      try { ys.push(s.smile.vol(m * fwd) * 100); } catch { ys.push(null); }
+    }
+    for (let j = 0; j < s.strikes.length; j++) {
+      xm.push(s.strikes[j] / fwd * 100);
+      ym.push(s.vols[j] * 100);
+    }
+
+    // clamp y-axis to market data range so SVI wings don't blow up the scale
+    const mktMin = Math.min(...ym);
+    const mktMax = Math.max(...ym);
+    const yPad = Math.max((mktMax - mktMin) * 0.3, 1);
+    const yLo = mktMin - yPad;
+    const yHi = mktMax + yPad;
+
+    const color = COLORS[i % COLORS.length];
+    const traces = [
+      { x: xs, y: ys, mode: 'lines', line: { color, width: 1.5 } },
+      { x: xm, y: ym, mode: 'markers', marker: { color, size: 3.5, symbol: 'circle-open', line: { width: 1, color } } },
+    ];
+    const thisLayout = { ...miniLayout, yaxis: { ...miniLayout.yaxis, range: [yLo, yHi] } };
+    Plotly.react(plotDiv, traces, thisLayout, { responsive: true, displayModeBar: false });
+  });
+}
+
+function plotTermStructure(smiles, atmVols) {
+  const xs = [], ys = [], labels = [];
+  smiles.forEach((s, i) => {
+    if (!s || atmVols[i] === null) return;
+    xs.push(s.expiry * 365);
+    ys.push(atmVols[i]);
+    labels.push(s.label);
+  });
+
+  if (!ys.length) {
+    Plotly.react('chart-term', [], LAYOUT_BASE, { responsive: true, displayModeBar: false });
+    return;
+  }
+
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  const yPad = Math.max((yMax - yMin) * 0.35, 0.5);
+
+  const traces = [{
+    x: xs, y: ys, mode: 'lines+markers+text',
+    text: ys.map(v => v.toFixed(1)),
+    textposition: 'top center',
+    textfont: { size: 9, color: '#e6edf3', family: 'JetBrains Mono' },
+    line: { color: '#58a6ff', width: 2, shape: 'spline' },
+    marker: { color: '#58a6ff', size: 6 },
+    fill: 'tonexty',
+    fillcolor: 'rgba(88,166,255,0.04)',
+  }, {
+    x: xs, y: xs.map(() => yMin - yPad), mode: 'lines',
+    line: { width: 0 }, showlegend: false, hoverinfo: 'skip',
+  }];
+
+  const layout = {
+    ...LAYOUT_BASE,
+    showlegend: false,
+    xaxis: {
+      ...LAYOUT_BASE.xaxis,
+      title: { text: '' },
+      tickvals: xs, ticktext: labels,
+    },
+    yaxis: {
+      ...LAYOUT_BASE.yaxis,
+      title: { text: 'ATM IV %' },
+      range: [yMin - yPad, yMax + yPad],
+    },
+  };
+  Plotly.react('chart-term', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function plotDensity(smiles, spot, rate) {
+  const indices = smiles.length <= 3
+    ? smiles.map((_, i) => i)
+    : [0, Math.floor(smiles.length / 2), smiles.length - 1];
+
+  const traces = [];
+  indices.forEach(i => {
+    const s = smiles[i];
+    if (!s) return;
+    const fwd = s.fwd;
+    const xs = [], ys = [];
+    for (let j = 0; j <= 200; j++) {
+      const m = 0.90 + (0.20 * j / 200);
+      const k = m * fwd;
+      xs.push(m * 100);
+      try { ys.push(s.smile.density(k)); } catch { ys.push(0); }
+    }
+    traces.push({
+      x: xs, y: ys, mode: 'lines', name: s.label,
+      line: { color: COLORS[i % COLORS.length], width: 1.5 },
+      fill: 'tozeroy',
+      fillcolor: COLORS[i % COLORS.length] + '0d',
+    });
+  });
+
+  const layout = {
+    ...LAYOUT_BASE,
+    xaxis: { ...LAYOUT_BASE.xaxis, title: { text: 'Moneyness %' }, range: [90, 110] },
+    yaxis: { ...LAYOUT_BASE.yaxis, title: { text: 'q(K)' } },
+    shapes: [{ type: 'line', x0: 100, x1: 100, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.7, dash: 'dot' } }],
+  };
+  Plotly.react('chart-density', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function plotDeltaSmile(smiles) {
+  const traces = [];
+  const nPts = 200;
+  smiles.forEach((s, i) => {
+    if (!s) return;
+    const fwd = s.fwd;
+    const xs = [], ys = [], xm = [], ym = [];
+    // cap model vol at 1.5x market range to suppress SVI wing blow-up
+    const mktMax = Math.max(...s.vols) * 100;
+    const volCap = mktMax * 1.5;
+    for (let j = 0; j <= nPts; j++) {
+      const m = 0.90 + (0.20 * j / nPts);
+      const k = m * fwd;
+      try {
+        const v = Math.min(s.smile.vol(k) * 100, volCap);
+        const d = bsDelta(fwd, k, v / 100, s.expiry);
+        if (d >= 0.05 && d <= 0.95) { xs.push(d); ys.push(v); }
+      } catch {}
+    }
+    for (let j = 0; j < s.strikes.length; j++) {
+      const d = bsDelta(fwd, s.strikes[j], s.vols[j], s.expiry);
+      xm.push(d); ym.push(s.vols[j] * 100);
+    }
+    traces.push({
+      x: xs, y: ys, mode: 'lines', name: s.label,
+      line: { color: COLORS[i % COLORS.length], width: 1.8 },
+    });
+    traces.push({
+      x: xm, y: ym, mode: 'markers', name: `${s.label} mkt`,
+      marker: { color: COLORS[i % COLORS.length], size: 4.5, symbol: 'circle-open', line: { width: 1.2, color: COLORS[i % COLORS.length] } },
+      showlegend: false,
+    });
+  });
+
+  const layout = {
+    ...LAYOUT_BASE,
+    xaxis: { ...LAYOUT_BASE.xaxis, title: { text: 'Call Delta' }, range: [0.05, 0.95], dtick: 0.1 },
+    yaxis: { ...LAYOUT_BASE.yaxis, title: { text: 'IV %' } },
+    shapes: [{ type: 'line', x0: 0.5, x1: 0.5, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.7, dash: 'dot' } }],
+  };
+  Plotly.react('chart-delta', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function showParams(smiles) {
+  const el = document.getElementById('params');
+  const model = document.getElementById('model').value;
+  let html = '';
+  smiles.forEach((s, i) => {
+    if (!s) return;
+    const c = COLORS[i % COLORS.length];
+    if (model === 'svi') {
+      const j = JSON.parse(s.smile.to_json());
+      html += `<div><span style="color:${c}">${s.label}</span> `
+        + `<span class="label">a=</span><span class="val">${j.a.toFixed(4)}</span> `
+        + `<span class="label">b=</span><span class="val">${j.b.toFixed(4)}</span> `
+        + `<span class="label">ρ=</span><span class="val">${j.rho.toFixed(3)}</span> `
+        + `<span class="label">m=</span><span class="val">${j.m.toFixed(4)}</span> `
+        + `<span class="label">σ=</span><span class="val">${j.sigma.toFixed(4)}</span>`
+        + `</div>`;
+    } else {
+      const j = JSON.parse(s.smile.to_json());
+      html += `<div><span style="color:${c}">${s.label}</span> `
+        + `<span class="label">α=</span><span class="val">${j.alpha.toFixed(4)}</span> `
+        + `<span class="label">β=</span><span class="val">${j.beta.toFixed(2)}</span> `
+        + `<span class="label">ρ=</span><span class="val">${j.rho.toFixed(3)}</span> `
+        + `<span class="label">ν=</span><span class="val">${j.nu.toFixed(4)}</span>`
+        + `</div>`;
+    }
+    // slope & curvature
+    try {
+      const volFn = k => s.smile.vol(k);
+      const atmVol = volFn(s.fwd);
+      const k25c = strikeAtDeltaSmile(s.fwd, 0.25, volFn, s.expiry);
+      const k25p = strikeAtDeltaSmile(s.fwd, 0.75, volFn, s.expiry);
+      const vol25c = volFn(k25c);
+      const vol25p = volFn(k25p);
+      const slope = (vol25p - vol25c) / 50 * 1000;
+      const bf = (vol25p + vol25c - 2 * atmVol) * 100;
+      html += `<div style="padding-left:30px">`
+        + `<span class="label">slope=</span><span class="val">${slope.toFixed(1)}</span> `
+        + `<span class="label">bf=</span><span class="val">${bf.toFixed(2)}%</span>`
+        + `</div>`;
+    } catch {
+      html += `<div style="padding-left:30px"><span class="label">slope/bf: n/a</span></div>`;
+    }
+  });
+  el.innerHTML = html;
+  el.style.display = html ? 'block' : 'none';
+}
+
+// ── events ──
+document.getElementById('btn-build').addEventListener('click', buildSurface);
+document.getElementById('btn-preset').addEventListener('click', () => {
+  loadPreset(document.getElementById('preset').value);
+  buildSurface();
+});
+
+startup().catch(e => {
+  console.error('WASM init failed:', e);
+  document.getElementById('version-tag').textContent = 'wasm failed';
+  document.getElementById('status').textContent = '● error';
+  document.getElementById('status').style.color = '#f85149';
+});
+</script>
+</body>
+</html>
