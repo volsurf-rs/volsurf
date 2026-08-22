@@ -579,6 +579,50 @@ mod tests {
         }
     }
 
+    /// The scan must come from the stored model, not from a spline resampling
+    /// of it: this SVI's `g(k)` goes negative in the wings, and the analytic
+    /// scan and a resampled spline disagree about that.
+    #[test]
+    fn smile_at_exact_tenor_delegates_the_arbitrage_scan() {
+        let svi = SviSmile::new(100.0, 1.0, 0.001, 0.8, -0.7, 0.0, 0.05).unwrap();
+        let surface = PiecewiseSurface::new(vec![1.0], vec![Box::new(svi.clone())]).unwrap();
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
+
+        for cfg in [
+            ArbitrageScanConfig::svi_default(),
+            ArbitrageScanConfig {
+                n_points: 61,
+                k_min: -1.5,
+                k_max: 1.5,
+            },
+        ] {
+            let got = smile.is_arbitrage_free_with(&cfg).unwrap();
+            let want = svi.is_arbitrage_free_with(&cfg).unwrap();
+            assert!(!want.is_free(), "fixture should violate butterfly");
+            assert_abs_diff_eq!(got.expiry, want.expiry, epsilon = 1e-14);
+            assert_eq!(
+                got.butterfly_violations.len(),
+                want.butterfly_violations.len()
+            );
+            for (g, w) in got
+                .butterfly_violations
+                .iter()
+                .zip(&want.butterfly_violations)
+            {
+                assert_abs_diff_eq!(g.strike, w.strike, epsilon = 1e-14);
+                assert_abs_diff_eq!(g.density, w.density, epsilon = 1e-14);
+            }
+        }
+
+        // The no-config method routes through the model's own default grid.
+        let got = smile.is_arbitrage_free().unwrap();
+        let want = svi.is_arbitrage_free().unwrap();
+        assert_eq!(
+            got.butterfly_violations.len(),
+            want.butterfly_violations.len()
+        );
+    }
+
     #[test]
     fn forward_matches_the_smile_the_surface_would_return() {
         let s1 = flat_smile(90.0, 0.5, 0.22);

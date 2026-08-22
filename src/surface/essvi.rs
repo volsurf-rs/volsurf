@@ -23,7 +23,8 @@ use crate::surface::arbitrage::{SurfaceDiagnostics, surface_diagnostics};
 use crate::surface::ssvi::{SsviSlice, ssvi_total_variance, ssvi_total_variance_with_phi_theta};
 use crate::types::{Strike, Tenor, Variance, Vol};
 use crate::validate::{
-    validate_in_range, validate_open_unit_interval, validate_positive, validate_surface_grid,
+    validate_in_range, validate_open_unit_interval, validate_positive, validate_positive_slice,
+    validate_surface_grid,
 };
 
 /// A structural calendar no-arb violation (Thm 4.1, Eq 4.10).
@@ -451,20 +452,8 @@ impl EssviSurface {
                 ),
             });
         }
-        for (i, &t) in tenors.iter().enumerate() {
-            if !t.is_finite() || t <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("tenors[{i}] must be positive and finite, got {t}"),
-                });
-            }
-        }
-        for (i, &f) in forwards.iter().enumerate() {
-            if !f.is_finite() || f <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("forwards[{i}] must be positive and finite, got {f}"),
-                });
-            }
-        }
+        validate_positive_slice(tenors, "tenors")?;
+        validate_positive_slice(forwards, "forwards")?;
 
         let mut fits = Vec::with_capacity(tenors.len());
         for (i, market_vols) in market_data.iter().enumerate() {

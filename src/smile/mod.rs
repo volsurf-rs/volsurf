@@ -284,6 +284,20 @@ pub trait SmileCalibrator: Send + Sync + std::fmt::Debug {
     /// Fewest quotes the model can fit. Checked before [`calibrate`](Self::calibrate).
     fn min_strikes(&self) -> usize;
 
+    /// Check the model's own parameters, independent of any market data.
+    ///
+    /// [`SurfaceBuilder::build`](crate::surface::SurfaceBuilder::build) calls
+    /// this once before it touches a single tenor, so a misconfigured model
+    /// reports its own error rather than whatever the first tenor happens to
+    /// trip over. Models with no free parameters keep the default.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`](crate::VolSurfError::InvalidInput)
+    /// if a parameter fixed at construction is out of range.
+    fn validate(&self) -> error::Result<()> {
+        Ok(())
+    }
+
     /// Fit the model to `market_vols`, a slice of `(strike, implied_vol)` pairs.
     ///
     /// `filter` is applied to the quotes before fitting; `weighting` sets the

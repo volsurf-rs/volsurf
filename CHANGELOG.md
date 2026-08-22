@@ -21,7 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `smile::SmileCalibrator` — the per-tenor calibration contract the models
   already shared informally. `SurfaceBuilder::calibrator()` accepts any
   implementation, so a model defined outside this crate can be built into a
-  surface on the same footing as the `SmileModel` variants.
+  surface on the same footing as the `SmileModel` variants. Its
+  `validate()` method (default `Ok(())`) checks parameters fixed at
+  construction; `SurfaceBuilder::build()` calls it before reading any tenor
+  data, so a misconfigured model reports its own error rather than whatever
+  the first tenor trips over.
 - `validate_in_range` and `validate_open_unit_interval` behind the ρ, β, and γ
   checks, so those messages are uniform across models.
 
@@ -37,6 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SVI's calibration is split into named stages (weighting, vol-cliff filter,
   ATM interpolation, multi-start search, ATM sanity check) that are unit-tested
   directly. The fit itself is unchanged.
+- Error message wording, on the same `VolSurfError` variants as before. Match
+  on the variant, not the string:
+  - Bad tenors or forwards passed to `SsviSurface::calibrate*` or
+    `EssviSurface::fit_per_tenor*` now read
+    `"tenors must be positive and finite, got tenors[0]=0"` rather than
+    `"tenors[0] must be positive and finite, got 0"`. Both surfaces route
+    through the shared slice validator, so they no longer disagree.
+  - An out-of-range SABR `beta` reads `"SABR beta must be in [0, 1], got NaN"`
+    rather than `"SABR beta must be in [0, 1] and finite, got NaN"`; `NaN` and
+    `inf` are still rejected.
+  - `SurfaceBuilder::build()`'s min-strikes error names the model by
+    `model_name()` — `"(model: SABR)"` — instead of debug-formatting the
+    `SmileModel`, so the message no longer carries `beta`.
 
 ### Removed
 

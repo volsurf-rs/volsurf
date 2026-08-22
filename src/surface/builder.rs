@@ -26,7 +26,7 @@ use crate::conventions;
 use crate::error::VolSurfError;
 use crate::smile::{SabrSmile, SmileCalibrator, SmileSection, SplineSmile, SviSmile};
 use crate::surface::piecewise::PiecewiseSurface;
-use crate::validate::{validate_finite, validate_positive};
+use crate::validate::{validate_finite, validate_in_range, validate_positive};
 use std::sync::Arc;
 
 #[cfg(feature = "parallel")]
@@ -105,6 +105,13 @@ impl SmileCalibrator for SmileModel {
             Self::Svi => 5,
             Self::CubicSpline => 3,
             Self::Sabr { .. } => 4,
+        }
+    }
+
+    fn validate(&self) -> crate::error::Result<()> {
+        match *self {
+            Self::Sabr { beta } => validate_in_range(beta, 0.0, 1.0, "SABR beta").map(|_| ()),
+            Self::Svi | Self::CubicSpline => Ok(()),
         }
     }
 
@@ -336,6 +343,7 @@ impl SurfaceBuilder {
         }
 
         let calibrator = self.calibrator.as_ref();
+        calibrator.validate()?;
         let min_strikes = calibrator.min_strikes();
         let model_name = calibrator.model_name();
         let filter = self.data_filter.unwrap_or_default();
@@ -1058,6 +1066,23 @@ mod tests {
             .add_tenor(0.25, &sample_strikes(), &sample_vols())
             .build();
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
+    }
+
+    /// A bad beta is the model's own error, so it must surface before any
+    /// per-tenor check — here, too few strikes for SABR's `min_strikes` of 4.
+    #[test]
+    fn sabr_invalid_beta_reported_before_tenor_checks() {
+        let err = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::Sabr { beta: f64::NAN })
+            .add_tenor(0.25, &[95.0, 100.0], &[0.22, 0.20])
+            .build()
+            .unwrap_err();
+        let VolSurfError::InvalidInput { message } = err else {
+            panic!("expected InvalidInput, got {err:?}");
+        };
+        assert!(message.contains("SABR beta"), "got {message}");
     }
 
     #[test]
