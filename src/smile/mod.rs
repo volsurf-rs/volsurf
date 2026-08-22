@@ -214,3 +214,94 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
         })
     }
 }
+
+/// Fits a [`SmileSection`] to one tenor of market quotes.
+///
+/// Every model runs the same pipeline — validate, filter, resolve weighting,
+/// optimize, reconstruct — and this trait is the contract they share. It is
+/// also what [`SurfaceBuilder`](crate::surface::SurfaceBuilder) calibrates
+/// through, so a model living outside this crate can be built into a surface
+/// on the same footing as [`SmileModel`](crate::surface::SmileModel).
+///
+/// # Examples
+///
+/// ```
+/// use volsurf::calibration::{DataFilter, WeightingScheme};
+/// use volsurf::smile::{SmileCalibrator, SmileSection, SplineSmile};
+/// use volsurf::surface::{SurfaceBuilder, VolSurface};
+/// use volsurf::types::{Strike, Tenor};
+///
+/// /// Straight-through interpolation of the quotes, no fitting.
+/// #[derive(Debug)]
+/// struct RawSpline;
+///
+/// impl SmileCalibrator for RawSpline {
+///     fn model_name(&self) -> &'static str {
+///         "RawSpline"
+///     }
+///
+///     fn min_strikes(&self) -> usize {
+///         3
+///     }
+///
+///     fn calibrate(
+///         &self,
+///         forward: f64,
+///         expiry: f64,
+///         market_vols: &[(f64, f64)],
+///         _filter: &DataFilter,
+///         _weighting: &WeightingScheme,
+///     ) -> volsurf::Result<Box<dyn SmileSection>> {
+///         let mut pairs: Vec<(f64, f64)> = market_vols
+///             .iter()
+///             .map(|&(k, v)| (k, v * v * expiry))
+///             .collect();
+///         pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+///         let (strikes, variances) = pairs.into_iter().unzip();
+///         Ok(Box::new(SplineSmile::new(forward, expiry, strikes, variances)?))
+///     }
+/// }
+///
+/// let strikes = vec![90.0, 95.0, 100.0, 105.0, 110.0];
+/// let vols = vec![0.24, 0.22, 0.20, 0.22, 0.24];
+///
+/// let surface = SurfaceBuilder::new()
+///     .spot(100.0)
+///     .rate(0.05)
+///     .calibrator(RawSpline)
+///     .add_tenor(0.25, &strikes, &vols)
+///     .add_tenor(1.00, &strikes, &vols)
+///     .build()?;
+///
+/// assert_eq!(surface.smile_at(Tenor(0.25))?.model_name(), "CubicSpline");
+/// assert!(surface.black_vol(Tenor(0.5), Strike(100.0))?.0 > 0.0);
+/// # Ok::<(), volsurf::VolSurfError>(())
+/// ```
+pub trait SmileCalibrator: Send + Sync + std::fmt::Debug {
+    /// Name used in error messages and diagnostics.
+    fn model_name(&self) -> &'static str;
+
+    /// Fewest quotes the model can fit. Checked before [`calibrate`](Self::calibrate).
+    fn min_strikes(&self) -> usize;
+
+    /// Fit the model to `market_vols`, a slice of `(strike, implied_vol)` pairs.
+    ///
+    /// `filter` is applied to the quotes before fitting; `weighting` sets the
+    /// per-quote weights in the objective. Implementations should route both
+    /// through [`prepare_market_vols`](crate::calibration::prepare_market_vols)
+    /// so filtering behaves consistently across models.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`](crate::VolSurfError::InvalidInput)
+    /// for malformed quotes and
+    /// [`VolSurfError::CalibrationError`](crate::VolSurfError::CalibrationError)
+    /// if the fit does not converge.
+    fn calibrate(
+        &self,
+        forward: f64,
+        expiry: f64,
+        market_vols: &[(f64, f64)],
+        filter: &crate::calibration::DataFilter,
+        weighting: &crate::calibration::WeightingScheme,
+    ) -> error::Result<Box<dyn SmileSection>>;
+}

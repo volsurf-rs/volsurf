@@ -945,7 +945,7 @@ fn ssvi_analytical_calendar_check() {
     let surface = build_ssvi_surface();
 
     // Analytical check should also pass for well-behaved params
-    let violations = surface.calendar_arb_analytical();
+    let violations = surface.calendar_violations().unwrap();
     assert!(
         violations.is_empty(),
         "Analytical calendar check should pass, got {} violations",

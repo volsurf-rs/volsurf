@@ -22,7 +22,9 @@ use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::ArbitrageReport;
 use crate::types::{Strike, Vol};
-use crate::validate::{validate_non_negative, validate_positive};
+use crate::validate::{
+    validate_in_range, validate_non_negative, validate_open_unit_interval, validate_positive,
+};
 
 const TAYLOR_Z_TOL: f64 = 1e-6;
 
@@ -153,17 +155,8 @@ impl SabrSmile {
         validate_positive(expiry, "expiry")?;
         validate_positive(alpha, "alpha")?;
 
-        if !(0.0..=1.0).contains(&beta) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("beta must be in [0, 1], got {beta}"),
-            });
-        }
-
-        if rho.abs() >= 1.0 || rho.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("rho must be in (-1, 1), got {rho}"),
-            });
-        }
+        validate_in_range(beta, 0.0, 1.0, "beta")?;
+        validate_open_unit_interval(rho, "rho")?;
 
         validate_non_negative(nu, "nu")?;
 
@@ -339,11 +332,7 @@ impl SabrSmile {
 
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
-        if !(0.0..=1.0).contains(&beta) || !beta.is_finite() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("beta must be in [0, 1], got {beta}"),
-            });
-        }
+        validate_in_range(beta, 0.0, 1.0, "beta")?;
         if market_vols.len() < MIN_POINTS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(

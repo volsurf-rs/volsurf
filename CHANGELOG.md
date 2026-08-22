@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `VolSurface::forward(expiry)` — reads the forward directly instead of
+  building a whole smile section for it. `DupireLocalVol` needs three forwards
+  and no vols per query; on a `PiecewiseSurface` that used to cost ~150
+  variance evaluations, three spline solves, and three allocations. The
+  `local_vol/dupire_piecewise_single_query` benchmark goes from 6.75 µs to
+  180 ns, a 37× speedup.
+- `VolSurface::calendar_violations()` — calendar spread checks reachable
+  through `&dyn VolSurface`, with a grid-scanning default. `SsviSurface`
+  overrides it with the exact `∂w/∂θ` test.
+- `smile::SmileCalibrator` — the per-tenor calibration contract the models
+  already shared informally. `SurfaceBuilder::calibrator()` accepts any
+  implementation, so a model defined outside this crate can be built into a
+  surface on the same footing as the `SmileModel` variants.
+- `validate_in_range` and `validate_open_unit_interval` behind the ρ, β, and γ
+  checks, so those messages are uniform across models.
+
+### Changed
+
+- `PiecewiseSurface::smile_at()` returns the stored smile on an exact tenor
+  match rather than a cubic-spline resampling of it. The section now keeps its
+  model identity (`model_name()` reports `"SVI"`, not `"CubicSpline"`), its
+  analytic density, and its wing behaviour — previously `smile_at(T).vol(K)`
+  and `black_vol(T, K)` disagreed outside `[0.5F, 2F]` on the same surface.
+  Off-grid expiries are still resampled onto a spline.
+- `ArbitrageScanConfig` is re-exported at the crate root, alongside `DataFilter`.
+- SVI's calibration is split into named stages (weighting, vol-cliff filter,
+  ATM interpolation, multi-start search, ATM sanity check) that are unit-tested
+  directly. The fit itself is unchanged.
+
+### Removed
+
+Breaking. Each has a drop-in replacement on the `VolSurface` trait — bring it
+into scope with `use volsurf::surface::VolSurface`:
+
+- `SsviSurface::calendar_arb_analytical()` → `SsviSurface::calendar_violations()`,
+  which now returns `Result<Vec<CalendarViolation>>`.
+- The inherent `SsviSurface::tenors()` and `EssviSurface::tenors()`, which
+  shadowed the identical trait method.
+
 ## [3.0.0] - 2026-08-22
 
 A major bump for the API contract, not for new capability. Three public items

@@ -47,7 +47,7 @@ pub use error::{Result, VolSurfError};
 #[doc(inline)]
 pub use local_vol::{BoundaryLocalVol, DupireLocalVol, LocalVol};
 #[doc(inline)]
-pub use smile::SmileSection;
+pub use smile::{ArbitrageScanConfig, SmileCalibrator, SmileSection};
 #[doc(inline)]
 pub use surface::VolSurface;
 #[doc(inline)]

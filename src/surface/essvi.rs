@@ -22,7 +22,9 @@ use crate::surface::VolSurface;
 use crate::surface::arbitrage::{SurfaceDiagnostics, surface_diagnostics};
 use crate::surface::ssvi::{SsviSlice, ssvi_total_variance, ssvi_total_variance_with_phi_theta};
 use crate::types::{Strike, Tenor, Variance, Vol};
-use crate::validate::{validate_positive, validate_surface_grid};
+use crate::validate::{
+    validate_in_range, validate_open_unit_interval, validate_positive, validate_surface_grid,
+};
 
 /// A structural calendar no-arb violation (Thm 4.1, Eq 4.10).
 ///
@@ -356,27 +358,15 @@ impl EssviSurface {
         forwards: Vec<f64>,
         thetas: Vec<f64>,
     ) -> error::Result<Self> {
-        if rho_0.abs() >= 1.0 || rho_0.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("|rho_0| must be less than 1, got {rho_0}"),
-            });
-        }
-        if rho_m.abs() >= 1.0 || rho_m.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("|rho_m| must be less than 1, got {rho_m}"),
-            });
-        }
+        validate_open_unit_interval(rho_0, "rho_0")?;
+        validate_open_unit_interval(rho_m, "rho_m")?;
         if !a.is_finite() || a < 0.0 {
             return Err(VolSurfError::InvalidInput {
                 message: format!("a must be non-negative and finite, got {a}"),
             });
         }
         validate_positive(eta, "eta")?;
-        if !gamma.is_finite() || !(0.0..=1.0).contains(&gamma) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("gamma must be in [0, 1], got {gamma}"),
-            });
-        }
+        validate_in_range(gamma, 0.0, 1.0, "gamma")?;
 
         validate_surface_grid(&tenors, &forwards, &thetas)?;
 
@@ -878,10 +868,6 @@ impl EssviSurface {
         self.gamma
     }
 
-    pub fn tenors(&self) -> &[f64] {
-        &self.tenors
-    }
-
     pub fn forwards(&self) -> &[f64] {
         &self.forwards
     }
@@ -960,6 +946,11 @@ impl VolSurface for EssviSurface {
             });
         }
         Ok(Variance(w))
+    }
+
+    fn forward(&self, expiry: Tenor) -> error::Result<f64> {
+        validate_positive(expiry.0, "expiry")?;
+        Ok(self.theta_and_forward_at(expiry.0).1)
     }
 
     fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {

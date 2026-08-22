@@ -85,6 +85,20 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// total variance must be non-decreasing in time for no-arbitrage.
     fn black_variance(&self, expiry: Tenor, strike: Strike) -> error::Result<Variance>;
 
+    /// Forward price F(T) at the given expiry.
+    ///
+    /// Every surface already knows its forwards — parametric surfaces
+    /// interpolate them alongside θ, piecewise surfaces read them off the
+    /// stored smiles. Exposing that directly spares callers who need only the
+    /// forward from building a whole smile section for it: Dupire's
+    /// log-moneyness conversion needs three forwards per query and no vols.
+    ///
+    /// The default implementation goes through [`smile_at`](VolSurface::smile_at);
+    /// implementations with a cheaper route should override it.
+    fn forward(&self, expiry: Tenor) -> error::Result<f64> {
+        Ok(self.smile_at(expiry)?.forward())
+    }
+
     /// A smile section at the given expiry.
     ///
     /// Returns an owned `Box<dyn SmileSection>` because parametric surfaces
@@ -102,6 +116,27 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// Passes `config` through to per-smile `is_arbitrage_free_with()` calls.
     /// Calendar spread checks use the same hardcoded grid as `diagnostics()`.
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics>;
+
+    /// Calendar spread violations: total variance decreasing in time.
+    ///
+    /// Reachable through `&dyn VolSurface`, unlike the model-specific checks
+    /// the parametric surfaces used to expose only as inherent methods.
+    ///
+    /// The default scans total variance across adjacent tenor pairs on a
+    /// log-spaced strike grid — the same scan [`diagnostics`](VolSurface::diagnostics)
+    /// performs. Surfaces whose parameterization admits an exact test should
+    /// override this; [`SsviSurface`] does, via `∂w/∂θ`.
+    fn calendar_violations(&self) -> error::Result<Vec<CalendarViolation>> {
+        let tenors = self.tenors().to_vec();
+        let forwards = tenors
+            .iter()
+            .map(|&t| self.forward(Tenor(t)))
+            .collect::<error::Result<Vec<_>>>()?;
+
+        arbitrage::calendar_scan(&tenors, &forwards, |i, strike| {
+            Ok(self.black_variance(Tenor(tenors[i]), Strike(strike))?.0)
+        })
+    }
 
     /// The tenor grid (expiries in years) that this surface covers.
     fn tenors(&self) -> &[f64];

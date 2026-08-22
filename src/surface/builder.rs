@@ -24,9 +24,10 @@ use serde::{Deserialize, Serialize};
 use crate::calibration::{DataFilter, WeightingScheme};
 use crate::conventions;
 use crate::error::VolSurfError;
-use crate::smile::{SabrSmile, SmileSection, SplineSmile, SviSmile};
+use crate::smile::{SabrSmile, SmileCalibrator, SmileSection, SplineSmile, SviSmile};
 use crate::surface::piecewise::PiecewiseSurface;
 use crate::validate::{validate_finite, validate_positive};
+use std::sync::Arc;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -90,6 +91,71 @@ impl TryFrom<SmileModelRaw> for SmileModel {
     }
 }
 
+impl SmileCalibrator for SmileModel {
+    fn model_name(&self) -> &'static str {
+        match self {
+            Self::Svi => "SVI",
+            Self::CubicSpline => "CubicSpline",
+            Self::Sabr { .. } => "SABR",
+        }
+    }
+
+    fn min_strikes(&self) -> usize {
+        match self {
+            Self::Svi => 5,
+            Self::CubicSpline => 3,
+            Self::Sabr { .. } => 4,
+        }
+    }
+
+    fn calibrate(
+        &self,
+        forward: f64,
+        expiry: f64,
+        market_vols: &[(f64, f64)],
+        filter: &DataFilter,
+        weighting: &WeightingScheme,
+    ) -> crate::error::Result<Box<dyn SmileSection>> {
+        match *self {
+            Self::Svi => Ok(Box::new(SviSmile::calibrate_with_config(
+                forward,
+                expiry,
+                market_vols,
+                filter,
+                weighting,
+                None,
+            )?)),
+
+            Self::CubicSpline => {
+                let data = crate::calibration::prepare_market_vols(
+                    market_vols,
+                    forward,
+                    filter,
+                    self.min_strikes(),
+                    self.model_name(),
+                )?;
+                let mut pairs: Vec<(f64, f64)> =
+                    data.iter().map(|&(k, v)| (k, v * v * expiry)).collect();
+                pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
+                Ok(Box::new(SplineSmile::new(
+                    forward, expiry, strikes, variances,
+                )?))
+            }
+
+            Self::Sabr { beta } => Ok(Box::new(SabrSmile::calibrate_with_config(
+                forward,
+                expiry,
+                beta,
+                market_vols,
+                filter,
+                weighting,
+                None,
+            )?)),
+        }
+    }
+}
+
 /// Builder for constructing volatility surfaces from market data.
 ///
 /// Accumulates spot price, risk-free rate, and per-tenor (strikes, vols)
@@ -121,7 +187,7 @@ pub struct SurfaceBuilder {
     spot: Option<f64>,
     rate: Option<f64>,
     dividend_yield: Option<f64>,
-    model: SmileModel,
+    calibrator: Arc<dyn SmileCalibrator>,
     data_filter: Option<DataFilter>,
     weighting: Option<WeightingScheme>,
     tenor_data: Vec<TenorData>,
@@ -142,7 +208,7 @@ impl SurfaceBuilder {
             spot: None,
             rate: None,
             dividend_yield: None,
-            model: SmileModel::default(),
+            calibrator: Arc::new(SmileModel::default()),
             data_filter: None,
             weighting: None,
             tenor_data: Vec::new(),
@@ -151,9 +217,19 @@ impl SurfaceBuilder {
 
     /// Set the smile model used for per-tenor calibration.
     ///
-    /// Default is [`SmileModel::Svi`].
-    pub fn model(mut self, model: SmileModel) -> Self {
-        self.model = model;
+    /// Default is [`SmileModel::Svi`]. For a model of your own, see
+    /// [`calibrator`](Self::calibrator).
+    pub fn model(self, model: SmileModel) -> Self {
+        self.calibrator(model)
+    }
+
+    /// Calibrate each tenor with an arbitrary [`SmileCalibrator`].
+    ///
+    /// The built-in [`SmileModel`] variants implement the trait, so
+    /// [`model`](Self::model) is the same call with the enum; this one also
+    /// accepts a model defined outside the crate.
+    pub fn calibrator(mut self, calibrator: impl SmileCalibrator + 'static) -> Self {
+        self.calibrator = Arc::new(calibrator);
         self
     }
 
@@ -241,7 +317,7 @@ impl SurfaceBuilder {
         #[cfg(feature = "logging")]
         tracing::debug!(
             n_tenors = self.tenor_data.len(),
-            model = ?self.model,
+            model = self.calibrator.model_name(),
             "surface build started"
         );
 
@@ -259,21 +335,9 @@ impl SurfaceBuilder {
             });
         }
 
-        let min_strikes = match self.model {
-            SmileModel::Svi => 5,
-            SmileModel::CubicSpline => 3,
-            SmileModel::Sabr { .. } => 4,
-        };
-
-        if let SmileModel::Sabr { beta } = self.model
-            && (!beta.is_finite() || !(0.0..=1.0).contains(&beta))
-        {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("SABR beta must be in [0, 1] and finite, got {beta}"),
-            });
-        }
-
-        let model = self.model;
+        let calibrator = self.calibrator.as_ref();
+        let min_strikes = calibrator.min_strikes();
+        let model_name = calibrator.model_name();
         let filter = self.data_filter.unwrap_or_default();
         let weighting = self.weighting.unwrap_or_default();
         let calibrate_tenor =
@@ -299,7 +363,7 @@ impl SurfaceBuilder {
                 if tenor.strikes.len() < min_strikes {
                     return Err(VolSurfError::InvalidInput {
                         message: format!(
-                            "at least {min_strikes} strikes required per tenor (model: {model:?}), got {} for tenor {}",
+                            "at least {min_strikes} strikes required per tenor (model: {model_name}), got {} for tenor {}",
                             tenor.strikes.len(),
                             tenor.expiry
                         ),
@@ -331,48 +395,13 @@ impl SurfaceBuilder {
                     .map(|(&strike, &vol)| (strike, vol))
                     .collect();
 
-                let smile: Box<dyn SmileSection> = match model {
-                    SmileModel::Svi => {
-                        let svi = SviSmile::calibrate_with_config(
-                            forward,
-                            tenor.expiry,
-                            &market_vols,
-                            &filter,
-                            &weighting,
-                            None,
-                        )?;
-                        Box::new(svi)
-                    }
-                    SmileModel::CubicSpline => {
-                        let data = crate::calibration::prepare_market_vols(
-                            &market_vols,
-                            forward,
-                            &filter,
-                            3,
-                            "CubicSpline",
-                        )?;
-                        let mut pairs: Vec<(f64, f64)> = data
-                            .iter()
-                            .map(|&(k, v)| (k, v * v * tenor.expiry))
-                            .collect();
-                        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
-                        let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
-                        let spline = SplineSmile::new(forward, tenor.expiry, strikes, variances)?;
-                        Box::new(spline)
-                    }
-                    SmileModel::Sabr { beta } => {
-                        let sabr = SabrSmile::calibrate_with_config(
-                            forward,
-                            tenor.expiry,
-                            beta,
-                            &market_vols,
-                            &filter,
-                            &weighting,
-                            None,
-                        )?;
-                        Box::new(sabr)
-                    }
-                };
+                let smile = calibrator.calibrate(
+                    forward,
+                    tenor.expiry,
+                    &market_vols,
+                    &filter,
+                    &weighting,
+                )?;
 
                 Ok((tenor.expiry, smile))
             };
@@ -424,6 +453,111 @@ mod tests {
 
     fn sample_vols() -> Vec<f64> {
         vec![0.28, 0.24, 0.22, 0.20, 0.22, 0.24, 0.28]
+    }
+
+    /// A calibrator defined outside the `SmileModel` enum.
+    #[derive(Debug)]
+    struct ConstantVolSmileFit {
+        vol: f64,
+        min_strikes: usize,
+    }
+
+    impl SmileCalibrator for ConstantVolSmileFit {
+        fn model_name(&self) -> &'static str {
+            "ConstantVol"
+        }
+
+        fn min_strikes(&self) -> usize {
+            self.min_strikes
+        }
+
+        fn calibrate(
+            &self,
+            forward: f64,
+            expiry: f64,
+            market_vols: &[(f64, f64)],
+            _filter: &DataFilter,
+            _weighting: &WeightingScheme,
+        ) -> crate::error::Result<Box<dyn SmileSection>> {
+            let mut strikes: Vec<f64> = market_vols.iter().map(|&(k, _)| k).collect();
+            strikes.sort_by(f64::total_cmp);
+            let variances = vec![self.vol * self.vol * expiry; strikes.len()];
+            Ok(Box::new(SplineSmile::new(
+                forward, expiry, strikes, variances,
+            )?))
+        }
+    }
+
+    #[test]
+    fn build_with_a_calibrator_defined_outside_the_crate() {
+        let surface = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .calibrator(ConstantVolSmileFit {
+                vol: 0.25,
+                min_strikes: 3,
+            })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .add_tenor(1.0, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+
+        // The custom fit ignores the quotes and returns a flat 25% smile.
+        for t in [0.25, 1.0] {
+            for k in [90.0, 100.0, 110.0] {
+                assert_abs_diff_eq!(
+                    surface.black_vol(Tenor(t), Strike(k)).unwrap().0,
+                    0.25,
+                    epsilon = 1e-12
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn custom_calibrator_min_strikes_is_enforced() {
+        let err = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .calibrator(ConstantVolSmileFit {
+                vol: 0.25,
+                min_strikes: 99,
+            })
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap_err();
+
+        assert!(matches!(err, VolSurfError::InvalidInput { .. }));
+        let message = err.to_string();
+        assert!(message.contains("at least 99 strikes"), "got {message}");
+        assert!(message.contains("ConstantVol"), "got {message}");
+    }
+
+    #[test]
+    fn model_and_calibrator_are_the_same_call_for_built_in_models() {
+        let via_model = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .model(SmileModel::CubicSpline)
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+        let via_calibrator = SurfaceBuilder::new()
+            .spot(100.0)
+            .rate(0.05)
+            .calibrator(SmileModel::CubicSpline)
+            .add_tenor(0.25, &sample_strikes(), &sample_vols())
+            .build()
+            .unwrap();
+
+        assert_abs_diff_eq!(
+            via_model.black_vol(Tenor(0.25), Strike(105.0)).unwrap().0,
+            via_calibrator
+                .black_vol(Tenor(0.25), Strike(105.0))
+                .unwrap()
+                .0,
+            epsilon = 1e-15
+        );
     }
 
     #[test]
@@ -672,7 +806,7 @@ mod tests {
     #[test]
     fn default_model_is_svi() {
         let builder = SurfaceBuilder::new();
-        assert_eq!(builder.model, SmileModel::Svi);
+        assert_eq!(builder.calibrator.model_name(), "SVI");
     }
 
     #[test]

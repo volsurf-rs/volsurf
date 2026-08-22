@@ -35,6 +35,34 @@ pub(crate) fn validate_finite(value: f64, name: &str) -> crate::error::Result<f6
     Ok(value)
 }
 
+/// Validate that a value lies in the closed interval `[lo, hi]` and is finite.
+pub(crate) fn validate_in_range(
+    value: f64,
+    lo: f64,
+    hi: f64,
+    name: &str,
+) -> crate::error::Result<f64> {
+    if !value.is_finite() || value < lo || value > hi {
+        return Err(VolSurfError::InvalidInput {
+            message: format!("{name} must be in [{lo}, {hi}], got {value}"),
+        });
+    }
+    Ok(value)
+}
+
+/// Validate that a value lies in the open interval `(-1, 1)` and is finite.
+///
+/// Used for the correlation parameters ρ, whose models are undefined at
+/// `|ρ| = 1`.
+pub(crate) fn validate_open_unit_interval(value: f64, name: &str) -> crate::error::Result<f64> {
+    if !value.is_finite() || value.abs() >= 1.0 {
+        return Err(VolSurfError::InvalidInput {
+            message: format!("{name} must be in (-1, 1), got {value}"),
+        });
+    }
+    Ok(value)
+}
+
 /// Validate every element of a named collection as positive and finite.
 ///
 /// The error format intentionally matches the surface constructors' historic
@@ -205,6 +233,57 @@ mod tests {
     #[test]
     fn finite_rejects_negative_inf() {
         assert!(validate_finite(f64::NEG_INFINITY, "x").is_err());
+    }
+
+    // validate_in_range
+
+    #[test]
+    fn in_range_accepts_interior_and_boundaries() {
+        assert_eq!(validate_in_range(0.5, 0.0, 1.0, "x").unwrap(), 0.5);
+        assert_eq!(validate_in_range(0.0, 0.0, 1.0, "x").unwrap(), 0.0);
+        assert_eq!(validate_in_range(1.0, 0.0, 1.0, "x").unwrap(), 1.0);
+    }
+
+    #[test]
+    fn in_range_rejects_outside_and_non_finite() {
+        assert!(validate_in_range(-0.001, 0.0, 1.0, "x").is_err());
+        assert!(validate_in_range(1.001, 0.0, 1.0, "x").is_err());
+        assert!(validate_in_range(f64::NAN, 0.0, 1.0, "x").is_err());
+        assert!(validate_in_range(f64::INFINITY, 0.0, 1.0, "x").is_err());
+    }
+
+    #[test]
+    fn in_range_message_matches_historic_beta_format() {
+        let err = validate_in_range(2.0, 0.0, 1.0, "beta").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid input: beta must be in [0, 1], got 2"
+        );
+    }
+
+    // validate_open_unit_interval
+
+    #[test]
+    fn open_unit_interval_accepts_interior() {
+        assert_eq!(validate_open_unit_interval(-0.999, "rho").unwrap(), -0.999);
+        assert_eq!(validate_open_unit_interval(0.0, "rho").unwrap(), 0.0);
+    }
+
+    #[test]
+    fn open_unit_interval_rejects_boundaries_and_non_finite() {
+        assert!(validate_open_unit_interval(1.0, "rho").is_err());
+        assert!(validate_open_unit_interval(-1.0, "rho").is_err());
+        assert!(validate_open_unit_interval(f64::NAN, "rho").is_err());
+        assert!(validate_open_unit_interval(f64::NEG_INFINITY, "rho").is_err());
+    }
+
+    #[test]
+    fn open_unit_interval_message_names_the_parameter() {
+        let err = validate_open_unit_interval(1.5, "rho_0").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid input: rho_0 must be in (-1, 1), got 1.5"
+        );
     }
 
     // Error messages include the field name

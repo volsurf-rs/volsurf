@@ -37,7 +37,10 @@ use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics, surface_d
 use crate::surface::interp::strike_grid;
 use crate::surface::{CALENDAR_ARB_TOL, CALENDAR_CHECK_GRID_SIZE};
 use crate::types::{Strike, Tenor, Variance, Vol};
-use crate::validate::{validate_positive, validate_surface_grid};
+use crate::validate::{
+    validate_in_range, validate_open_unit_interval, validate_positive, validate_positive_slice,
+    validate_surface_grid,
+};
 
 /// Evaluate the shared SSVI/eSSVI total-variance kernel.
 pub(crate) fn ssvi_total_variance(theta: f64, k: f64, rho: f64, eta: f64, gamma: f64) -> f64 {
@@ -156,17 +159,9 @@ impl SsviSurface {
         thetas: Vec<f64>,
     ) -> error::Result<Self> {
         // Scalar validation
-        if rho.abs() >= 1.0 || rho.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("|rho| must be less than 1, got {rho}"),
-            });
-        }
+        validate_open_unit_interval(rho, "rho")?;
         validate_positive(eta, "eta")?;
-        if !gamma.is_finite() || !(0.0..=1.0).contains(&gamma) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("gamma must be in [0, 1], got {gamma}"),
-            });
-        }
+        validate_in_range(gamma, 0.0, 1.0, "gamma")?;
 
         validate_surface_grid(&tenors, &forwards, &thetas)?;
 
@@ -194,11 +189,6 @@ impl SsviSurface {
     /// Term structure decay parameter γ.
     pub fn gamma(&self) -> f64 {
         self.gamma
-    }
-
-    /// Per-tenor expiries.
-    pub fn tenors(&self) -> &[f64] {
-        &self.tenors
     }
 
     /// Forward prices at each tenor.
@@ -252,45 +242,6 @@ impl SsviSurface {
         let u = phi * k;
         let r = ((u + self.rho).powi(2) + self.one_minus_rho_sq).sqrt();
         0.5 * (1.0 + self.rho * u * (1.0 - self.gamma) + r - self.gamma * u * (u + self.rho) / r)
-    }
-
-    /// Analytical calendar arbitrage check for this SSVI surface.
-    ///
-    /// Scans `∂w/∂θ` (see `dw_dtheta`) on a grid of
-    /// `(θ, k)` points at each consecutive tenor pair. Returns calendar
-    /// violations where the derivative is negative, indicating total
-    /// variance would decrease with increasing ATM variance.
-    ///
-    /// For valid SSVI surfaces with power-law `φ(θ) = η/θ^γ`, `γ ∈ [0, 1]`,
-    /// and `|ρ| < 1`, this always returns an empty vector because `∂w/∂θ ≥ 0`
-    /// is mathematically guaranteed. The scan serves as empirical confirmation
-    /// of the analytical bound.
-    ///
-    /// # References
-    /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
-    pub fn calendar_arb_analytical(&self) -> Vec<CalendarViolation> {
-        let mut violations = Vec::new();
-
-        for i in 0..self.tenors.len().saturating_sub(1) {
-            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
-            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
-
-            for &strike in &grid {
-                let k_short = (strike / self.forwards[i]).ln();
-                if self.dw_dtheta(self.thetas[i], k_short) < -CALENDAR_ARB_TOL {
-                    let k_long = (strike / self.forwards[i + 1]).ln();
-                    violations.push(CalendarViolation {
-                        strike,
-                        tenor_short: self.tenors[i],
-                        tenor_long: self.tenors[i + 1],
-                        variance_short: self.total_variance_at(self.thetas[i], k_short),
-                        variance_long: self.total_variance_at(self.thetas[i + 1], k_long),
-                    });
-                }
-            }
-        }
-
-        violations
     }
 
     /// Interpolate `(θ, F)` at an arbitrary expiry.
@@ -391,20 +342,8 @@ impl SsviSurface {
                 ),
             });
         }
-        for (i, &t) in tenors.iter().enumerate() {
-            if !t.is_finite() || t <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("tenors[{i}] must be positive and finite, got {t}"),
-                });
-            }
-        }
-        for (i, &f) in forwards.iter().enumerate() {
-            if !f.is_finite() || f <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("forwards[{i}] must be positive and finite, got {f}"),
-                });
-            }
-        }
+        validate_positive_slice(tenors, "tenors")?;
+        validate_positive_slice(forwards, "forwards")?;
 
         // Stage 1: Per-tenor SVI calibration
         let n_tenors = tenors.len();
@@ -570,11 +509,55 @@ impl VolSurface for SsviSurface {
         Ok(Variance(w))
     }
 
+    fn forward(&self, expiry: Tenor) -> error::Result<f64> {
+        validate_positive(expiry.0, "expiry")?;
+        Ok(self.theta_and_forward_at(expiry.0).1)
+    }
+
     fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {
         validate_positive(expiry.0, "expiry")?;
         let (theta, forward) = self.theta_and_forward_at(expiry.0);
         let slice = SsviSlice::new(forward, expiry.0, self.rho, self.eta, self.gamma, theta)?;
         Ok(Box::new(slice))
+    }
+
+    /// Exact calendar arbitrage check for this SSVI surface.
+    ///
+    /// Scans `∂w/∂θ` (see `dw_dtheta`) on a grid of
+    /// `(θ, k)` points at each consecutive tenor pair. Returns calendar
+    /// violations where the derivative is negative, indicating total
+    /// variance would decrease with increasing ATM variance.
+    ///
+    /// For valid SSVI surfaces with power-law `φ(θ) = η/θ^γ`, `γ ∈ [0, 1]`,
+    /// and `|ρ| < 1`, this always returns an empty vector because `∂w/∂θ ≥ 0`
+    /// is mathematically guaranteed. The scan serves as empirical confirmation
+    /// of the analytical bound.
+    ///
+    /// # References
+    /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
+    fn calendar_violations(&self) -> error::Result<Vec<CalendarViolation>> {
+        let mut violations = Vec::new();
+
+        for i in 0..self.tenors.len().saturating_sub(1) {
+            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
+            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
+
+            for &strike in &grid {
+                let k_short = (strike / self.forwards[i]).ln();
+                if self.dw_dtheta(self.thetas[i], k_short) < -CALENDAR_ARB_TOL {
+                    let k_long = (strike / self.forwards[i + 1]).ln();
+                    violations.push(CalendarViolation {
+                        strike,
+                        tenor_short: self.tenors[i],
+                        tenor_long: self.tenors[i + 1],
+                        variance_short: self.total_variance_at(self.thetas[i], k_short),
+                        variance_long: self.total_variance_at(self.thetas[i + 1], k_long),
+                    });
+                }
+            }
+        }
+
+        Ok(violations)
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
@@ -721,17 +704,9 @@ impl SsviSlice {
     ) -> error::Result<Self> {
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
-        if rho.abs() >= 1.0 || rho.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("|rho| must be less than 1, got {rho}"),
-            });
-        }
+        validate_open_unit_interval(rho, "rho")?;
         validate_positive(eta, "eta")?;
-        if !gamma.is_finite() || !(0.0..=1.0).contains(&gamma) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("gamma must be in [0, 1], got {gamma}"),
-            });
-        }
+        validate_in_range(gamma, 0.0, 1.0, "gamma")?;
         validate_positive(theta, "theta")?;
         Ok(Self {
             forward,
@@ -921,9 +896,30 @@ mod tests {
     }
 
     #[test]
+    fn forward_matches_the_smile_the_surface_would_return() {
+        let s = equity_surface();
+        for &t in &[0.1, 0.25, 0.4, 1.0, 3.0] {
+            assert_abs_diff_eq!(
+                s.forward(Tenor(t)).unwrap(),
+                s.smile_at(Tenor(t)).unwrap().forward(),
+                epsilon = 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn forward_rejects_non_positive_expiry() {
+        let s = equity_surface();
+        assert!(matches!(
+            s.forward(Tenor(0.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
     fn calendar_arb_single_tenor_empty() {
         let surface = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04]).unwrap();
-        let violations = surface.calendar_arb_analytical();
+        let violations = surface.calendar_violations().unwrap();
         assert!(violations.is_empty());
     }
 
@@ -1992,10 +1988,10 @@ mod tests {
     }
 
     #[test]
-    fn calendar_arb_analytical_clean_for_valid_surface() {
+    fn calendar_violations_analytical_clean_for_valid_surface() {
         // Valid SSVI surface: analytical check returns no violations.
         let s = equity_surface();
-        let violations = s.calendar_arb_analytical();
+        let violations = s.calendar_violations().unwrap();
         assert!(
             violations.is_empty(),
             "valid SSVI should be analytically calendar-arb-free, got {} violations",
@@ -2004,12 +2000,12 @@ mod tests {
     }
 
     #[test]
-    fn calendar_arb_analytical_and_numerical_agree() {
+    fn calendar_violations_analytical_and_numerical_agree() {
         // Both numerical (diagnostics) and analytical checks agree:
         // no calendar violations for a valid SSVI surface.
         let s = equity_surface();
         let diag = s.diagnostics().unwrap();
-        let analytical = s.calendar_arb_analytical();
+        let analytical = s.calendar_violations().unwrap();
         assert!(
             diag.calendar_violations.is_empty(),
             "numerical check should find no violations"
@@ -2057,14 +2053,14 @@ mod tests {
     }
 
     #[test]
-    fn calendar_arb_analytical_single_tenor() {
+    fn calendar_violations_analytical_single_tenor() {
         // Single tenor: no consecutive pairs, so no calendar violations.
         let s = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.16]).unwrap();
-        assert!(s.calendar_arb_analytical().is_empty());
+        assert!(s.calendar_violations().unwrap().is_empty());
     }
 
     #[test]
-    fn calendar_arb_analytical_differing_forwards() {
+    fn calendar_violations_analytical_differing_forwards() {
         let s = SsviSurface::new(
             -0.3,
             0.5,
@@ -2075,7 +2071,7 @@ mod tests {
         )
         .unwrap();
 
-        let analytical = s.calendar_arb_analytical();
+        let analytical = s.calendar_violations().unwrap();
         assert!(
             analytical.is_empty(),
             "valid SSVI with differing forwards should be arb-free, got {} violations",
@@ -2106,7 +2102,7 @@ mod tests {
             diag.calendar_violations.is_empty(),
             "barely increasing thetas should still pass numerical calendar checks"
         );
-        let analytical = s.calendar_arb_analytical();
+        let analytical = s.calendar_violations().unwrap();
         assert!(
             analytical.is_empty(),
             "barely increasing thetas should still pass analytical calendar checks"

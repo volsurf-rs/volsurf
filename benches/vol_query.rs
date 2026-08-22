@@ -161,7 +161,7 @@ fn surface_benchmarks(c: &mut Criterion) {
 
     // --- SSVI calendar analytical ---
     group.bench_function("ssvi_calendar_analytical", |b| {
-        b.iter(|| ssvi.calendar_arb_analytical());
+        b.iter(|| ssvi.calendar_violations().unwrap());
     });
 
     group.finish();
@@ -191,6 +191,17 @@ fn local_vol_benchmarks(c: &mut Criterion) {
                     let _ = dupire.local_vol(Tenor(t), Strike(k)).unwrap();
                 }
             }
+        });
+    });
+
+    // Piecewise-backed Dupire: smile_at() is far costlier here than on a
+    // parametric surface, so this is where the forward lookups dominate.
+    let dupire_piecewise = DupireLocalVol::new(Arc::new(make_surface()));
+    group.bench_function("dupire_piecewise_single_query", |b| {
+        b.iter(|| {
+            dupire_piecewise
+                .local_vol(Tenor(black_box(0.375)), Strike(black_box(100.0)))
+                .unwrap()
         });
     });
 
