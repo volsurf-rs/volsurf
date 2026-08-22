@@ -50,7 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     through the shared slice validator, so they no longer disagree.
   - An out-of-range SABR `beta` reads `"SABR beta must be in [0, 1], got NaN"`
     rather than `"SABR beta must be in [0, 1] and finite, got NaN"`; `NaN` and
-    `inf` are still rejected.
+    `inf` are still rejected. `SabrSmile::new`/`calibrate_with_config` name the
+    parameter the same way (was `"beta must be in [0, 1]"`), and the Python and
+    WASM bindings raise the core message instead of their own copy of it.
   - `SurfaceBuilder::build()`'s min-strikes error names the model by
     `model_name()` — `"(model: SABR)"` — instead of debug-formatting the
     `SmileModel`, so the message no longer carries `beta`.

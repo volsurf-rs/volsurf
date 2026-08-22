@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use volsurf::VolSurface;
 use volsurf::calibration::{DataFilter, WeightingScheme};
 use volsurf::surface::{SmileModel, SurfaceBuilder};
-use volsurf::{Strike, Tenor};
+use volsurf::{SmileCalibrator, Strike, Tenor, VolSurface};
 use wasm_bindgen::prelude::*;
 
 use crate::arbitrage::WasmSurfaceDiagnostics;
@@ -47,13 +46,10 @@ impl WasmSurfaceBuilder {
     }
 
     pub fn model_sabr(&mut self, beta: f64) -> Result<(), JsValue> {
-        if !beta.is_finite() || !(0.0..=1.0).contains(&beta) {
-            return Err(JsValue::from_str(&format!(
-                "SABR beta must be in [0, 1] and finite, got {beta}"
-            )));
-        }
+        let model = SmileModel::Sabr { beta };
+        model.validate().map_err(to_js_err)?;
         let b = self.inner.take().ok_or_else(consumed)?;
-        self.inner = Some(b.model(SmileModel::Sabr { beta }));
+        self.inner = Some(b.model(model));
         Ok(())
     }
 

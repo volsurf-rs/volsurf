@@ -2804,6 +2804,34 @@ mod tests {
         ));
     }
 
+    /// A bad tenor or forward must be rejected by the slice validator up front
+    /// as `InvalidInput` — not reach `SviSmile::calibrate_with_config` and come
+    /// back wrapped as `CalibrationError`.
+    #[test]
+    fn fit_per_tenor_rejects_bad_tenors_and_forwards() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5];
+        let forwards = vec![100.0, 100.0];
+        let strikes: Vec<Vec<f64>> = tenors
+            .iter()
+            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
+            .collect();
+        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+
+        for (bad_tenors, bad_forwards) in [
+            (vec![0.0, 0.5], forwards.clone()),
+            (vec![f64::NAN, 0.5], forwards.clone()),
+            (tenors.clone(), vec![100.0, f64::NAN]),
+        ] {
+            let err = EssviSurface::fit_per_tenor(&market_data, &bad_tenors, &bad_forwards)
+                .expect_err("expected rejection");
+            assert!(
+                matches!(err, crate::error::VolSurfError::InvalidInput { .. }),
+                "expected InvalidInput, got: {err}"
+            );
+        }
+    }
+
     #[test]
     fn from_per_tenor_rejects_negative_tenor() {
         let original = equity_surface();

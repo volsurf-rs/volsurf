@@ -155,7 +155,7 @@ impl SabrSmile {
         validate_positive(expiry, "expiry")?;
         validate_positive(alpha, "alpha")?;
 
-        validate_in_range(beta, 0.0, 1.0, "beta")?;
+        validate_in_range(beta, 0.0, 1.0, "SABR beta")?;
         validate_open_unit_interval(rho, "rho")?;
 
         validate_non_negative(nu, "nu")?;
@@ -332,7 +332,7 @@ impl SabrSmile {
 
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
-        validate_in_range(beta, 0.0, 1.0, "beta")?;
+        validate_in_range(beta, 0.0, 1.0, "SABR beta")?;
         if market_vols.len() < MIN_POINTS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(

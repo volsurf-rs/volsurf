@@ -83,7 +83,7 @@ impl TryFrom<SmileModelRaw> for SmileModel {
             SmileModelRaw::CubicSpline => Ok(Self::CubicSpline),
             SmileModelRaw::Sabr { beta } => {
                 if !(0.0..=1.0).contains(&beta) {
-                    return Err(format!("beta must be in [0, 1], got {beta}"));
+                    return Err(format!("SABR beta must be in [0, 1], got {beta}"));
                 }
                 Ok(Self::Sabr { beta })
             }
@@ -315,11 +315,14 @@ impl SurfaceBuilder {
     /// persistence is needed.
     ///
     /// # Errors
-    /// Returns [`VolSurfError::InvalidInput`] if tenor data is invalid, or if
-    /// `spot`/`rate` are missing while a tenor still needs its forward derived
-    /// — tenors added via [`add_tenor_with_forward`](Self::add_tenor_with_forward)
-    /// need neither. Returns [`VolSurfError::CalibrationError`] if calibration
-    /// fails for any tenor.
+    /// Returns [`VolSurfError::InvalidInput`] if the calibrator's own
+    /// parameters are invalid — checked before any tenor data, see
+    /// [`SmileCalibrator::validate`](crate::SmileCalibrator::validate) — if
+    /// tenor data is invalid, or if `spot`/`rate` are missing while a tenor
+    /// still needs its forward derived; tenors added via
+    /// [`add_tenor_with_forward`](Self::add_tenor_with_forward) need neither.
+    /// Returns [`VolSurfError::CalibrationError`] if calibration fails for any
+    /// tenor.
     pub fn build(self) -> crate::error::Result<PiecewiseSurface> {
         #[cfg(feature = "logging")]
         tracing::debug!(
