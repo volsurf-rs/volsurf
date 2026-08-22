@@ -60,7 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message rather than the `Display` form, matching the Python bindings: a JS
   caller sees `"tenors must be positive and finite, got tenors[0]=0"`, not
   `"invalid input: tenors must be positive and finite, got tenors[0]=0"`. This
-  applies to every message on those two variants, not just SABR `beta`.
+  applies to every message on those two variants, not just SABR `beta`. All
+  three concrete variants now reach JS as plain strings, so the thrown value no
+  longer encodes which one it was — the Python bindings still distinguish them
+  by exception class (`ValueError` vs `RuntimeError`), and JS has no analogue.
 
 ### Removed
 

@@ -929,6 +929,18 @@ fn convention_error_paths() {
     assert!(forward_price(100.0, 0.05, 0.0, -1.0).is_err());
 }
 
+#[wasm_bindgen_test]
+fn numerical_error_carries_bare_message() {
+    // K/F underflows to zero, so ln(K/F) = -inf: a NumericalError, not InvalidInput.
+    let err = log_moneyness(f64::MIN_POSITIVE, f64::MAX).unwrap_err();
+    let msg = err.as_string().unwrap();
+    // The bare core message, not its `Display` form ("numerical error: ...").
+    assert!(
+        msg.starts_with("log-moneyness overflow"),
+        "unexpected message: {msg}"
+    );
+}
+
 // ── Local vol: Dupire + boundary adapter, reachable from WASM surfaces (PAN-28) ──
 
 // A perfectly flat cubic-spline surface (constant 0.20 vol at every strike and

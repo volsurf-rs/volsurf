@@ -169,6 +169,11 @@ try {
 }
 ```
 
+The thrown value is a plain string carrying the core error message, with no
+variant tag: an invalid-input rejection and a numerical failure are
+indistinguishable to a caller. (The Python bindings do separate them, by
+raising `ValueError` and `RuntimeError` respectively.)
+
 ### Serialization
 
 All model types support JSON round-trip:
