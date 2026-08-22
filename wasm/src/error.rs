@@ -12,6 +12,7 @@ pub(crate) fn to_js_err(e: VolSurfError) -> JsValue {
             Some(rms) => JsValue::from_str(&format!("{model}: {message} (rms={rms:.6})")),
             None => JsValue::from_str(&format!("{model}: {message}")),
         },
+        VolSurfError::NumericalError { message } => JsValue::from_str(&message),
         _ => JsValue::from_str(&format!("{e}")),
     }
 }

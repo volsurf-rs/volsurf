@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SurfaceBuilder::build()`'s min-strikes error names the model by
     `model_name()` — `"(model: SABR)"` — instead of debug-formatting the
     `SmileModel`, so the message no longer carries `beta`.
+- WASM errors from `InvalidInput` and `NumericalError` now carry the bare
+  message rather than the `Display` form, matching the Python bindings: a JS
+  caller sees `"tenors must be positive and finite, got tenors[0]=0"`, not
+  `"invalid input: tenors must be positive and finite, got tenors[0]=0"`. This
+  applies to every message on those two variants, not just SABR `beta`.
 
 ### Removed
 

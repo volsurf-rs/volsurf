@@ -676,7 +676,12 @@ fn model_sabr_rejects_negative_beta() {
 #[wasm_bindgen_test]
 fn model_sabr_rejects_beta_above_one() {
     let mut b = WasmSurfaceBuilder::new();
-    assert!(b.model_sabr(1.1).is_err());
+    let err = b.model_sabr(1.1).unwrap_err();
+    // The bare core message, not its `Display` form — matches the Python binding.
+    assert_eq!(
+        err.as_string().unwrap(),
+        "SABR beta must be in [0, 1], got 1.1"
+    );
 }
 
 #[wasm_bindgen_test]
