@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-22
+
+A major bump for the API contract, not for new capability. Three public items
+changed shape and several calls that used to degrade silently now return an
+error instead (PAN-135).
+
+Migrating:
+
+- `conventions::StickyKind` is gone. Nothing consumed it, so there is no
+  replacement to adopt — remove the import.
+- `NormalImpliedVol::compute` returns `types::NormalVol` rather than `Vol`. Both
+  are tuple newtypes, so `.0` still reaches the `f64`.
+- `ButterflyViolation::magnitude` is a method: `v.magnitude` becomes
+  `v.magnitude()`.
+- Calibrations that relied on a `DataFilter` quietly falling back to the
+  unfiltered data now fail with a `CalibrationError`. Widen the filter, or lower
+  `min_points`, to get the previous fit.
+- Butterfly scans that could not evaluate every grid point returned a clean
+  report; they now return a `NumericalError`. A report means the whole grid was
+  covered.
+
+The Python and WASM bindings keep their existing signatures — both already
+returned bare floats, and both wrappers absorb the `magnitude` change.
+
 ### Removed
 
 - **BREAKING**: `conventions::StickyKind`. The enum had no consumer anywhere in the
@@ -247,7 +271,8 @@ resolve; they remain git-only releases and their contents ship here (PAN-134).
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/volsurf-rs/volsurf/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/volsurf-rs/volsurf/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/volsurf-rs/volsurf/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/volsurf-rs/volsurf/compare/v2.1.0...v2.2.0
