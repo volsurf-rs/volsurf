@@ -253,11 +253,11 @@ mod tests {
     }
 
     #[test]
-    fn in_range_message_matches_historic_beta_format() {
-        let err = validate_in_range(2.0, 0.0, 1.0, "beta").unwrap_err();
+    fn in_range_message_names_the_parameter_and_bounds() {
+        let err = validate_in_range(2.0, 0.0, 1.0, "SABR beta").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "invalid input: beta must be in [0, 1], got 2"
+            "invalid input: SABR beta must be in [0, 1], got 2"
         );
     }
 

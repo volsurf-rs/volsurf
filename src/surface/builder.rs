@@ -82,10 +82,12 @@ impl TryFrom<SmileModelRaw> for SmileModel {
             SmileModelRaw::Svi => Ok(Self::Svi),
             SmileModelRaw::CubicSpline => Ok(Self::CubicSpline),
             SmileModelRaw::Sabr { beta } => {
-                if !(0.0..=1.0).contains(&beta) {
-                    return Err(format!("SABR beta must be in [0, 1], got {beta}"));
-                }
-                Ok(Self::Sabr { beta })
+                let model = Self::Sabr { beta };
+                model.validate().map_err(|e| match e {
+                    VolSurfError::InvalidInput { message } => message,
+                    other => other.to_string(),
+                })?;
+                Ok(model)
             }
         }
     }
@@ -1086,6 +1088,36 @@ mod tests {
             panic!("expected InvalidInput, got {err:?}");
         };
         assert!(message.contains("SABR beta"), "got {message}");
+    }
+
+    /// Every SABR beta check — smile constructor, calibrator, `SmileCalibrator::validate`,
+    /// and the serde path — must produce byte-identical wording.
+    #[test]
+    fn sabr_beta_message_is_identical_across_all_call_sites() {
+        const EXPECTED: &str = "SABR beta must be in [0, 1], got 2";
+
+        let from_new = SabrSmile::new(100.0, 1.0, 0.2, 2.0, -0.3, 0.4).unwrap_err();
+        let from_calibrate = SabrSmile::calibrate_with_config(
+            100.0,
+            1.0,
+            2.0,
+            &[],
+            &DataFilter::default(),
+            &WeightingScheme::default(),
+            None,
+        )
+        .unwrap_err();
+        let from_validate = SmileModel::Sabr { beta: 2.0 }.validate().unwrap_err();
+        let from_serde =
+            serde_json::from_str::<SmileModel>(r#"{"Sabr":{"beta":2.0}}"#).unwrap_err();
+
+        for err in [&from_new, &from_calibrate, &from_validate] {
+            let VolSurfError::InvalidInput { message } = err else {
+                panic!("expected InvalidInput, got {err:?}");
+            };
+            assert_eq!(message, EXPECTED);
+        }
+        assert!(from_serde.to_string().contains(EXPECTED), "{from_serde}");
     }
 
     #[test]

@@ -3,6 +3,7 @@ use wasm_bindgen::JsValue;
 
 pub(crate) fn to_js_err(e: VolSurfError) -> JsValue {
     match e {
+        VolSurfError::InvalidInput { message } => JsValue::from_str(&message),
         VolSurfError::CalibrationError {
             message,
             model,
