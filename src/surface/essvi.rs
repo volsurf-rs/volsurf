@@ -376,14 +376,14 @@ impl EssviSurface {
     /// non-positive values. Returns [`VolSurfError::CalibrationError`] if
     /// any per-tenor SVI calibration fails.
     pub fn fit_per_tenor(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
     ) -> error::Result<Vec<PerTenorFit>> {
         Self::fit_per_tenor_with_config(
-            market_data,
             tenors,
             forwards,
+            market_data,
             DataFilter::default(),
             WeightingScheme::default(),
         )
@@ -395,9 +395,9 @@ impl EssviSurface {
     /// [`DataFilter`] and [`WeightingScheme`] that flow through to
     /// [`SviSmile::calibrate_with_config`](crate::smile::SviSmile::calibrate_with_config).
     pub fn fit_per_tenor_with_config(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
         filter: DataFilter,
         weighting: WeightingScheme,
     ) -> error::Result<Vec<PerTenorFit>> {
@@ -699,31 +699,31 @@ impl EssviSurface {
     ///     .collect();
     ///
     /// let surface = EssviSurface::calibrate(
-    ///     &[data_3m, data_1y],
     ///     &[0.25, 1.0],
     ///     &[100.0, 100.0],
+    ///     &[data_3m, data_1y],
     /// )?;
     /// # Ok::<(), volsurf::VolSurfError>(())
     /// ```
     pub fn calibrate(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
     ) -> error::Result<Self> {
-        let fits = Self::fit_per_tenor(market_data, tenors, forwards)?;
+        let fits = Self::fit_per_tenor(tenors, forwards, market_data)?;
         Self::from_per_tenor(&fits)
     }
 
     /// Calibrate eSSVI surface with configurable per-tenor filtering and weighting.
     pub fn calibrate_with_config(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
         filter: DataFilter,
         weighting: WeightingScheme,
     ) -> error::Result<Self> {
         let fits =
-            Self::fit_per_tenor_with_config(market_data, tenors, forwards, filter, weighting)?;
+            Self::fit_per_tenor_with_config(tenors, forwards, market_data, filter, weighting)?;
         Self::from_per_tenor(&fits)
     }
 
@@ -1965,7 +1965,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let rms = rms_vol_error(&calibrated, &tenors, &market_data);
         assert!(rms < 0.005, "round-trip RMS {rms} should be < 0.005");
     }
@@ -1978,7 +1978,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 10, 75.0, 5.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let rms = rms_vol_error(&calibrated, &tenors, &market_data);
         assert!(
             rms < 0.005,
@@ -2007,7 +2007,7 @@ mod tests {
             .collect();
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let rms = rms_vol_error(&calibrated, &tenors, &market_data);
         assert!(
             rms < 0.005,
@@ -2023,7 +2023,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let c = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let c = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         assert!(c.rho_0().abs() < 1.0, "rho_0 out of range: {}", c.rho_0());
         assert!(c.rho_m().abs() < 1.0, "rho_m out of range: {}", c.rho_m());
         assert!(
@@ -2050,7 +2050,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         for w in calibrated.thetas().windows(2) {
             assert!(
                 w[1] > w[0],
@@ -2069,7 +2069,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let diag = calibrated.diagnostics().unwrap();
         assert!(
             diag.is_free(),
@@ -2085,7 +2085,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let violations = calibrated.calendar_violations_structural();
         assert!(
             violations.is_empty(),
@@ -2102,7 +2102,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let json = serde_json::to_string(&calibrated).unwrap();
         let deserialized: EssviSurface = serde_json::from_str(&json).unwrap();
 
@@ -2133,7 +2133,7 @@ mod tests {
             (105.0, 0.2),
             (110.0, 0.2),
         ]];
-        let result = EssviSurface::calibrate(&data, &[1.0], &[100.0]);
+        let result = EssviSurface::calibrate(&[1.0], &[100.0], &data);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -2161,7 +2161,7 @@ mod tests {
                 (110.0, 0.2),
             ],
         ];
-        let result = EssviSurface::calibrate(&data, &[0.5, 1.0], &[100.0]);
+        let result = EssviSurface::calibrate(&[0.5, 1.0], &[100.0], &data);
         assert!(result.is_err());
     }
 
@@ -2183,7 +2183,7 @@ mod tests {
                 (110.0, 0.2),
             ],
         ];
-        let result = EssviSurface::calibrate(&data, &[0.5, 1.0], &[-100.0, 100.0]);
+        let result = EssviSurface::calibrate(&[0.5, 1.0], &[-100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -2205,7 +2205,7 @@ mod tests {
                 (110.0, 0.2),
             ],
         ];
-        let result = EssviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
+        let result = EssviSurface::calibrate(&[0.0, 1.0], &[100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -2224,7 +2224,7 @@ mod tests {
                 .collect()
         };
         let data = vec![make_smile(100.0, 0.50), make_smile(100.0, 0.20)];
-        let result = EssviSurface::calibrate(&data, &[0.25, 0.50], &[100.0, 100.0]);
+        let result = EssviSurface::calibrate(&[0.25, 0.50], &[100.0, 100.0], &data);
         let err = result.unwrap_err();
         assert!(matches!(err, VolSurfError::CalibrationError { .. }));
         let msg = err.to_string();
@@ -2240,7 +2240,7 @@ mod tests {
             vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
             vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
         ];
-        let result = EssviSurface::calibrate(&data, &[0.5, 1.0], &[100.0, 100.0]);
+        let result = EssviSurface::calibrate(&[0.5, 1.0], &[100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -2275,7 +2275,7 @@ mod tests {
             })
             .collect();
 
-        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let cal = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         let rho_diff = cal.rho_m() - cal.rho_0();
         let a_bound = a_max_eq57(cal.gamma(), rho_diff, cal.rho_m());
@@ -2343,7 +2343,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 25, 70.0, 2.5);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let cal = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         assert!(
             cal.rho_exponent() < 0.5,
@@ -2377,7 +2377,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let cal = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         // Per-tenor SVI rho estimates are noisy, so the reconstructed rho(theta)
         // won't be perfectly flat. But the spread should be small.
@@ -2404,7 +2404,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let cal = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         // rho(theta_max) must equal rho_m: the power law (theta_max/theta_max)^a = 1^a = 1
         assert_abs_diff_eq!(cal.rho_at(cal.theta_max()), cal.rho_m(), epsilon = 1e-14);
@@ -2482,7 +2482,7 @@ mod tests {
         // One-sided data after vol-cliff filter may produce per-tenor SVI fits
         // that violate Roger Lee bound or ATM sanity check. Calibration failure
         // is acceptable for this degenerate input.
-        match EssviSurface::calibrate(&market_data, &tenors, &forwards) {
+        match EssviSurface::calibrate(&tenors, &forwards, &market_data) {
             Ok(surface) => {
                 for (&t, &f) in tenors.iter().zip(forwards.iter()) {
                     let vol = surface.black_vol(Tenor(t), Strike(f)).unwrap().0;
@@ -2515,7 +2515,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
         assert_eq!(fits.len(), 4);
 
         for (i, fit) in fits.iter().enumerate() {
@@ -2544,7 +2544,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
 
         // Drop tenor[1] (0.5y) — middle tenor, keeps monotone thetas
         let pruned: Vec<_> = fits
@@ -2568,8 +2568,8 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let one_shot = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
-        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let one_shot = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
+        let fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
         let two_stage = EssviSurface::from_per_tenor(&fits).unwrap();
 
         // Should be bit-identical since calibrate() delegates
@@ -2595,7 +2595,7 @@ mod tests {
         let forwards = vec![100.0; 4];
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
-        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
 
         let json = serde_json::to_string(&fits[0]).unwrap();
         let deser: PerTenorFit = serde_json::from_str(&json).unwrap();
@@ -2623,7 +2623,7 @@ mod tests {
         let forwards = vec![100.0];
         let strikes = strike_ladder(1, 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
-        let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
         assert!(matches!(
             err,
@@ -2638,7 +2638,7 @@ mod tests {
         let forwards = vec![100.0, 100.0];
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
-        let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let mut fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
 
         // Swap thetas to break monotonicity
         fits[0].theta = fits[1].theta + 0.01;
@@ -2653,7 +2653,7 @@ mod tests {
     #[test]
     fn fit_per_tenor_rejects_length_mismatch() {
         let err =
-            EssviSurface::fit_per_tenor(&[vec![(100.0, 0.2)]], &[0.25, 0.5], &[100.0]).unwrap_err();
+            EssviSurface::fit_per_tenor(&[0.25, 0.5], &[100.0], &[vec![(100.0, 0.2)]]).unwrap_err();
         assert!(matches!(
             err,
             crate::error::VolSurfError::InvalidInput { .. }
@@ -2676,7 +2676,7 @@ mod tests {
             (vec![f64::NAN, 0.5], forwards.clone()),
             (tenors.clone(), vec![100.0, f64::NAN]),
         ] {
-            let err = EssviSurface::fit_per_tenor(&market_data, &bad_tenors, &bad_forwards)
+            let err = EssviSurface::fit_per_tenor(&bad_tenors, &bad_forwards, &market_data)
                 .expect_err("expected rejection");
             assert!(
                 matches!(err, crate::error::VolSurfError::InvalidInput { .. }),
@@ -2692,7 +2692,7 @@ mod tests {
         let forwards = vec![100.0, 100.0];
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
-        let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let mut fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
         fits[0].tenor = -1.0;
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
         assert!(matches!(
@@ -2708,7 +2708,7 @@ mod tests {
         let forwards = vec![100.0, 100.0];
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
-        let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let mut fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
         fits[1].theta = f64::NAN;
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
         assert!(matches!(
@@ -2724,7 +2724,7 @@ mod tests {
         let forwards = vec![100.0, 100.0];
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
-        let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
+        let mut fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
         fits[0].theta = 0.0;
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
         assert!(matches!(

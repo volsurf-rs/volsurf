@@ -133,9 +133,9 @@ fn calibration_benchmarks(c: &mut Criterion) {
     group.bench_function("ssvi_calibration", |b| {
         b.iter(|| {
             SsviSurface::calibrate(
-                black_box(&ssvi_market_data),
                 black_box(&ssvi_tenors),
                 black_box(&ssvi_forwards),
+                black_box(&ssvi_market_data),
             )
             .unwrap()
         });
@@ -176,9 +176,9 @@ fn calibration_benchmarks(c: &mut Criterion) {
     group.bench_function("essvi_calibration", |b| {
         b.iter(|| {
             EssviSurface::calibrate(
-                black_box(&essvi_market_data),
                 black_box(&essvi_tenors),
                 black_box(&essvi_forwards),
+                black_box(&essvi_market_data),
             )
             .unwrap()
         });
@@ -217,9 +217,9 @@ fn calibration_benchmarks(c: &mut Criterion) {
     group.bench_function("essvi_calibration_flat_rho", |b| {
         b.iter(|| {
             EssviSurface::calibrate(
-                black_box(&flat_rho_data),
                 black_box(&essvi_tenors),
                 black_box(&essvi_forwards),
+                black_box(&flat_rho_data),
             )
             .unwrap()
         });

@@ -139,28 +139,28 @@ impl PySsviSurface {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (market_data, tenors, forwards))]
+    #[pyo3(signature = (tenors, forwards, market_data))]
     fn calibrate(
-        market_data: Vec<Vec<(f64, f64)>>,
         tenors: Vec<f64>,
         forwards: Vec<f64>,
+        market_data: Vec<Vec<(f64, f64)>>,
     ) -> PyResult<Self> {
-        let inner = SsviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_py_err)?;
+        let inner = SsviSurface::calibrate(&tenors, &forwards, &market_data).map_err(to_py_err)?;
         Ok(Self { inner })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (market_data, tenors, forwards, filter=None, weighting=None))]
+    #[pyo3(signature = (tenors, forwards, market_data, filter=None, weighting=None))]
     fn calibrate_with_config(
-        market_data: Vec<Vec<(f64, f64)>>,
         tenors: Vec<f64>,
         forwards: Vec<f64>,
+        market_data: Vec<Vec<(f64, f64)>>,
         filter: Option<&crate::types::PyDataFilter>,
         weighting: Option<&crate::types::PyWeightingScheme>,
     ) -> PyResult<Self> {
         let f = filter.map(|f| f.inner).unwrap_or_default();
         let w = weighting.map(|w| w.inner).unwrap_or_default();
-        let inner = SsviSurface::calibrate_with_config(&market_data, &tenors, &forwards, f, w)
+        let inner = SsviSurface::calibrate_with_config(&tenors, &forwards, &market_data, f, w)
             .map_err(to_py_err)?;
         Ok(Self { inner })
     }
@@ -319,41 +319,41 @@ impl PyEssviSurface {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (market_data, tenors, forwards))]
+    #[pyo3(signature = (tenors, forwards, market_data))]
     fn calibrate(
-        market_data: Vec<Vec<(f64, f64)>>,
         tenors: Vec<f64>,
         forwards: Vec<f64>,
+        market_data: Vec<Vec<(f64, f64)>>,
     ) -> PyResult<Self> {
-        let inner = EssviSurface::calibrate(&market_data, &tenors, &forwards).map_err(to_py_err)?;
+        let inner = EssviSurface::calibrate(&tenors, &forwards, &market_data).map_err(to_py_err)?;
         Ok(Self { inner })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (market_data, tenors, forwards, filter=None, weighting=None))]
+    #[pyo3(signature = (tenors, forwards, market_data, filter=None, weighting=None))]
     fn calibrate_with_config(
-        market_data: Vec<Vec<(f64, f64)>>,
         tenors: Vec<f64>,
         forwards: Vec<f64>,
+        market_data: Vec<Vec<(f64, f64)>>,
         filter: Option<&crate::types::PyDataFilter>,
         weighting: Option<&crate::types::PyWeightingScheme>,
     ) -> PyResult<Self> {
         let f = filter.map(|f| f.inner).unwrap_or_default();
         let w = weighting.map(|w| w.inner).unwrap_or_default();
-        let inner = EssviSurface::calibrate_with_config(&market_data, &tenors, &forwards, f, w)
+        let inner = EssviSurface::calibrate_with_config(&tenors, &forwards, &market_data, f, w)
             .map_err(to_py_err)?;
         Ok(Self { inner })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (market_data, tenors, forwards))]
+    #[pyo3(signature = (tenors, forwards, market_data))]
     fn fit_per_tenor(
-        market_data: Vec<Vec<(f64, f64)>>,
         tenors: Vec<f64>,
         forwards: Vec<f64>,
+        market_data: Vec<Vec<(f64, f64)>>,
     ) -> PyResult<Vec<PyPerTenorFit>> {
         let fits =
-            EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).map_err(to_py_err)?;
+            EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).map_err(to_py_err)?;
         Ok(fits
             .into_iter()
             .map(|f| PyPerTenorFit { inner: f })
@@ -361,17 +361,17 @@ impl PyEssviSurface {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (market_data, tenors, forwards, filter=None, weighting=None))]
+    #[pyo3(signature = (tenors, forwards, market_data, filter=None, weighting=None))]
     fn fit_per_tenor_with_config(
-        market_data: Vec<Vec<(f64, f64)>>,
         tenors: Vec<f64>,
         forwards: Vec<f64>,
+        market_data: Vec<Vec<(f64, f64)>>,
         filter: Option<&crate::types::PyDataFilter>,
         weighting: Option<&crate::types::PyWeightingScheme>,
     ) -> PyResult<Vec<PyPerTenorFit>> {
         let f = filter.map(|f| f.inner).unwrap_or_default();
         let w = weighting.map(|w| w.inner).unwrap_or_default();
-        let fits = EssviSurface::fit_per_tenor_with_config(&market_data, &tenors, &forwards, f, w)
+        let fits = EssviSurface::fit_per_tenor_with_config(&tenors, &forwards, &market_data, f, w)
             .map_err(to_py_err)?;
         Ok(fits
             .into_iter()

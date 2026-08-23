@@ -143,9 +143,9 @@ let data_1y: Vec<(f64, f64)> = (0..10)
     .collect();
 
 let surface = EssviSurface::calibrate(
-    &[data_3m, data_1y],
     &[0.25, 1.0],       // tenors
     &[100.0, 100.0],    // forwards
+    &[data_3m, data_1y],
 )?;
 
 let vol = surface.black_vol(Tenor(0.5), Strike(95.0))?;

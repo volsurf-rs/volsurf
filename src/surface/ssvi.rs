@@ -237,9 +237,9 @@ impl SsviSurface {
     /// 2. Global optimization of (η, γ) with ρ fixed from the SVI average
     ///
     /// # Arguments
-    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (min 5 per tenor)
     /// * `tenors` — Expiry times in years (min 2, all positive)
     /// * `forwards` — Forward prices at each tenor (all positive)
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (min 5 per tenor)
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for insufficient or invalid data,
@@ -263,23 +263,23 @@ impl SsviSurface {
     ///     (100.0, 0.20), (105.0, 0.22), (110.0, 0.24), (120.0, 0.28),
     /// ];
     /// let surface = SsviSurface::calibrate(
-    ///     &[data_3m, data_1y],
     ///     &[0.25, 1.0],
     ///     &[100.0, 100.0],
+    ///     &[data_3m, data_1y],
     /// )?;
     /// let vol = surface.black_vol(Tenor(0.5), Strike(100.0))?;
     /// assert!(vol.0 > 0.0);
     /// # Ok::<(), volsurf::VolSurfError>(())
     /// ```
     pub fn calibrate(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
     ) -> error::Result<Self> {
         Self::calibrate_with_config(
-            market_data,
             tenors,
             forwards,
+            market_data,
             DataFilter::default(),
             WeightingScheme::default(),
         )
@@ -287,9 +287,9 @@ impl SsviSurface {
 
     /// Calibrate SSVI surface with configurable per-tenor filtering and weighting.
     pub fn calibrate_with_config(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
         filter: DataFilter,
         weighting: WeightingScheme,
     ) -> error::Result<Self> {
@@ -1289,7 +1289,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         let mut total_rss = 0.0;
         let mut n_points = 0;
@@ -1321,7 +1321,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 10, 75.0, 5.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         let mut total_rss = 0.0;
         let mut n_points = 0;
@@ -1359,7 +1359,7 @@ mod tests {
             .collect();
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         let mut total_rss = 0.0;
         let mut n_points = 0;
@@ -1386,7 +1386,7 @@ mod tests {
             (105.0, 0.2),
             (110.0, 0.2),
         ]];
-        let result = SsviSurface::calibrate(&data, &[1.0], &[100.0]);
+        let result = SsviSurface::calibrate(&[1.0], &[100.0], &data);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -1415,7 +1415,7 @@ mod tests {
             ],
         ];
         // tenors has 2 but forwards has 1
-        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[100.0]);
+        let result = SsviSurface::calibrate(&[0.5, 1.0], &[100.0], &data);
         assert!(result.is_err());
     }
 
@@ -1437,7 +1437,7 @@ mod tests {
                 (110.0, 0.2),
             ],
         ];
-        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[-100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.5, 1.0], &[-100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -1459,7 +1459,7 @@ mod tests {
                 (110.0, 0.2),
             ],
         ];
-        let result = SsviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.0, 1.0], &[100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -1486,7 +1486,7 @@ mod tests {
         let market_data = vec![short_tenor_data, long_tenor_data];
         let tenors = vec![0.25, 1.0];
         let forwards = vec![100.0, 100.0];
-        let result = SsviSurface::calibrate(&market_data, &tenors, &forwards);
+        let result = SsviSurface::calibrate(&tenors, &forwards, &market_data);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -1513,7 +1513,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         assert!(calibrated.rho().abs() < 1.0, "rho out of range");
         assert!(calibrated.eta() > 0.0, "eta must be positive");
         assert!(
@@ -1534,7 +1534,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let diag = calibrated.diagnostics().unwrap();
         assert!(
             diag.is_free(),
@@ -1551,7 +1551,7 @@ mod tests {
         let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let thetas = calibrated.thetas();
         for w in thetas.windows(2) {
             assert!(
@@ -1581,7 +1581,7 @@ mod tests {
             make_smile(100.0, 0.50), // short tenor: very high vol (earnings)
             make_smile(100.0, 0.20), // long tenor: normal vol
         ];
-        let result = SsviSurface::calibrate(&data, &[0.25, 0.50], &[100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.25, 0.50], &[100.0, 100.0], &data);
         let err = result.unwrap_err();
         assert!(matches!(err, VolSurfError::CalibrationError { .. }));
         let msg = err.to_string();
@@ -1598,7 +1598,7 @@ mod tests {
             vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
             vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
         ];
-        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.5, 1.0], &[100.0, 100.0], &data);
         assert!(result.is_err());
     }
 

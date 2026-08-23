@@ -456,7 +456,7 @@ fn calibrate_round_trip_paper_params() {
         })
         .collect();
 
-    let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+    let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
     let mut total_rss = 0.0;
     let mut n = 0;
@@ -493,7 +493,7 @@ fn calibrate_paper_structural_check() {
         })
         .collect();
 
-    let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+    let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
     let violations = calibrated.calendar_violations_structural();
     assert!(
         violations.is_empty(),

@@ -104,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Result<_, _>>()?;
 
     // Stage 1: fit SVI per tenor
-    let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards)?;
+    let fits = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data)?;
 
     println!("Per-tenor SVI fits:");
     for fit in &fits {
@@ -150,7 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n--- One-shot calibrate ---\n");
 
-    let oneshot = EssviSurface::calibrate(&market_data, &tenors, &forwards)?;
+    let oneshot = EssviSurface::calibrate(&tenors, &forwards, &market_data)?;
     println!(
         "One-shot: rho_0={:.4}, rho_m={:.4}, a={:.4}, eta={:.4}, gamma={:.4}",
         oneshot.rho_0(),

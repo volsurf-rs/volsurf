@@ -291,25 +291,25 @@ class TestSsviSurfaceCalibrate:
 
     def test_calibrate(self):
         s = SsviSurface.calibrate(
-            [self.MARKET_3M, self.MARKET_1Y],
             [0.25, 1.0],
             [100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y],
         )
         v = s.black_vol(0.5, 100.0)
         assert v > 0 and math.isfinite(v)
 
     def test_calibrate_atm_roundtrip(self):
         s = SsviSurface.calibrate(
-            [self.MARKET_3M, self.MARKET_1Y],
             [0.25, 1.0],
             [100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y],
         )
         atm_1y = s.black_vol(1.0, 100.0)
         assert abs(atm_1y - 0.20) < 0.02
 
     def test_calibrate_insufficient_tenors(self):
         with pytest.raises(ValueError):
-            SsviSurface.calibrate([self.MARKET_3M], [0.25], [100.0])
+            SsviSurface.calibrate([0.25], [100.0], [self.MARKET_3M])
 
 
 class TestEssviSurfaceCalibrate:
@@ -324,25 +324,25 @@ class TestEssviSurfaceCalibrate:
 
     def test_calibrate(self):
         s = EssviSurface.calibrate(
-            [self.MARKET_3M, self.MARKET_1Y],
             [0.25, 1.0],
             [100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y],
         )
         v = s.black_vol(0.5, 100.0)
         assert v > 0 and math.isfinite(v)
 
     def test_calibrate_atm_roundtrip(self):
         s = EssviSurface.calibrate(
-            [self.MARKET_3M, self.MARKET_1Y],
             [0.25, 1.0],
             [100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y],
         )
         atm_1y = s.black_vol(1.0, 100.0)
         assert abs(atm_1y - 0.20) < 0.02
 
     def test_calibrate_insufficient_tenors(self):
         with pytest.raises(ValueError):
-            EssviSurface.calibrate([self.MARKET_3M], [0.25], [100.0])
+            EssviSurface.calibrate([0.25], [100.0], [self.MARKET_3M])
 
 
 class TestEssviSurface:
@@ -350,7 +350,7 @@ class TestEssviSurface:
         s = EssviSurface(**ESSVI_EQUITY)
         assert s.rho_0 == -0.4
         assert s.rho_m == -0.2
-        assert s.a == 0.5
+        assert s.rho_exponent == 0.5
 
     def test_black_vol_atm(self):
         s = EssviSurface(**ESSVI_EQUITY)
@@ -464,9 +464,9 @@ class TestEssviTwoStageApi:
 
     def test_fit_per_tenor(self):
         fits = EssviSurface.fit_per_tenor(
-            [self.MARKET_3M, self.MARKET_1Y],
             [0.25, 1.0],
             [100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y],
         )
         assert len(fits) == 2
         assert isinstance(fits[0], PerTenorFit)
@@ -479,9 +479,9 @@ class TestEssviTwoStageApi:
 
     def test_from_per_tenor(self):
         fits = EssviSurface.fit_per_tenor(
-            [self.MARKET_3M, self.MARKET_1Y],
             [0.25, 1.0],
             [100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y],
         )
         surface = EssviSurface.from_per_tenor(fits)
         v = surface.black_vol(0.5, 100.0)
@@ -493,9 +493,9 @@ class TestEssviTwoStageApi:
             (100.0, 0.19), (105.0, 0.21), (110.0, 0.23), (120.0, 0.27),
         ]
         fits = EssviSurface.fit_per_tenor(
-            [self.MARKET_3M, self.MARKET_1Y, market_2y],
             [0.25, 1.0, 2.0],
             [100.0, 100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y, market_2y],
         )
         assert len(fits) == 3
         # Drop middle tenor and rebuild
@@ -506,9 +506,9 @@ class TestEssviTwoStageApi:
 
     def test_per_tenor_fit_svi_getter(self):
         fits = EssviSurface.fit_per_tenor(
-            [self.MARKET_3M, self.MARKET_1Y],
             [0.25, 1.0],
             [100.0, 100.0],
+            [self.MARKET_3M, self.MARKET_1Y],
         )
         svi = fits[0].svi
         assert svi.forward == 100.0
@@ -523,7 +523,7 @@ class TestEssviTwoStageApi:
     def test_fit_per_tenor_rejects_length_mismatch(self):
         with pytest.raises((ValueError, RuntimeError)):
             EssviSurface.fit_per_tenor(
-                [self.MARKET_3M],
                 [0.25, 1.0],
                 [100.0],
+                [self.MARKET_3M],
             )

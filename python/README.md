@@ -91,14 +91,14 @@ ssvi = SsviSurface(
 )
 
 essvi = EssviSurface.calibrate(
-    [market_3m, market_1y],   # per-tenor [(strike, vol), ...]
     [0.25, 1.0],              # tenors
     [100.0, 100.0],           # forwards
+    [market_3m, market_1y],   # per-tenor [(strike, vol), ...]
 )
 ```
 
 To see how well each tenor fit, run the first stage on its own.
-`EssviSurface.fit_per_tenor(market_data, tenors, forwards)` returns a list of
+`EssviSurface.fit_per_tenor(tenors, forwards, market_data)` returns a list of
 `PerTenorFit` — each with `rms_error`, `theta`, and the fitted `svi` slice — and
 `EssviSurface.from_per_tenor(fits)` turns that list into the surface.
 
