@@ -73,6 +73,7 @@ sabr = SabrSmile(100.0, 1.0, 0.20, 0.5, -0.3, 0.4)     # forward, expiry, alpha,
 
 market = [(80.0, 0.28), (90.0, 0.24), (100.0, 0.20), (110.0, 0.24), (120.0, 0.28)]
 fitted = SviSmile.calibrate(100.0, 1.0, market)
+spline = SplineSmile.calibrate(100.0, 1.0, market)  # interpolates, so no two quotes may share a strike
 ```
 
 ## Global surfaces

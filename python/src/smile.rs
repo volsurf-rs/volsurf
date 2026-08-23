@@ -222,6 +222,20 @@ impl PySplineSmile {
         let inner = SplineSmile::calibrate(forward, expiry, &market_vols).map_err(to_py_err)?;
         Ok(Self { inner })
     }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, market_vols, filter=None))]
+    fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        market_vols: Vec<(f64, f64)>,
+        filter: Option<&crate::types::PyDataFilter>,
+    ) -> PyResult<Self> {
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let inner = SplineSmile::calibrate_with_config(forward, expiry, &market_vols, f)
+            .map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
 }
 
 impl_smile_methods!(PySplineSmile);

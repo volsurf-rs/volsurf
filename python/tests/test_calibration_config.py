@@ -7,6 +7,7 @@ from volsurf import (
     SurfaceBuilder,
     SviSmile,
     SabrSmile,
+    SplineSmile,
 )
 
 
@@ -119,6 +120,26 @@ class TestSabrCalibrateWithConfig:
             100.0, 0.5, 0.5, market, weighting=WeightingScheme.vega()
         )
         assert result.vol(100.0) > 0
+
+
+class TestSplineCalibrateWithConfig:
+    def _market_data(self):
+        return [(60.0, 0.30), (80.0, 0.24), (100.0, 0.20), (120.0, 0.24), (170.0, 0.30)]
+
+    def test_defaults_match_calibrate(self):
+        market = self._market_data()
+        a = SplineSmile.calibrate(100.0, 1.0, market)
+        b = SplineSmile.calibrate_with_config(100.0, 1.0, market)
+        assert abs(a.vol(100.0) - b.vol(100.0)) < 1e-12
+
+    def test_filter_drops_the_wings(self):
+        market = self._market_data()
+        f = DataFilter(max_log_moneyness=0.3)
+        filtered = SplineSmile.calibrate_with_config(100.0, 1.0, market, filter=f)
+        # 60 and 170 are outside the band, so the fit flat-extrapolates to them
+        # instead of interpolating the 0.30 quoted there.
+        assert abs(filtered.vol(170.0) - 0.24) < 1e-12
+        assert abs(SplineSmile.calibrate(100.0, 1.0, market).vol(170.0) - 0.30) < 1e-12
 
 
 class TestSurfaceBuilderConfig:

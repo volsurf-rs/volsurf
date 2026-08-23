@@ -187,8 +187,10 @@ impl SplineSmile {
     /// if fewer than 3 quotes are supplied, or if two surviving quotes share a
     /// strike — a spline interpolates, so unlike SVI and SABR it cannot absorb
     /// a repeated strike (a call and a put on the same strike) into a
-    /// least-squares fit. Returns [`VolSurfError::CalibrationError`] if
-    /// `filter` leaves fewer than 3 quotes.
+    /// least-squares fit; the message names the shared strike, since quotes are
+    /// sorted before fitting and an input position would not survive the sort.
+    /// Returns [`VolSurfError::CalibrationError`] if `filter` leaves fewer than
+    /// 3 quotes.
     pub fn calibrate_with_config(
         forward: f64,
         expiry: f64,
@@ -216,6 +218,13 @@ impl SplineSmile {
             .map(|&(strike, vol)| (strike, vol * vol * expiry))
             .collect();
         pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // `new` reports duplicates by position, which after this sort no longer
+        // matches anything the caller passed in. Name the strike instead.
+        if let Some(w) = pairs.windows(2).find(|w| w[1].0 <= w[0].0) {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("two quotes share strike {}", w[0].0),
+            });
+        }
         let (strikes, variances) = pairs.into_iter().unzip();
         Self::new(forward, expiry, strikes, variances)
     }
@@ -441,6 +450,18 @@ mod tests {
             SplineSmile::calibrate(100.0, 1.0, &quotes),
             Err(VolSurfError::InvalidInput { .. })
         ));
+    }
+
+    /// Quotes are sorted before fitting, so a positional message would point at
+    /// whatever landed next to the duplicate rather than at what was passed.
+    #[test]
+    fn duplicate_strike_error_names_the_strike() {
+        let quotes = [(110.0, 0.24), (100.0, 0.20), (90.0, 0.24), (100.0, 0.21)];
+        let err = SplineSmile::calibrate(100.0, 1.0, &quotes).unwrap_err();
+        let VolSurfError::InvalidInput { message } = &err else {
+            panic!("expected InvalidInput, got {err}");
+        };
+        assert!(message.contains("share strike 100"), "{message}");
     }
 
     #[test]

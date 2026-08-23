@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(strike, vol)` quotes like SVI and SABR do. `new()` takes sorted strikes and
   total variances, and every caller was writing that conversion itself.
   `calibrate_with_config` takes no `WeightingScheme`: a spline passes through
-  every surviving quote, so no residual bears a weight.
+  every surviving quote, so no residual bears a weight. Both reach the Python
+  bindings as `SplineSmile.calibrate` and `SplineSmile.calibrate_with_config`;
+  WASM exposes no spline smile type, so there is no JS counterpart.
 - Accessors for parameters that could previously only be read back through
   serde: `SviSmile::a/b/m/sigma` and `SplineSmile::strikes/variances`.
 - `VolSurface::forward(expiry)` — reads the forward directly instead of
