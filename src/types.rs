@@ -5,13 +5,18 @@
 //!
 //! # Newtype Strategy
 //!
-//! **Both inputs and outputs use newtypes.** [`Vol`], [`NormalVol`] and
-//! [`Variance`] wrap return values so callers can't accidentally mix a Black
-//! volatility with a Bachelier one, or either with a variance.
-//! [`Strike`] and [`Tenor`] wrap inputs to prevent parameter swapping — e.g.,
-//! `black_vol(Tenor(0.5), Strike(100.0))` cannot be accidentally transposed.
-//! The ceremony of `Strike(100.0)` is a small cost for compile-time safety
-//! at the API boundary.
+//! Newtypes guard the two places a mistake is silent. [`Vol`], [`NormalVol`]
+//! and [`DisplacedVol`] separate the three volatility units, so a Bachelier
+//! vol of 20.0 cannot reach a function expecting a Black vol of 0.20 — they
+//! are used for both the vol a query returns and the vol a pricing function
+//! takes. [`Variance`] likewise keeps σ²T apart from σ. [`Strike`] and
+//! [`Tenor`] wrap the query arguments that share a type and could be
+//! transposed — `black_vol(Tenor(0.5), Strike(100.0))` reads in one order only.
+//!
+//! Model parameters stay bare `f64`. `SviSmile::new(forward, expiry, a, b, …)`
+//! and the calibration entry points name their arguments in the doc comment
+//! rather than in the type system: those are per-model quantities with no
+//! shared unit to protect.
 //!
 //! # Why no `Eq` or `Ord`?
 //! These types wrap `f64`, which does not implement `Eq` or `Ord` because `NaN`
@@ -89,6 +94,21 @@ pub struct Vol(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct NormalVol(pub f64);
 
+/// Displaced diffusion volatility `σ`, the vol parameter of the β-blend model.
+///
+/// Neither a [`Vol`] nor a [`NormalVol`] except at the endpoints: at β = 1 it
+/// equals Black implied vol, and at β = 0 the equivalent normal vol is `σ · F`.
+/// In between it is its own unit, meaningful only alongside the β it was
+/// extracted with.
+///
+/// # Examples
+/// ```
+/// use volsurf::types::DisplacedVol;
+/// let vol = DisplacedVol(0.20);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct DisplacedVol(pub f64);
+
 /// Total variance `σ²T` or instantaneous variance `σ²`.
 ///
 /// Variance is the square of volatility. Cross-tenor interpolation is performed
@@ -126,7 +146,7 @@ macro_rules! impl_numeric_display {
     };
 }
 
-impl_numeric_display!(Strike, Tenor, Vol, NormalVol, Variance);
+impl_numeric_display!(Strike, Tenor, Vol, NormalVol, DisplacedVol, Variance);
 
 impl fmt::Display for OptionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -172,6 +192,14 @@ mod tests {
         let v = NormalVol(20.0);
         let json = serde_json::to_string(&v).unwrap();
         let v2: NormalVol = serde_json::from_str(&json).unwrap();
+        assert_eq!(v, v2);
+    }
+
+    #[test]
+    fn displaced_vol_serde_round_trip() {
+        let v = DisplacedVol(0.20);
+        let json = serde_json::to_string(&v).unwrap();
+        let v2: DisplacedVol = serde_json::from_str(&json).unwrap();
         assert_eq!(v, v2);
     }
 

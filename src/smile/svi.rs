@@ -1201,9 +1201,9 @@ mod tests {
             let vol_m = smile.vol(Strike(strike - h)).unwrap().0;
             let vol_0 = smile.vol(Strike(strike)).unwrap().0;
             let vol_p = smile.vol(Strike(strike + h)).unwrap().0;
-            let c_m = black_price(f, strike - h, vol_m, t, OptionType::Call).unwrap();
-            let c_0 = black_price(f, strike, vol_0, t, OptionType::Call).unwrap();
-            let c_p = black_price(f, strike + h, vol_p, t, OptionType::Call).unwrap();
+            let c_m = black_price(f, strike - h, Vol(vol_m), t, OptionType::Call).unwrap();
+            let c_0 = black_price(f, strike, Vol(vol_0), t, OptionType::Call).unwrap();
+            let c_p = black_price(f, strike + h, Vol(vol_p), t, OptionType::Call).unwrap();
             let numerical = (c_p - 2.0 * c_0 + c_m) / (h * h);
             let analytical = smile.density(Strike(strike)).unwrap();
             assert_abs_diff_eq!(analytical, numerical, epsilon = 1e-4);

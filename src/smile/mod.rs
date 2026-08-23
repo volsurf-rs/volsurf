@@ -152,27 +152,15 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
         let v_mid = self.vol(strike)?;
         let v_hi = self.vol(Strike(k_hi))?;
 
-        let c_lo = black_price(
-            self.forward(),
-            k_lo,
-            v_lo.0,
-            self.expiry(),
-            OptionType::Call,
-        )?;
+        let c_lo = black_price(self.forward(), k_lo, v_lo, self.expiry(), OptionType::Call)?;
         let c_mid = black_price(
             self.forward(),
             strike.0,
-            v_mid.0,
+            v_mid,
             self.expiry(),
             OptionType::Call,
         )?;
-        let c_hi = black_price(
-            self.forward(),
-            k_hi,
-            v_hi.0,
-            self.expiry(),
-            OptionType::Call,
-        )?;
+        let c_hi = black_price(self.forward(), k_hi, v_hi, self.expiry(), OptionType::Call)?;
 
         // Breeden-Litzenberger: q(K) = d²C/dK² (undiscounted)
         Ok((c_lo - 2.0 * c_mid + c_hi) / (h * h))

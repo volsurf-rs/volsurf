@@ -15,10 +15,12 @@
 //!
 //! ## Design
 //!
-//! - **Newtypes for inputs and outputs.** [`Vol`], [`NormalVol`], [`Variance`]
-//!   wrap return values to prevent accidental mixing. [`Strike`], [`Tenor`] wrap inputs
-//!   for compile-time parameter-swap safety — e.g.,
-//!   `black_vol(Tenor(0.5), Strike(100.0))` cannot be transposed.
+//! - **Newtypes for vol units and query arguments.** [`Vol`], [`NormalVol`],
+//!   [`DisplacedVol`] and [`Variance`] keep the quoting conventions apart on
+//!   both sides of a call — [`black_price`](implied::black_price) takes the
+//!   same [`Vol`] that [`BlackImpliedVol`](implied::BlackImpliedVol) returns.
+//!   [`Strike`] and [`Tenor`] wrap the query arguments that could be
+//!   transposed — `black_vol(Tenor(0.5), Strike(100.0))` reads one way only.
 //! - **No panics.** Every fallible operation returns [`Result`]. Library code
 //!   never calls `unwrap()` or `expect()`.
 //! - **Immutable surfaces.** Once constructed, a surface cannot be modified.
@@ -54,4 +56,4 @@ pub use smile::{ArbitrageScanConfig, SmileCalibrator, SmileSection};
 #[doc(inline)]
 pub use surface::VolSurface;
 #[doc(inline)]
-pub use types::{NormalVol, OptionType, Strike, Tenor, Variance, Vol};
+pub use types::{DisplacedVol, NormalVol, OptionType, Strike, Tenor, Variance, Vol};

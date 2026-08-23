@@ -94,16 +94,16 @@ impl NormalImpliedVol {
 pub fn normal_price(
     forward: f64,
     strike: f64,
-    vol: f64,
+    vol: NormalVol,
     expiry: f64,
     option_type: OptionType,
 ) -> crate::error::Result<f64> {
-    validate_pricing_inputs(forward, strike, vol, expiry, PriceDomain::Finite)?;
+    validate_pricing_inputs(forward, strike, vol.0, expiry, PriceDomain::Finite)?;
 
     let price = PriceBachelier::builder()
         .forward(forward)
         .strike(strike)
-        .volatility(vol)
+        .volatility(vol.0)
         .expiry(expiry)
         .is_call(is_call(option_type))
         .build();
@@ -122,38 +122,38 @@ mod tests {
     #[test]
     fn normal_price_put_call_parity() {
         let (f, k, sigma, t) = (100.0, 110.0, 20.0, 1.0);
-        let call = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
-        let put = normal_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let call = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
+        let put = normal_price(f, k, NormalVol(sigma), t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(call - put, f - k, epsilon = 1e-10);
     }
 
     #[test]
     fn normal_price_zero_vol_itm_call() {
-        let price = normal_price(100.0, 80.0, 0.0, 1.0, OptionType::Call).unwrap();
+        let price = normal_price(100.0, 80.0, NormalVol(0.0), 1.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
     #[test]
     fn normal_price_zero_vol_otm_call() {
-        let price = normal_price(100.0, 120.0, 0.0, 1.0, OptionType::Call).unwrap();
+        let price = normal_price(100.0, 120.0, NormalVol(0.0), 1.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
     }
 
     #[test]
     fn normal_price_zero_vol_itm_put() {
-        let price = normal_price(100.0, 120.0, 0.0, 1.0, OptionType::Put).unwrap();
+        let price = normal_price(100.0, 120.0, NormalVol(0.0), 1.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
     #[test]
     fn normal_price_zero_vol_otm_put() {
-        let price = normal_price(100.0, 80.0, 0.0, 1.0, OptionType::Put).unwrap();
+        let price = normal_price(100.0, 80.0, NormalVol(0.0), 1.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
     }
 
     #[test]
     fn normal_price_zero_expiry() {
-        let price = normal_price(100.0, 80.0, 20.0, 0.0, OptionType::Call).unwrap();
+        let price = normal_price(100.0, 80.0, NormalVol(20.0), 0.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
@@ -161,121 +161,121 @@ mod tests {
     fn normal_price_atm_call() {
         // ATM Bachelier: C = σ√T / √(2π)
         let (f, k, sigma, t) = (100.0, 100.0, 20.0, 1.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let expected = sigma * t.sqrt() / (2.0 * std::f64::consts::PI).sqrt();
         assert_abs_diff_eq!(price, expected, epsilon = 1e-12);
     }
 
     #[test]
     fn normal_price_rejects_negative_vol() {
-        let result = normal_price(100.0, 100.0, -1.0, 1.0, OptionType::Call);
+        let result = normal_price(100.0, 100.0, NormalVol(-1.0), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn normal_price_rejects_negative_expiry() {
-        let result = normal_price(100.0, 100.0, 20.0, -1.0, OptionType::Call);
+        let result = normal_price(100.0, 100.0, NormalVol(20.0), -1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn normal_price_rejects_nan_forward() {
-        let result = normal_price(f64::NAN, 100.0, 20.0, 1.0, OptionType::Call);
+        let result = normal_price(f64::NAN, 100.0, NormalVol(20.0), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn normal_price_rejects_inf_strike() {
-        let result = normal_price(100.0, f64::INFINITY, 20.0, 1.0, OptionType::Call);
+        let result = normal_price(100.0, f64::INFINITY, NormalVol(20.0), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn normal_price_negative_forward() {
         // Normal model supports negative forwards (rates markets)
-        let call = normal_price(-1.0, -0.5, 0.5, 1.0, OptionType::Call).unwrap();
-        let put = normal_price(-1.0, -0.5, 0.5, 1.0, OptionType::Put).unwrap();
+        let call = normal_price(-1.0, -0.5, NormalVol(0.5), 1.0, OptionType::Call).unwrap();
+        let put = normal_price(-1.0, -0.5, NormalVol(0.5), 1.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(call - put, -1.0 - (-0.5), epsilon = 1e-10);
     }
 
     #[test]
     fn round_trip_atm_call() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 20.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_atm_put() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 20.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Put).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Put).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_itm_call() {
         let (f, k, t, sigma) = (100.0, 80.0, 1.0, 15.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_otm_call() {
         let (f, k, t, sigma) = (100.0, 120.0, 1.0, 25.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_itm_put() {
         let (f, k, t, sigma) = (100.0, 120.0, 1.0, 25.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Put).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Put).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_otm_put() {
         let (f, k, t, sigma) = (100.0, 80.0, 1.0, 15.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Put).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Put).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_short_expiry() {
         let (f, k, t, sigma) = (100.0, 100.0, 0.01, 20.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_long_expiry() {
         let (f, k, t, sigma) = (100.0, 100.0, 10.0, 20.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_high_vol() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 80.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
@@ -283,19 +283,19 @@ mod tests {
     fn round_trip_negative_forward() {
         // Normal model supports negative forwards (rates markets)
         let (f, k, t, sigma) = (-0.5, -0.3, 1.0, 0.5);
-        let price = normal_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Put).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Put).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_deep_otm_call() {
         let (f, k, t, sigma) = (100.0, 160.0, 1.0, 20.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         assert!(price > 0.0, "deep OTM normal price should be positive");
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
@@ -360,7 +360,7 @@ mod tests {
     fn round_trip_deep_otm_underflow() {
         // d = (100-900)/20 = -40, beyond paper's -38.278 double precision limit
         let (f, k, t, sigma) = (100.0, 900.0, 1.0, 20.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         assert!(price < 1e-100, "deep OTM should underflow to near zero");
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(iv.0, 0.0, epsilon = 1e-6);
@@ -371,17 +371,17 @@ mod tests {
         // d = (100-100.5)/0.01 = -50, past paper's -38.278 double precision limit.
         // Price underflows — verify self-consistent round-trip, not sigma recovery.
         let (f, k, t, sigma) = (100.0, 100.5, 1.0, 0.01);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_large_negative_rates() {
         let (f, k, t, sigma) = (-5.0, -3.0, 2.0, 2.0);
-        let call = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
-        let put = normal_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let call = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
+        let put = normal_price(f, k, NormalVol(sigma), t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(call - put, f - k, epsilon = 1e-10);
 
         let iv_call = NormalImpliedVol::compute(call, f, k, t, OptionType::Call).unwrap();
@@ -394,10 +394,10 @@ mod tests {
     fn round_trip_very_high_vol() {
         // Normal model has no upper price bound (unlike Black)
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 1000.0);
-        let price = normal_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = normal_price(f, k, NormalVol(sigma), t, OptionType::Call).unwrap();
         assert!(price > 100.0, "very high vol should give very large price");
         let iv = NormalImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = normal_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = normal_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-8);
     }
 

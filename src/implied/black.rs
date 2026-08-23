@@ -68,16 +68,16 @@ impl BlackImpliedVol {
 pub fn black_price(
     forward: f64,
     strike: f64,
-    vol: f64,
+    vol: Vol,
     expiry: f64,
     option_type: OptionType,
 ) -> crate::error::Result<f64> {
-    validate_pricing_inputs(forward, strike, vol, expiry, PriceDomain::Positive)?;
+    validate_pricing_inputs(forward, strike, vol.0, expiry, PriceDomain::Positive)?;
 
     let price = PriceBlackScholes::builder()
         .forward(forward)
         .strike(strike)
-        .volatility(vol)
+        .volatility(vol.0)
         .expiry(expiry)
         .is_call(is_call(option_type))
         .build();
@@ -96,99 +96,99 @@ mod tests {
     #[test]
     fn round_trip_atm_call() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_atm_put() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
-        let price = black_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Put).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Put).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_itm_call() {
         let (f, k, t, sigma) = (100.0, 80.0, 1.0, 0.25);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_otm_call() {
         let (f, k, t, sigma) = (100.0, 120.0, 1.0, 0.30);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_deep_otm_call() {
         let (f, k, t, sigma) = (100.0, 200.0, 1.0, 0.20);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         assert!(price > 0.0, "deep OTM price should be positive");
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_high_vol() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 1.0);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_short_expiry() {
         let (f, k, t, sigma) = (100.0, 100.0, 0.01, 0.20);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_long_expiry() {
         let (f, k, t, sigma) = (100.0, 100.0, 10.0, 0.20);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_otm_put() {
         let (f, k, t, sigma) = (100.0, 80.0, 1.0, 0.25);
-        let price = black_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Put).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Put).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn round_trip_itm_put() {
         let (f, k, t, sigma) = (100.0, 120.0, 1.0, 0.30);
-        let price = black_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Put).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Put).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
     #[test]
     fn black_price_call_put_parity() {
         let (f, k, t, sigma) = (100.0, 110.0, 1.0, 0.25);
-        let call = black_price(f, k, sigma, t, OptionType::Call).unwrap();
-        let put = black_price(f, k, sigma, t, OptionType::Put).unwrap();
+        let call = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
+        let put = black_price(f, k, Vol(sigma), t, OptionType::Put).unwrap();
         // Call - Put = Forward - Strike (undiscounted put-call parity)
         assert_abs_diff_eq!(call - put, f - k, epsilon = 1e-10);
     }
@@ -196,21 +196,21 @@ mod tests {
     #[test]
     fn black_price_zero_vol_call() {
         // Zero vol: call = max(F - K, 0)
-        let price = black_price(100.0, 80.0, 0.0, 1.0, OptionType::Call).unwrap();
+        let price = black_price(100.0, 80.0, Vol(0.0), 1.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
     #[test]
     fn black_price_zero_vol_otm_call() {
         // Zero vol, OTM call: max(F - K, 0) = 0
-        let price = black_price(100.0, 120.0, 0.0, 1.0, OptionType::Call).unwrap();
+        let price = black_price(100.0, 120.0, Vol(0.0), 1.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
     }
 
     #[test]
     fn black_price_zero_expiry() {
         // Zero expiry: intrinsic value
-        let price = black_price(100.0, 80.0, 0.20, 0.0, OptionType::Call).unwrap();
+        let price = black_price(100.0, 80.0, Vol(0.20), 0.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
@@ -271,19 +271,19 @@ mod tests {
 
     #[test]
     fn black_price_rejects_negative_vol() {
-        let result = black_price(100.0, 100.0, -0.1, 1.0, OptionType::Call);
+        let result = black_price(100.0, 100.0, Vol(-0.1), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn black_price_rejects_negative_expiry() {
-        let result = black_price(100.0, 100.0, 0.2, -1.0, OptionType::Call);
+        let result = black_price(100.0, 100.0, Vol(0.2), -1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn black_price_rejects_zero_forward() {
-        let result = black_price(0.0, 100.0, 0.2, 1.0, OptionType::Call);
+        let result = black_price(0.0, 100.0, Vol(0.2), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -292,13 +292,13 @@ mod tests {
     #[test]
     fn black_price_rejects_zero_strike() {
         // Zero strike is rejected by validate_positive, regardless of vol
-        let result = black_price(100.0, 0.0, 0.0, 1.0, OptionType::Call);
+        let result = black_price(100.0, 0.0, Vol(0.0), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn black_price_rejects_zero_strike_with_zero_vol() {
-        let result = black_price(100.0, 0.0, 0.0, 1.0, OptionType::Put);
+        let result = black_price(100.0, 0.0, Vol(0.0), 1.0, OptionType::Put);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -318,34 +318,34 @@ mod tests {
 
     #[test]
     fn black_price_rejects_infinite_strike() {
-        let result = black_price(100.0, f64::INFINITY, 0.2, 1.0, OptionType::Call);
+        let result = black_price(100.0, f64::INFINITY, Vol(0.2), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn black_price_rejects_nan_strike() {
-        let result = black_price(100.0, f64::NAN, 0.2, 1.0, OptionType::Call);
+        let result = black_price(100.0, f64::NAN, Vol(0.2), 1.0, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn black_price_zero_vol_itm_put() {
         // ITM put: K > F, intrinsic = max(K-F, 0) = 20.0
-        let price = black_price(100.0, 120.0, 0.0, 1.0, OptionType::Put).unwrap();
+        let price = black_price(100.0, 120.0, Vol(0.0), 1.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
     #[test]
     fn black_price_zero_vol_otm_put() {
         // OTM put: K < F, intrinsic = max(K-F, 0) = 0.0
-        let price = black_price(100.0, 80.0, 0.0, 1.0, OptionType::Put).unwrap();
+        let price = black_price(100.0, 80.0, Vol(0.0), 1.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
     }
 
     #[test]
     fn black_price_zero_vol_atm_put() {
         // ATM put: K = F, intrinsic = 0
-        let price = black_price(100.0, 100.0, 0.0, 1.0, OptionType::Put).unwrap();
+        let price = black_price(100.0, 100.0, Vol(0.0), 1.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, 0.0, epsilon = 1e-12);
     }
 
@@ -367,7 +367,7 @@ mod tests {
         assert!(iv.0.is_finite(), "IV should be finite");
 
         // Round-trip: reprice with extracted IV should match original price
-        let reprice = black_price(forward, strike, iv.0, expiry, OptionType::Call).unwrap();
+        let reprice = black_price(forward, strike, iv, expiry, OptionType::Call).unwrap();
         assert_abs_diff_eq!(reprice, price, epsilon = 1e-8);
     }
 
@@ -375,10 +375,10 @@ mod tests {
     fn round_trip_extreme_otm_call() {
         // |x| = ln(10) ≈ 2.3 with high vol to keep price above zero
         let (f, k, t, sigma) = (100.0, 1000.0, 1.0, 0.80);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         assert!(price > 0.0);
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
@@ -386,9 +386,9 @@ mod tests {
     fn round_trip_extreme_itm_call() {
         // |x| = ln(1000) ≈ 6.9
         let (f, k, t, sigma) = (100.0, 0.1, 1.0, 0.20);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
@@ -409,9 +409,9 @@ mod tests {
     #[test]
     fn round_trip_very_high_vol() {
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 5.0);
-        let price = black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let price = black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         let iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = black_price(f, k, iv.0, t, OptionType::Call).unwrap();
+        let reprice = black_price(f, k, iv, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-10);
     }
 }

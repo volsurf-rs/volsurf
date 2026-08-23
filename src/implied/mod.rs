@@ -14,8 +14,10 @@
 //! extractors are **standalone utilities** — deliberately so. Threading a vol
 //! convention through the surface stack would make this a pricing library,
 //! which it is not; callers working in normal vol should convert at the
-//! boundary. The [`NormalVol`](crate::types::NormalVol) newtype exists to keep
-//! those absolute-unit quotes from being mistaken for lognormal ones, not as a
+//! boundary. The [`NormalVol`](crate::types::NormalVol) and
+//! [`DisplacedVol`](crate::types::DisplacedVol) newtypes exist to keep those
+//! quotes from being mistaken for lognormal ones — including by the pricing
+//! functions here, which take the unit their extractor returns — not as a
 //! half-finished surface parameterization.
 //!
 //! [`SmileSection::density`]: crate::smile::SmileSection::density
