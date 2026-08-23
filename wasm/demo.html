@@ -507,7 +507,7 @@ function getTenorData() {
     const label = row.dataset.label;
     const strikes = parseQuotes(row.querySelector('[data-field="strikes"]').value);
     const vols = parseQuotes(row.querySelector('[data-field="vols"]').value);
-    // apply_filter drops non-finite quotes, so a blank or non-numeric field vanishes without a trace
+    // calibrate rejects non-finite quotes with a generic error — name the bad field here instead
     const error = strikes.length !== vols.length
       ? `${strikes.length} strikes vs ${vols.length} vols`
       : [...strikes, ...vols].some(v => !Number.isFinite(v))
