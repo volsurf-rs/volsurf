@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn cubic_spline_with_unsorted_strikes_succeeds() {
-        // Builder sorts strikes internally for CubicSpline path
+        // `calibrate_with_config` sorts the quotes by strike before building the knots
         let strikes = vec![110.0, 90.0, 100.0];
         let vols = vec![0.24, 0.24, 0.20];
         let result = SurfaceBuilder::new()
@@ -896,7 +896,7 @@ mod tests {
             .build();
         assert!(
             result.is_ok(),
-            "unsorted strikes should be sorted by builder"
+            "unsorted strikes should be sorted during calibration"
         );
     }
 
