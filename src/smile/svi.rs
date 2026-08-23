@@ -395,11 +395,26 @@ impl SviSmile {
     }
 
     /// Variance slope `b`, which sets the skew magnitude.
+    ///
+    /// Not identified on every slice. Where `m` falls outside the range of
+    /// quoted log-moneyness, `√((k − m)² + σ²) → m − k` over every observed
+    /// `k`, so `w(k) → a + b(1 − ρ)(m − k)` — linear, with only the product
+    /// `b(1 − ρ)` pinned. `b` and `ρ` then trade off along a ray: `b` can move
+    /// an order of magnitude while the fitted curve shifts by less than the
+    /// fit's own residual. Check [`m()`](Self::m) against the quoted strike range, or
+    /// profile the objective in `b`, before reading `b` as a wing measurement.
+    /// A low RMSE does not rule this out — such a fit is good, it is just not
+    /// the only good one.
     pub fn b(&self) -> f64 {
         self.b
     }
 
-    /// Skew parameter.
+    /// Skew parameter `ρ`, the smile's asymmetry.
+    ///
+    /// Its sign is not a reliable read on which wing is steeper. Where `m`
+    /// falls outside the quoted log-moneyness range the whole ladder sits on
+    /// one branch of the hyperbola, and a slice with a visibly steeper put
+    /// wing can fit `ρ > 0`. Same degeneracy as [`b()`](Self::b).
     pub fn rho(&self) -> f64 {
         self.rho
     }

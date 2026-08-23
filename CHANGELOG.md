@@ -140,6 +140,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not overlap the knot range now returns `InvalidInput` rather than silently
   reporting a clean scan it never performed.
 
+- `SviSmile::b` and `SviSmile::rho` document that neither is identified when
+  `m` falls outside the quoted log-moneyness range. The total-variance curve
+  goes linear there and the two trade off along a ray, so a low RMSE does not
+  imply a determined `b`, and `rho`'s sign stops tracking which wing is
+  steeper.
+
 ### Removed
 
 Breaking. Each has a drop-in replacement on the `VolSurface` trait — bring it
