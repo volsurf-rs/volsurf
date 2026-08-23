@@ -41,7 +41,7 @@ fn sqrt_vega_weights(
     market_vols: &[(f64, f64)],
     forward: f64,
     expiry: f64,
-    weighting: &WeightingScheme,
+    weighting: WeightingScheme,
 ) -> Vec<f64> {
     match weighting {
         WeightingScheme::ModelDefault | WeightingScheme::Vega => market_vols
@@ -436,8 +436,8 @@ impl SviSmile {
             forward,
             expiry,
             market_vols,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
     }
@@ -467,8 +467,8 @@ impl SviSmile {
         forward: f64,
         expiry: f64,
         market_vols: &[(f64, f64)],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        filter: DataFilter,
+        weighting: WeightingScheme,
         seed: Option<&SviSmile>,
     ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
@@ -714,7 +714,7 @@ impl SmileSection for SviSmile {
     /// Gatheral & Jacquier (2014), Theorem 4.1.
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         scan_g(
             self.expiry,
@@ -746,14 +746,14 @@ mod tests {
     #[test]
     fn uniform_weighting_gives_unit_weights() {
         let quotes = [(90.0, 0.24), (100.0, 0.20), (110.0, 0.24)];
-        let w = sqrt_vega_weights(&quotes, 100.0, 1.0, &WeightingScheme::Uniform);
+        let w = sqrt_vega_weights(&quotes, 100.0, 1.0, WeightingScheme::Uniform);
         assert_eq!(w, vec![1.0; 3]);
     }
 
     #[test]
     fn vega_weighting_peaks_at_the_money() {
         let quotes = [(80.0, 0.24), (100.0, 0.20), (130.0, 0.24)];
-        let w = sqrt_vega_weights(&quotes, 100.0, 1.0, &WeightingScheme::Vega);
+        let w = sqrt_vega_weights(&quotes, 100.0, 1.0, WeightingScheme::Vega);
         assert!(w[1] > w[0] && w[1] > w[2], "ATM should weigh most: {w:?}");
         assert!(w.iter().all(|&x| x >= 1e-8));
     }
@@ -762,8 +762,8 @@ mod tests {
     fn model_default_weighting_is_vega_for_svi() {
         let quotes = [(90.0, 0.24), (100.0, 0.20), (110.0, 0.24)];
         assert_eq!(
-            sqrt_vega_weights(&quotes, 100.0, 1.0, &WeightingScheme::ModelDefault),
-            sqrt_vega_weights(&quotes, 100.0, 1.0, &WeightingScheme::Vega)
+            sqrt_vega_weights(&quotes, 100.0, 1.0, WeightingScheme::ModelDefault),
+            sqrt_vega_weights(&quotes, 100.0, 1.0, WeightingScheme::Vega)
         );
     }
 
@@ -2072,8 +2072,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
         .unwrap();
@@ -2094,8 +2094,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             Some(&svi),
         );
         assert!(
@@ -2124,8 +2124,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &filter,
-            &WeightingScheme::default(),
+            filter,
+            WeightingScheme::default(),
             None,
         )
         .unwrap_err();
@@ -2155,8 +2155,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &filter,
-            &WeightingScheme::default(),
+            filter,
+            WeightingScheme::default(),
             None,
         );
         assert!(result.is_ok(), "should succeed after filtering far wings");
@@ -2176,8 +2176,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::Uniform,
+            DataFilter::default(),
+            WeightingScheme::Uniform,
             None,
         );
         assert!(result.is_ok(), "uniform weighting should produce valid fit");
@@ -2201,8 +2201,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &filter,
-            &WeightingScheme::default(),
+            filter,
+            WeightingScheme::default(),
             None,
         );
         assert!(
@@ -2227,8 +2227,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
         .unwrap_err();
@@ -2255,8 +2255,8 @@ mod tests {
                 100.0,
                 0.25,
                 &market,
-                &filter,
-                &WeightingScheme::default(),
+                filter,
+                WeightingScheme::default(),
                 None,
             )
             .is_ok(),
@@ -2281,8 +2281,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
         .expect("a dip must reach the fit, not be trimmed as a cliff");
@@ -2293,11 +2293,11 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter {
+            DataFilter {
                 vol_cliff_filter: Some(false),
                 ..Default::default()
             },
-            &WeightingScheme::default(),
+            WeightingScheme::default(),
             None,
         )
         .expect("opting out must fit the same dip");
@@ -2324,8 +2324,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             Some(&bad_seed),
         );
         assert!(
@@ -2358,8 +2358,8 @@ mod tests {
             100.0,
             0.25,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             Some(&bad_seed),
         );
         assert!(

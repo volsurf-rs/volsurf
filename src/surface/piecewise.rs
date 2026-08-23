@@ -205,7 +205,7 @@ impl SmileSection for SharedSmile {
 
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<crate::smile::ArbitrageReport> {
         self.0.is_arbitrage_free_with(config)
     }
@@ -279,7 +279,7 @@ impl VolSurface for PiecewiseSurface {
         self.diagnostics_via(|i| self.smiles[i].is_arbitrage_free())
     }
 
-    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
+    fn diagnostics_with(&self, config: ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
         self.diagnostics_via(|i| self.smiles[i].is_arbitrage_free_with(config))
     }
 
@@ -557,8 +557,8 @@ mod tests {
                 k_max: 1.5,
             },
         ] {
-            let got = smile.is_arbitrage_free_with(&cfg).unwrap();
-            let want = svi.is_arbitrage_free_with(&cfg).unwrap();
+            let got = smile.is_arbitrage_free_with(cfg).unwrap();
+            let want = svi.is_arbitrage_free_with(cfg).unwrap();
             assert!(!want.is_free(), "fixture should violate butterfly");
             assert_abs_diff_eq!(got.expiry, want.expiry, epsilon = 1e-14);
             assert_eq!(

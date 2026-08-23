@@ -122,8 +122,8 @@ impl SmileCalibrator for SmileModel {
         forward: f64,
         expiry: f64,
         market_vols: &[(f64, f64)],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        filter: DataFilter,
+        weighting: WeightingScheme,
     ) -> crate::error::Result<Box<dyn SmileSection>> {
         match *self {
             Self::Svi => Ok(Box::new(SviSmile::calibrate_with_config(
@@ -139,7 +139,7 @@ impl SmileCalibrator for SmileModel {
                 forward,
                 expiry,
                 market_vols,
-                *filter,
+                filter,
             )?)),
 
             Self::Sabr { beta } => Ok(Box::new(SabrSmile::calibrate_with_config(
@@ -398,13 +398,8 @@ impl SurfaceBuilder {
                     .map(|(&strike, &vol)| (strike, vol))
                     .collect();
 
-                let smile = calibrator.calibrate(
-                    forward,
-                    tenor.expiry,
-                    &market_vols,
-                    &filter,
-                    &weighting,
-                )?;
+                let smile =
+                    calibrator.calibrate(forward, tenor.expiry, &market_vols, filter, weighting)?;
 
                 Ok((tenor.expiry, smile))
             };
@@ -475,8 +470,8 @@ mod tests {
             forward: f64,
             expiry: f64,
             market_vols: &[(f64, f64)],
-            _filter: &DataFilter,
-            _weighting: &WeightingScheme,
+            _filter: DataFilter,
+            _weighting: WeightingScheme,
         ) -> crate::error::Result<Box<dyn SmileSection>> {
             let mut strikes: Vec<f64> = market_vols.iter().map(|&(k, _)| k).collect();
             strikes.sort_by(f64::total_cmp);
@@ -1088,8 +1083,8 @@ mod tests {
             1.0,
             2.0,
             &[],
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
         .unwrap_err();

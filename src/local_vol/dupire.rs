@@ -253,7 +253,7 @@ mod tests {
         }
         fn diagnostics_with(
             &self,
-            _: &crate::smile::ArbitrageScanConfig,
+            _: crate::smile::ArbitrageScanConfig,
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
@@ -320,7 +320,7 @@ mod tests {
         }
         fn diagnostics_with(
             &self,
-            _: &crate::smile::ArbitrageScanConfig,
+            _: crate::smile::ArbitrageScanConfig,
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
@@ -565,7 +565,7 @@ mod tests {
             }
             fn diagnostics_with(
                 &self,
-                _: &crate::smile::ArbitrageScanConfig,
+                _: crate::smile::ArbitrageScanConfig,
             ) -> error::Result<SurfaceDiagnostics> {
                 unimplemented!()
             }

@@ -206,7 +206,7 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// [`is_arbitrage_free_with`](SmileSection::is_arbitrage_free_with) to
     /// change how the grid is scanned.
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        self.is_arbitrage_free_with(&self.default_scan_config())
+        self.is_arbitrage_free_with(self.default_scan_config())
     }
 
     /// Check butterfly arbitrage with custom scan grid configuration.
@@ -224,7 +224,7 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// its own proof that every point of `config` was examined.
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         arbitrage::scan_density(self.expiry(), self.forward(), config, |strike| {
             self.density(Strike(strike))
@@ -266,8 +266,8 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
 ///         forward: f64,
 ///         expiry: f64,
 ///         market_vols: &[(f64, f64)],
-///         _filter: &DataFilter,
-///         _weighting: &WeightingScheme,
+///         _filter: DataFilter,
+///         _weighting: WeightingScheme,
 ///     ) -> volsurf::Result<Box<dyn SmileSection>> {
 ///         let mut pairs: Vec<(f64, f64)> = market_vols
 ///             .iter()
@@ -332,7 +332,7 @@ pub trait SmileCalibrator: Send + Sync + std::fmt::Debug {
         forward: f64,
         expiry: f64,
         market_vols: &[(f64, f64)],
-        filter: &crate::calibration::DataFilter,
-        weighting: &crate::calibration::WeightingScheme,
+        filter: crate::calibration::DataFilter,
+        weighting: crate::calibration::WeightingScheme,
     ) -> error::Result<Box<dyn SmileSection>>;
 }

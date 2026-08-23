@@ -94,7 +94,7 @@ impl PySsviSurface {
     fn diagnostics_with(&self, config: &PyArbitrageScanConfig) -> PyResult<PySurfaceDiagnostics> {
         Ok(self
             .inner
-            .diagnostics_with(&config.inner)
+            .diagnostics_with(config.inner)
             .map_err(to_py_err)?
             .into())
     }
@@ -160,7 +160,7 @@ impl PySsviSurface {
     ) -> PyResult<Self> {
         let f = filter.map(|f| f.inner).unwrap_or_default();
         let w = weighting.map(|w| w.inner).unwrap_or_default();
-        let inner = SsviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
+        let inner = SsviSurface::calibrate_with_config(&market_data, &tenors, &forwards, f, w)
             .map_err(to_py_err)?;
         Ok(Self { inner })
     }
@@ -259,7 +259,7 @@ impl PyEssviSurface {
     fn diagnostics_with(&self, config: &PyArbitrageScanConfig) -> PyResult<PySurfaceDiagnostics> {
         Ok(self
             .inner
-            .diagnostics_with(&config.inner)
+            .diagnostics_with(config.inner)
             .map_err(to_py_err)?
             .into())
     }
@@ -340,7 +340,7 @@ impl PyEssviSurface {
     ) -> PyResult<Self> {
         let f = filter.map(|f| f.inner).unwrap_or_default();
         let w = weighting.map(|w| w.inner).unwrap_or_default();
-        let inner = EssviSurface::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
+        let inner = EssviSurface::calibrate_with_config(&market_data, &tenors, &forwards, f, w)
             .map_err(to_py_err)?;
         Ok(Self { inner })
     }
@@ -371,9 +371,8 @@ impl PyEssviSurface {
     ) -> PyResult<Vec<PyPerTenorFit>> {
         let f = filter.map(|f| f.inner).unwrap_or_default();
         let w = weighting.map(|w| w.inner).unwrap_or_default();
-        let fits =
-            EssviSurface::fit_per_tenor_with_config(&market_data, &tenors, &forwards, &f, &w)
-                .map_err(to_py_err)?;
+        let fits = EssviSurface::fit_per_tenor_with_config(&market_data, &tenors, &forwards, f, w)
+            .map_err(to_py_err)?;
         Ok(fits
             .into_iter()
             .map(|f| PyPerTenorFit { inner: f })

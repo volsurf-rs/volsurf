@@ -55,7 +55,7 @@ macro_rules! impl_wasm_smile_methods {
                 config: &WasmArbitrageScanConfig,
             ) -> Result<WasmArbitrageReport, JsValue> {
                 self.inner
-                    .is_arbitrage_free_with(&config.inner())
+                    .is_arbitrage_free_with(config.inner())
                     .map(WasmArbitrageReport::from)
                     .map_err(to_js_err)
             }
@@ -252,8 +252,8 @@ impl WasmSviSmile {
             forward,
             expiry,
             &pairs,
-            &f,
-            &w,
+            f,
+            w,
             seed.as_ref().map(|s| &s.inner),
         )
         .map_err(to_js_err)?;
@@ -321,8 +321,8 @@ impl WasmSabrSmile {
             expiry,
             beta,
             &pairs,
-            &f,
-            &w,
+            f,
+            w,
             seed.as_ref().map(|s| &s.inner),
         )
         .map_err(to_js_err)?;

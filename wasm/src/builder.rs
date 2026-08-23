@@ -180,7 +180,7 @@ impl WasmPiecewiseSurface {
         config: &WasmArbitrageScanConfig,
     ) -> Result<WasmSurfaceDiagnostics, JsValue> {
         self.inner
-            .diagnostics_with(&config.inner())
+            .diagnostics_with(config.inner())
             .map(WasmSurfaceDiagnostics::from)
             .map_err(to_js_err)
     }

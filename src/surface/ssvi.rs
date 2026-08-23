@@ -280,8 +280,8 @@ impl SsviSurface {
             market_data,
             tenors,
             forwards,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
         )
     }
 
@@ -290,8 +290,8 @@ impl SsviSurface {
         market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        filter: DataFilter,
+        weighting: WeightingScheme,
     ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
         tracing::debug!(n_tenors = tenors.len(), "SSVI calibration started");
@@ -472,10 +472,10 @@ impl VolSurface for SsviSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        self.diagnostics_with(&ArbitrageScanConfig::wide())
+        self.diagnostics_with(ArbitrageScanConfig::wide())
     }
 
-    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
+    fn diagnostics_with(&self, config: ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
         surface_diagnostics(
             &self.tenors,
             &self.forwards,
@@ -725,7 +725,7 @@ impl SmileSection for SsviSlice {
     /// Gatheral & Jacquier (2014), Theorem 4.1.
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         scan_g(
             self.expiry,

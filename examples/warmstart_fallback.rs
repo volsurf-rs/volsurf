@@ -55,8 +55,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fwd,
         t,
         &market,
-        &DataFilter::default(),
-        &WeightingScheme::default(),
+        DataFilter::default(),
+        WeightingScheme::default(),
         Some(&smile_prev),
     )?;
     let warm_ms = t1.elapsed().as_secs_f64() * 1000.0;
@@ -81,8 +81,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fwd,
         t,
         &market,
-        &DataFilter::default(),
-        &WeightingScheme::default(),
+        DataFilter::default(),
+        WeightingScheme::default(),
         Some(&bad_seed),
     )?;
     let bad_ms = t3.elapsed().as_secs_f64() * 1000.0;

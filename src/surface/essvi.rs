@@ -217,7 +217,7 @@ impl SmileSection for EssviSlice {
 
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         self.0.is_arbitrage_free_with(config)
     }
@@ -384,8 +384,8 @@ impl EssviSurface {
             market_data,
             tenors,
             forwards,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
         )
     }
 
@@ -398,8 +398,8 @@ impl EssviSurface {
         market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        filter: DataFilter,
+        weighting: WeightingScheme,
     ) -> error::Result<Vec<PerTenorFit>> {
         validate_calibration_grid(tenors, forwards, market_data.len())?;
 
@@ -719,8 +719,8 @@ impl EssviSurface {
         market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        filter: DataFilter,
+        weighting: WeightingScheme,
     ) -> error::Result<Self> {
         let fits =
             Self::fit_per_tenor_with_config(market_data, tenors, forwards, filter, weighting)?;
@@ -863,10 +863,10 @@ impl VolSurface for EssviSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        self.diagnostics_with(&ArbitrageScanConfig::wide())
+        self.diagnostics_with(ArbitrageScanConfig::wide())
     }
 
-    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
+    fn diagnostics_with(&self, config: ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
         surface_diagnostics(
             &self.tenors,
             &self.forwards,

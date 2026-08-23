@@ -258,8 +258,8 @@ impl SabrSmile {
             expiry,
             beta,
             market_vols,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
     }
@@ -285,8 +285,8 @@ impl SabrSmile {
         expiry: f64,
         beta: f64,
         market_vols: &[(f64, f64)],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        filter: DataFilter,
+        weighting: WeightingScheme,
         seed: Option<&SabrSmile>,
     ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
@@ -2268,8 +2268,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
         .unwrap();
@@ -2293,8 +2293,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             Some(&smile),
         );
         assert!(
@@ -2323,8 +2323,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &filter,
-            &WeightingScheme::default(),
+            filter,
+            WeightingScheme::default(),
             None,
         );
         assert!(result.is_ok());
@@ -2345,8 +2345,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::Vega,
+            DataFilter::default(),
+            WeightingScheme::Vega,
             None,
         );
         assert!(result.is_ok(), "vega weighting should produce valid fit");

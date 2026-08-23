@@ -118,7 +118,7 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
     /// implementations may narrow `config` to their domain of validity — see
     /// [`SmileSection::is_arbitrage_free_with`].
     /// Calendar spread checks use the same hardcoded grid as `diagnostics()`.
-    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics>;
+    fn diagnostics_with(&self, config: ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics>;
 
     /// Calendar spread violations: total variance decreasing in time.
     ///

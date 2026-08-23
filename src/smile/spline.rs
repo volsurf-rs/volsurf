@@ -205,7 +205,7 @@ impl SplineSmile {
             validate_positive(vol, "implied vol")?;
         }
 
-        let quotes = prepare_market_vols(market_vols, forward, &filter, MIN_POINTS, "CubicSpline")?;
+        let quotes = prepare_market_vols(market_vols, forward, filter, MIN_POINTS, "CubicSpline")?;
         let mut pairs: Vec<(f64, f64)> = quotes
             .iter()
             .map(|&(strike, vol)| (strike, vol * vol * expiry))
@@ -358,7 +358,7 @@ impl SmileSection for SplineSmile {
     /// case names its own cause.
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         config.validate()?;
         let last = self.strikes.len() - 1;
@@ -388,7 +388,7 @@ impl SmileSection for SplineSmile {
             k_min: config.k_min.max(lo),
             k_max: config.k_max.min(hi),
         };
-        scan_density(self.expiry, self.forward, &clipped, |strike| {
+        scan_density(self.expiry, self.forward, clipped, |strike| {
             self.density(Strike(strike))
         })
     }
@@ -706,7 +706,7 @@ mod tests {
 
         let default = smile.is_arbitrage_free().unwrap();
         let explicit = smile
-            .is_arbitrage_free_with(&ArbitrageScanConfig::wide())
+            .is_arbitrage_free_with(ArbitrageScanConfig::wide())
             .unwrap();
         assert!(
             !default.butterfly_violations.is_empty(),
@@ -739,7 +739,7 @@ mod tests {
             k_min: -0.22,
             k_max: -0.19,
         };
-        let report = smile.is_arbitrage_free_with(&narrow).unwrap();
+        let report = smile.is_arbitrage_free_with(narrow).unwrap();
         assert!(
             report.is_free(),
             "left wing is clean, got {} violations",
@@ -766,7 +766,7 @@ mod tests {
             k_min: 1.0,
             k_max: 2.0,
         };
-        let err = smile.is_arbitrage_free_with(&far_wing).unwrap_err();
+        let err = smile.is_arbitrage_free_with(far_wing).unwrap_err();
         let VolSurfError::InvalidInput { message } = &err else {
             panic!("expected InvalidInput, got {err}");
         };
@@ -788,7 +788,7 @@ mod tests {
         .unwrap();
 
         let err = smile
-            .is_arbitrage_free_with(&ArbitrageScanConfig::wide())
+            .is_arbitrage_free_with(ArbitrageScanConfig::wide())
             .unwrap_err();
         let VolSurfError::InvalidInput { message } = &err else {
             panic!("expected InvalidInput, got {err}");

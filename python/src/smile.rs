@@ -43,7 +43,7 @@ macro_rules! impl_smile_methods {
             ) -> PyResult<PyArbitrageReport> {
                 Ok(self
                     .inner
-                    .is_arbitrage_free_with(&config.inner)
+                    .is_arbitrage_free_with(config.inner)
                     .map_err(to_py_err)?
                     .into())
             }
@@ -136,8 +136,8 @@ impl PySviSmile {
             forward,
             expiry,
             &market_vols,
-            &f,
-            &w,
+            f,
+            w,
             seed.map(|s| &s.inner),
         )
         .map_err(to_py_err)?;
@@ -191,8 +191,8 @@ impl PySabrSmile {
             expiry,
             beta,
             &market_vols,
-            &f,
-            &w,
+            f,
+            w,
             seed.map(|s| &s.inner),
         )
         .map_err(to_py_err)?;

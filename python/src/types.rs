@@ -261,7 +261,7 @@ impl PySmile {
     ) -> PyResult<PyArbitrageReport> {
         Ok(self
             .inner
-            .is_arbitrage_free_with(&config.inner)
+            .is_arbitrage_free_with(config.inner)
             .map_err(to_py_err)?
             .into())
     }
@@ -324,7 +324,7 @@ impl PySurface {
     fn diagnostics_with(&self, config: &PyArbitrageScanConfig) -> PyResult<PySurfaceDiagnostics> {
         Ok(self
             .inner
-            .diagnostics_with(&config.inner)
+            .diagnostics_with(config.inner)
             .map_err(to_py_err)?
             .into())
     }

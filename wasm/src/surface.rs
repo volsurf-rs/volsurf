@@ -87,7 +87,7 @@ macro_rules! impl_wasm_surface_methods {
                 config: &WasmArbitrageScanConfig,
             ) -> Result<WasmSurfaceDiagnostics, JsValue> {
                 self.inner
-                    .diagnostics_with(&config.inner())
+                    .diagnostics_with(config.inner())
                     .map(WasmSurfaceDiagnostics::from)
                     .map_err(to_js_err)
             }
@@ -125,9 +125,8 @@ macro_rules! impl_wasm_surface_methods {
                 let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
                 let f = filter.map(|f| f.inner()).unwrap_or_default();
                 let w = weighting.map(|w| w.inner()).unwrap_or_default();
-                let inner =
-                    <$inner>::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
-                        .map_err(to_js_err)?;
+                let inner = <$inner>::calibrate_with_config(&market_data, &tenors, &forwards, f, w)
+                    .map_err(to_js_err)?;
                 Ok(Self { inner })
             }
 
