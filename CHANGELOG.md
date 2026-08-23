@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `types::DisplacedVol` — the displaced-diffusion vol parameter, which is a
+  Black vol only at β = 1 and was being returned as one at every β.
+- `SmileSection::default_scan_config()` — the grid `is_arbitrage_free()` scans.
+  A model whose approximation stops short of the wings states its own domain
+  once instead of overriding `is_arbitrage_free()` to pass a grid, and an
+  implementor outside this crate no longer silently inherits SVI's.
+- `ArbitrageScanConfig::default()`, so
+  `ArbitrageScanConfig { n_points: 500, ..Default::default() }` compiles.
+- `SplineSmile::calibrate` and `calibrate_with_config` — fit a spline from
+  `(strike, vol)` quotes like SVI and SABR do. `new()` takes sorted strikes and
+  total variances, and every caller was writing that conversion itself.
+  `calibrate_with_config` takes no `WeightingScheme`: a spline passes through
+  every surviving quote, so no residual bears a weight.
+- Accessors for parameters that could previously only be read back through
+  serde: `SviSmile::a/b/m/sigma` and `SplineSmile::strikes/variances`.
 - `VolSurface::forward(expiry)` — reads the forward directly instead of
   building a whole smile section for it. `DupireLocalVol` needs three forwards
   and no vols per query; on a `PiecewiseSurface` that used to cost ~150
@@ -31,6 +46,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING**: `black_price`, `normal_price` and `displaced_price` take the vol
+  newtype their extractor returns — `Vol`, `NormalVol` and `DisplacedVol`
+  respectively — rather than a bare `f64`. A Bachelier vol of `20.0` and a Black
+  vol of `0.20` were interchangeable at the one call site where the two units
+  meet. Wrap the argument: `black_price(f, k, Vol(0.2), t, ty)`, or pass an
+  extractor's output straight through. The Python and WASM bindings still take
+  and return bare floats.
+- **BREAKING**: `DisplacedImpliedVol::compute` returns `DisplacedVol` rather
+  than `Vol`. Both are tuple newtypes, so `.0` still reaches the `f64`.
+- **BREAKING**: `ArbitrageScanConfig::svi_default()` and `sabr_default()` are
+  `wide()` and `narrow()`. They describe grid width, not models — `svi_default()`
+  was also the SSVI default and the trait-wide fallback. `Default` returns
+  `wide()`. Renamed in the Python and WASM bindings too.
+- **BREAKING**: `DataFilter`, `WeightingScheme` and `ArbitrageScanConfig` are
+  passed by value, not by reference, on every `calibrate_with_config`,
+  `is_arbitrage_free_with`, `diagnostics_with`, `apply_filter` and
+  `SmileCalibrator::calibrate`. All three are `Copy`, and
+  `SurfaceBuilder::data_filter` already took one by value. Drop the `&`.
+- **BREAKING**: surface calibration takes `(tenors, forwards, market_data)`
+  rather than `(market_data, tenors, forwards)`, matching the smile layer's
+  coordinates-then-quotes order. Affects `SsviSurface::calibrate*`,
+  `EssviSurface::calibrate*` and `EssviSurface::fit_per_tenor*`, in the Python
+  and WASM bindings as well. `market_data` has a distinct type, so a call left
+  in the old order fails to compile rather than mis-binding.
+- **BREAKING**: `EssviSurface::rho(theta)` is `rho_at(theta)` and
+  `EssviSurface::a()` is `rho_exponent()`. `rho()` everywhere else in the crate
+  reads a stored parameter; on `EssviSurface` alone it evaluated a function.
+  `a` is the exponent in ρ(θ) = ρ₀ + (ρₘ − ρ₀)(θ/θ_max)^a — still the name of
+  the constructor argument, which follows the paper. Every `EssviSurface`
+  accessor now carries a doc comment.
+- **BREAKING**: `EssviSurface::calendar_check_structural()` is
+  `calendar_violations_structural()`, matching the `VolSurface::calendar_violations()`
+  it sits beside.
 - `PiecewiseSurface::smile_at()` returns the stored smile on an exact tenor
   match rather than a cubic-spline resampling of it. The section now keeps its
   model identity (`model_name()` reports `"SVI"`, not `"CubicSpline"`), its
