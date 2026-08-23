@@ -742,6 +742,7 @@ impl SmileSection for SsviSlice {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{strike_ladder, synthetic_surface_data};
     use approx::assert_abs_diff_eq;
 
     /// Canonical SSVI parameters for a typical equity surface.
@@ -1282,34 +1283,14 @@ mod tests {
     // ========== Calibration tests (T09) ==========
 
     /// Generate synthetic SSVI market data by sampling a known surface.
-    fn synthetic_ssvi_data(
-        surface: &SsviSurface,
-        tenors: &[f64],
-        strikes_per_tenor: &[Vec<f64>],
-    ) -> Vec<Vec<(f64, f64)>> {
-        tenors
-            .iter()
-            .zip(strikes_per_tenor)
-            .map(|(&t, strikes)| {
-                strikes
-                    .iter()
-                    .map(|&k| (k, surface.black_vol(Tenor(t), Strike(k)).unwrap().0))
-                    .collect()
-            })
-            .collect()
-    }
-
     #[test]
     fn calibrate_round_trip_equity() {
         // Create a known SSVI surface, sample it, calibrate, compare.
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
@@ -1340,11 +1321,8 @@ mod tests {
         .unwrap();
         let tenors = vec![0.5, 1.0];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..10).map(|i| 75.0 + 5.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 10, 75.0, 5.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
@@ -1382,7 +1360,7 @@ mod tests {
             .iter()
             .map(|&f| (0..10).map(|i| f * 0.8 + f * 0.04 * i as f64).collect())
             .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
@@ -1535,11 +1513,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         assert!(calibrated.rho().abs() < 1.0, "rho out of range");
@@ -1559,11 +1534,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let diag = calibrated.diagnostics().unwrap();
@@ -1579,11 +1551,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let thetas = calibrated.thetas();

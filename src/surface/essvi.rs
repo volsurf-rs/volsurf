@@ -882,6 +882,7 @@ impl VolSurface for EssviSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{strike_ladder, synthetic_surface_data};
     use approx::assert_abs_diff_eq;
 
     fn equity_slice() -> EssviSlice {
@@ -1925,23 +1926,6 @@ mod tests {
         let _boxed: Box<dyn VolSurface> = Box::new(s);
     }
 
-    fn synthetic_essvi_data(
-        surface: &EssviSurface,
-        tenors: &[f64],
-        strikes_per_tenor: &[Vec<f64>],
-    ) -> Vec<Vec<(f64, f64)>> {
-        tenors
-            .iter()
-            .zip(strikes_per_tenor)
-            .map(|(&t, strikes)| {
-                strikes
-                    .iter()
-                    .map(|&k| (k, surface.black_vol(Tenor(t), Strike(k)).unwrap().0))
-                    .collect()
-            })
-            .collect()
-    }
-
     fn rms_vol_error(
         calibrated: &EssviSurface,
         tenors: &[f64],
@@ -1964,11 +1948,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let rms = rms_vol_error(&calibrated, &tenors, &market_data);
@@ -1980,11 +1961,8 @@ mod tests {
         let original = two_tenor_surface();
         let tenors = vec![0.5, 1.0];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..10).map(|i| 75.0 + 5.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 10, 75.0, 5.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let rms = rms_vol_error(&calibrated, &tenors, &market_data);
@@ -2013,7 +1991,7 @@ mod tests {
             .iter()
             .map(|&f| (0..10).map(|i| f * 0.8 + f * 0.04 * i as f64).collect())
             .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let rms = rms_vol_error(&calibrated, &tenors, &market_data);
@@ -2028,11 +2006,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let c = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         assert!(c.rho_0().abs() < 1.0, "rho_0 out of range: {}", c.rho_0());
@@ -2054,11 +2029,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         for w in calibrated.thetas().windows(2) {
@@ -2076,11 +2048,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let diag = calibrated.diagnostics().unwrap();
@@ -2095,11 +2064,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let violations = calibrated.calendar_check_structural();
@@ -2115,11 +2081,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let json = serde_json::to_string(&calibrated).unwrap();
@@ -2276,10 +2239,7 @@ mod tests {
             (0.070, 0.02, -0.15),
         ];
 
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
 
         let market_data: Vec<Vec<(f64, f64)>> = tenors
             .iter()
@@ -2358,11 +2318,8 @@ mod tests {
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
         // 25 strikes (not 15) to stabilize per-tenor SVI fits against grid density changes
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..25).map(|i| 70.0 + 2.5 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 25, 70.0, 2.5);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
@@ -2395,11 +2352,8 @@ mod tests {
 
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
@@ -2425,11 +2379,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
@@ -2539,11 +2490,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
         assert_eq!(fits.len(), 4);
@@ -2571,11 +2519,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
 
@@ -2598,11 +2543,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let one_shot = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
@@ -2629,11 +2571,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0; 4];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
         let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
 
         let json = serde_json::to_string(&fits[0]).unwrap();
@@ -2661,7 +2600,7 @@ mod tests {
         let tenors = vec![0.25];
         let forwards = vec![100.0];
         let strikes: Vec<Vec<f64>> = vec![(0..15).map(|i| 70.0 + 4.0 * i as f64).collect()];
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
         let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
         assert!(matches!(
@@ -2675,11 +2614,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
         let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
 
         // Swap thetas to break monotonicity
@@ -2710,11 +2646,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         for (bad_tenors, bad_forwards) in [
             (vec![0.0, 0.5], forwards.clone()),
@@ -2735,11 +2668,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
         let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
         fits[0].tenor = -1.0;
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
@@ -2754,11 +2684,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
         let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
         fits[1].theta = f64::NAN;
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
@@ -2773,11 +2700,8 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_essvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
         let mut fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
         fits[0].theta = 0.0;
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();

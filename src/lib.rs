@@ -38,6 +38,8 @@ mod optim;
 mod serde_raw;
 pub mod smile;
 pub mod surface;
+#[cfg(test)]
+mod test_support;
 pub mod types;
 mod validate;
 
