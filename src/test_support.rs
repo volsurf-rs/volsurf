@@ -17,6 +17,11 @@ pub(crate) fn synthetic_surface_data<S: VolSurface>(
     tenors: &[f64],
     strikes_per_tenor: &[Vec<f64>],
 ) -> Vec<Vec<(f64, f64)>> {
+    debug_assert_eq!(
+        tenors.len(),
+        strikes_per_tenor.len(),
+        "one strike ladder per tenor"
+    );
     tenors
         .iter()
         .zip(strikes_per_tenor)
@@ -31,6 +36,11 @@ pub(crate) fn synthetic_surface_data<S: VolSurface>(
 
 /// The same uniform strike ladder `lo, lo + step, …` repeated at `n_tenors`
 /// tenors — the shape `synthetic_surface_data` expects.
-pub(crate) fn strike_ladder(n_tenors: usize, n: usize, lo: f64, step: f64) -> Vec<Vec<f64>> {
-    vec![(0..n).map(|i| lo + step * i as f64).collect(); n_tenors]
+pub(crate) fn strike_ladder(
+    n_tenors: usize,
+    n_strikes: usize,
+    lo: f64,
+    step: f64,
+) -> Vec<Vec<f64>> {
+    vec![(0..n_strikes).map(|i| lo + step * i as f64).collect(); n_tenors]
 }

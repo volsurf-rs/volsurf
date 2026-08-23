@@ -203,8 +203,12 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// `[config.k_min, config.k_max]`. Models with analytical g-functions
     /// (SVI, SSVI) override this for better accuracy.
     ///
-    /// A returned report covers the whole configured grid: if the density cannot
-    /// be evaluated at any point, this returns `Err` rather than a partial scan.
+    /// A returned report covers the whole grid actually scanned: if the density
+    /// cannot be evaluated at any point, this returns `Err` rather than a partial
+    /// scan. Implementations may first narrow `config` to their own domain of
+    /// validity — [`SplineSmile`](crate::smile::SplineSmile) clips to its knot
+    /// range, since it flat-extrapolates beyond it — so a clean report is not on
+    /// its own proof that every point of `config` was examined.
     fn is_arbitrage_free_with(
         &self,
         config: &ArbitrageScanConfig,

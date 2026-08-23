@@ -1282,7 +1282,6 @@ mod tests {
 
     // ========== Calibration tests (T09) ==========
 
-    /// Generate synthetic SSVI market data by sampling a known surface.
     #[test]
     fn calibrate_round_trip_equity() {
         // Create a known SSVI surface, sample it, calibrate, compare.
@@ -2142,18 +2141,25 @@ mod tests {
         assert_send_sync::<SsviSlice>();
     }
 
+    /// `validated_serde!` passes its field list positionally into `new()`, so a
+    /// reordered list would still compile and silently remap ρ/η/γ/θ. Distinct
+    /// η and γ and an off-ATM query are what make such a swap visible — ATM,
+    /// `w(0) = θ` regardless of the other three.
     #[test]
     fn slice_serde_round_trip() {
-        let s = equity_slice();
+        let s = SsviSlice::new(100.0, 1.0, -0.3, 0.7, 0.4, 0.16).unwrap();
         let json = serde_json::to_string(&s).unwrap();
         let s2: SsviSlice = serde_json::from_str(&json).unwrap();
         assert_eq!(s.forward(), s2.forward());
         assert_eq!(s.expiry(), s2.expiry());
         assert_eq!(s.theta(), s2.theta());
+        assert_eq!(s.rho(), s2.rho());
+        assert_eq!(s.eta(), s2.eta());
+        assert_eq!(s.gamma(), s2.gamma());
         // Verify vol agrees after deserialization
         assert_abs_diff_eq!(
-            s.vol(Strike(100.0)).unwrap().0,
-            s2.vol(Strike(100.0)).unwrap().0,
+            s.vol(Strike(90.0)).unwrap().0,
+            s2.vol(Strike(90.0)).unwrap().0,
             epsilon = 1e-14
         );
     }

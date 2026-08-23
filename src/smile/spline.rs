@@ -155,10 +155,6 @@ impl SplineSmile {
         })
     }
 
-    /// Evaluate the spline to get total variance at a given strike.
-    ///
-    /// Uses flat extrapolation outside the knot range and Horner-form
-    /// polynomial evaluation on interior intervals.
     /// Interpolated total variance at `strike`, rejecting the negative values a
     /// cubic can undershoot to between non-negative knots.
     fn checked_variance(&self, strike: Strike) -> error::Result<f64> {
@@ -172,6 +168,10 @@ impl SplineSmile {
         Ok(w)
     }
 
+    /// Evaluate the spline to get total variance at a given strike.
+    ///
+    /// Uses flat extrapolation outside the knot range and Horner-form
+    /// polynomial evaluation on interior intervals.
     fn eval_variance(&self, strike: f64) -> f64 {
         let n = self.strikes.len();
         // Flat extrapolation
@@ -282,21 +282,31 @@ impl SmileSection for SplineSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if `config` does not overlap the
-    /// knot range, since no point in it could be meaningfully evaluated.
+    /// usable knot range, since no point in it could be meaningfully evaluated.
+    /// That covers a config disjoint from the knots and a knot span narrower
+    /// than `2 · KNOT_EDGE_INSET` in log-moneyness, which leaves nothing usable
+    /// whatever the config; the message reports both ranges so the two cases are
+    /// distinguishable.
     fn is_arbitrage_free_with(
         &self,
         config: &ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         config.validate()?;
         let last = self.strikes.len() - 1;
+        let lo = (self.strikes[0] / self.forward).ln() + KNOT_EDGE_INSET;
+        let hi = (self.strikes[last] / self.forward).ln() - KNOT_EDGE_INSET;
+        if lo >= hi || config.k_max <= lo || config.k_min >= hi {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "scan range [{}, {}] does not overlap the spline's usable knot range [{lo}, {hi}]",
+                    config.k_min, config.k_max
+                ),
+            });
+        }
         let clipped = ArbitrageScanConfig {
             n_points: config.n_points,
-            k_min: config
-                .k_min
-                .max((self.strikes[0] / self.forward).ln() + KNOT_EDGE_INSET),
-            k_max: config
-                .k_max
-                .min((self.strikes[last] / self.forward).ln() - KNOT_EDGE_INSET),
+            k_min: config.k_min.max(lo),
+            k_max: config.k_max.min(hi),
         };
         scan_density(self.expiry, self.forward, &clipped, |strike| {
             self.density(Strike(strike))
@@ -590,23 +600,33 @@ mod tests {
     }
 
     /// A config narrower than the knot range is honoured, not widened back out.
+    ///
+    /// The dip fixture violates only near ATM, so a window placed on the clean
+    /// left wing has to come back free while the default scan does not — which
+    /// fails if the window is widened, and fails differently if the clip's
+    /// `.max`/`.min` are swapped.
     #[test]
     fn scan_config_narrower_than_knots_is_respected() {
         let smile = SplineSmile::new(
             100.0,
             1.0,
             vec![80.0, 90.0, 100.0, 110.0, 120.0],
-            vec![0.065, 0.045, 0.04, 0.045, 0.065],
+            vec![0.04, 0.04, 0.002, 0.04, 0.04],
         )
         .unwrap();
 
         let narrow = ArbitrageScanConfig {
-            n_points: 5,
-            k_min: -0.01,
-            k_max: 0.01,
+            n_points: 20,
+            k_min: -0.22,
+            k_max: -0.19,
         };
         let report = smile.is_arbitrage_free_with(&narrow).unwrap();
-        assert!(report.is_free());
+        assert!(
+            report.is_free(),
+            "left wing is clean, got {} violations",
+            report.butterfly_violations.len()
+        );
+        assert!(!smile.is_arbitrage_free().unwrap().is_free());
         assert_abs_diff_eq!(report.expiry, 1.0, epsilon = 1e-14);
     }
 
@@ -627,10 +647,31 @@ mod tests {
             k_min: 1.0,
             k_max: 2.0,
         };
-        assert!(matches!(
-            smile.is_arbitrage_free_with(&far_wing),
-            Err(VolSurfError::InvalidInput { .. })
-        ));
+        let err = smile.is_arbitrage_free_with(&far_wing).unwrap_err();
+        let VolSurfError::InvalidInput { message } = &err else {
+            panic!("expected InvalidInput, got {err}");
+        };
+        // Both ranges, so the requested one is recognisable as what was passed.
+        assert!(message.contains("[1, 2]"), "{message}");
+        assert!(message.contains("knot range"), "{message}");
+    }
+
+    /// A knot span narrower than the inset leaves nothing usable whatever the
+    /// config, so the error must not read as a complaint about the config.
+    #[test]
+    fn scan_of_ladder_narrower_than_the_inset_errors() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![99.95, 100.0, 100.05],
+            vec![0.04, 0.04, 0.04],
+        )
+        .unwrap();
+
+        let err = smile
+            .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+            .unwrap_err();
+        assert!(matches!(err, VolSurfError::InvalidInput { .. }), "{err}");
     }
 
     /// Deliberately violated input: a variance dip sharp enough to drive the

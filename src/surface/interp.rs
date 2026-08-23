@@ -14,6 +14,7 @@ pub(crate) enum TenorPosition {
 
 /// Locate `expiry` on a strictly increasing, non-empty tenor grid.
 pub(crate) fn locate_tenor(tenors: &[f64], expiry: f64) -> TenorPosition {
+    debug_assert!(!tenors.is_empty(), "tenors must not be empty");
     for (i, &t) in tenors.iter().enumerate() {
         if (expiry - t).abs() < EXPIRY_MATCH_TOL {
             return TenorPosition::Exact(i);

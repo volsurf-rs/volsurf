@@ -47,6 +47,7 @@ pub(crate) fn check_theta_monotone(
     tenors: &[f64],
     model: &'static str,
 ) -> error::Result<()> {
+    debug_assert_eq!(thetas.len(), tenors.len(), "one theta per tenor");
     for (i, w) in thetas.windows(2).enumerate() {
         if w[1] <= w[0] {
             return Err(VolSurfError::CalibrationError {
@@ -67,11 +68,13 @@ pub(crate) fn check_theta_monotone(
     Ok(())
 }
 
-/// Optimize (η, γ) over η ∈ \[0.01, 3\], γ ∈ \[0, 1\].
+/// Optimize (η, γ) by grid-seeded Nelder-Mead.
 ///
-/// Grid search seeds Nelder-Mead, whose result is clamped back into the model's
-/// admissible range. Returns `(η, γ, rms)`, where `rms` is the root-mean-square
-/// total-variance residual over `n_points` observations.
+/// Grid search seeds over η ∈ \[0.01, 3\], γ ∈ \[0, 1\]; Nelder-Mead is then
+/// unconstrained above, and only the result is clamped, to η ≥ 1e-6 and
+/// γ ∈ \[0, 1\] — so a returned η may fall outside the seed range. Returns
+/// `(η, γ, rms)`, where `rms` is the root-mean-square total-variance residual
+/// over `n_points` observations.
 pub(crate) fn optimize_eta_gamma<F>(
     objective: F,
     n_points: usize,

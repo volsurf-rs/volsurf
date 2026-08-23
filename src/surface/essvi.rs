@@ -2599,7 +2599,7 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25];
         let forwards = vec![100.0];
-        let strikes: Vec<Vec<f64>> = vec![(0..15).map(|i| 70.0 + 4.0 * i as f64).collect()];
+        let strikes = strike_ladder(1, 15, 70.0, 4.0);
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
         let fits = EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).unwrap();
         let err = EssviSurface::from_per_tenor(&fits).unwrap_err();
