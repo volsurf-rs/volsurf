@@ -77,24 +77,20 @@ fn apply_vol_cliff_filter(
     let mut order: Vec<usize> = (0..k_vals.len()).collect();
     order.sort_by(|&a, &b| k_vals[a].total_cmp(&k_vals[b]));
 
-    let mut has_drop = false;
     let mut has_rise = false;
     let mut cliff_idx = None;
     for i in 0..order.len().saturating_sub(1) {
         let v_cur = vols[order[i]];
         let v_next = vols[order[i + 1]];
-        if v_next < 0.5 * v_cur {
-            has_drop = true;
-            if cliff_idx.is_none() {
-                cliff_idx = Some(i);
-            }
+        if v_next < 0.5 * v_cur && cliff_idx.is_none() {
+            cliff_idx = Some(i);
         }
         if v_next > 2.0 * v_cur {
             has_rise = true;
         }
     }
 
-    let Some(ci) = cliff_idx.filter(|_| !has_rise || !has_drop) else {
+    let Some(ci) = cliff_idx.filter(|_| !has_rise) else {
         return Ok((k_vals, w_vals, sqrt_vega));
     };
 

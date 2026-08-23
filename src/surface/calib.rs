@@ -15,6 +15,20 @@ use crate::validate::validate_positive_slice;
 /// Points per axis in the 2-D calibration grid searches.
 pub(crate) const GRID_N: usize = 15;
 
+/// Bound keeping |ρ| strictly inside 1.
+///
+/// The SSVI radical `√((φk + ρ)² + 1 − ρ²)` collapses to `|φk + ρ|` at
+/// |ρ| = 1, which zeroes `w''` and makes the density degenerate, so neither
+/// calibration nor `ρ(θ)` may return an endpoint.
+pub(crate) const RHO_CLAMP: f64 = 0.999;
+
+/// Below this |ρₘ − ρ₀| the eSSVI correlation term structure counts as flat.
+///
+/// The exponent `a` in `ρ(θ) = ρ₀ + (ρₘ − ρ₀)·(θ/θ_max)^a` is then
+/// unidentifiable and the Eq. 5.7 bound, which divides by that difference,
+/// does not apply.
+pub(crate) const RHO_FLAT_EPS: f64 = 1e-14;
+
 /// Validate the per-tenor calibration inputs common to both surfaces.
 ///
 /// The message format is part of the crate's observable API, so it is

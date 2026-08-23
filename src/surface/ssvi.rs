@@ -35,7 +35,9 @@ use crate::smile::arbitrage::{ArbitrageReport, density_from_g, gatheral_g, scan_
 use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics, surface_diagnostics};
-use crate::surface::calib::{check_theta_monotone, optimize_eta_gamma, validate_calibration_grid};
+use crate::surface::calib::{
+    RHO_CLAMP, check_theta_monotone, optimize_eta_gamma, validate_calibration_grid,
+};
 use crate::surface::interp::strike_grid;
 use crate::surface::{CALENDAR_ARB_TOL, CALENDAR_CHECK_GRID_SIZE};
 use crate::types::{Strike, Tenor, Variance, Vol};
@@ -337,7 +339,7 @@ impl SsviSurface {
         check_theta_monotone(&thetas, tenors, "SSVI")?;
 
         // Average rho from per-tenor SVI fits, clamped to valid range
-        let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
+        let rho_global = (rho_sum / n_tenors as f64).clamp(-RHO_CLAMP, RHO_CLAMP);
 
         // Prepare observation triples from filtered data so Stage 2 optimizes
         // against the same points that Stage 1 SVI was calibrated on.

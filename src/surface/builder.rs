@@ -420,15 +420,11 @@ impl SurfaceBuilder {
             };
 
         #[cfg(feature = "parallel")]
-        let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> = self
-            .tenor_data
-            .par_iter()
-            .map(calibrate_tenor)
-            .collect::<crate::error::Result<Vec<_>>>()?;
+        let tenors = self.tenor_data.par_iter();
         #[cfg(not(feature = "parallel"))]
-        let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> = self
-            .tenor_data
-            .iter()
+        let tenors = self.tenor_data.iter();
+
+        let mut tenor_smile_pairs: Vec<(f64, Box<dyn SmileSection>)> = tenors
             .map(calibrate_tenor)
             .collect::<crate::error::Result<Vec<_>>>()?;
 

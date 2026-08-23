@@ -22,7 +22,8 @@ use crate::surface::CALENDAR_ARB_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{SurfaceDiagnostics, surface_diagnostics};
 use crate::surface::calib::{
-    GRID_N, check_theta_monotone, optimize_eta_gamma, validate_calibration_grid,
+    GRID_N, RHO_CLAMP, RHO_FLAT_EPS, check_theta_monotone, optimize_eta_gamma,
+    validate_calibration_grid,
 };
 use crate::surface::ssvi::{SsviSlice, ssvi_total_variance, ssvi_total_variance_with_phi_theta};
 use crate::types::{Strike, Tenor, Variance, Vol};
@@ -332,7 +333,7 @@ impl EssviSurface {
         let theta_max = thetas[thetas.len() - 1];
 
         let rho_diff = rho_m - rho_0;
-        if rho_diff.abs() > 1e-14 {
+        if rho_diff.abs() > RHO_FLAT_EPS {
             let a_max = a_max_eq57(gamma, rho_diff, rho_m);
             if a > a_max + 1e-12 {
                 return Err(VolSurfError::InvalidInput {
@@ -521,7 +522,7 @@ impl EssviSurface {
         // Quadratic spacing concentrates a-scan grid near a=0 where narrow optima live.
         let fit_a = |r0: f64, rm: f64| -> (f64, f64) {
             let d = rm - r0;
-            if d.abs() < 1e-14 {
+            if d.abs() < RHO_FLAT_EPS {
                 let rss: f64 = rhos.iter().map(|&r| (r0 - r).powi(2)).sum();
                 return (0.0, rss);
             }
@@ -558,8 +559,8 @@ impl EssviSurface {
             |r0, rm| fit_a(r0, rm).1,
         )
         .unwrap_or((
-            rho_min.clamp(-0.999, 0.999),
-            rho_max.clamp(-0.999, 0.999),
+            rho_min.clamp(-RHO_CLAMP, RHO_CLAMP),
+            rho_max.clamp(-RHO_CLAMP, RHO_CLAMP),
             f64::MAX,
         ));
 
@@ -567,7 +568,11 @@ impl EssviSurface {
         let nm_config = crate::optim::NelderMeadConfig::calibration();
         let nm_rho = crate::optim::nelder_mead_2d(
             |r0, rm| {
-                if r0.abs() >= 0.999 || rm.abs() >= 0.999 || !r0.is_finite() || !rm.is_finite() {
+                if r0.abs() >= RHO_CLAMP
+                    || rm.abs() >= RHO_CLAMP
+                    || !r0.is_finite()
+                    || !rm.is_finite()
+                {
                     return f64::MAX;
                 }
                 fit_a(r0, rm).1
@@ -579,8 +584,8 @@ impl EssviSurface {
             &nm_config,
         );
 
-        let opt_rho_0 = nm_rho.x.clamp(-0.999, 0.999);
-        let opt_rho_m = nm_rho.y.clamp(-0.999, 0.999);
+        let opt_rho_0 = nm_rho.x.clamp(-RHO_CLAMP, RHO_CLAMP);
+        let opt_rho_m = nm_rho.y.clamp(-RHO_CLAMP, RHO_CLAMP);
         let (opt_a_fit, _) = fit_a(opt_rho_0, opt_rho_m);
 
         #[cfg(feature = "logging")]
@@ -611,7 +616,7 @@ impl EssviSurface {
             {
                 return f64::MAX;
             }
-            let a_eff = if rho_diff.abs() > 1e-14 {
+            let a_eff = if rho_diff.abs() > RHO_FLAT_EPS {
                 let a_mx = a_max_eq57(gamma, rho_diff, opt_rho_m);
                 if a_mx < 0.0 {
                     return f64::MAX;
@@ -624,7 +629,7 @@ impl EssviSurface {
             let mut rss = 0.0;
             for &(theta, k, w_obs, ln_tr) in &all_points {
                 let rho = (opt_rho_0 + (opt_rho_m - opt_rho_0) * (a_eff * ln_tr).exp())
-                    .clamp(-0.999, 0.999);
+                    .clamp(-RHO_CLAMP, RHO_CLAMP);
                 let theta_c = theta.max(1e-10);
                 let w_pred = ssvi_total_variance_with_phi_theta(theta, theta_c, k, rho, eta, gamma);
                 if !w_pred.is_finite() {
@@ -637,7 +642,7 @@ impl EssviSurface {
 
         let (opt_eta, opt_gamma, rms) = optimize_eta_gamma(objective, all_points.len(), "eSSVI")?;
 
-        let final_a = if rho_diff.abs() > 1e-14 {
+        let final_a = if rho_diff.abs() > RHO_FLAT_EPS {
             let a_mx = a_max_eq57(opt_gamma, rho_diff, opt_rho_m);
             opt_a_fit.min(a_mx.max(0.0))
         } else {
@@ -732,7 +737,7 @@ impl EssviSurface {
     pub fn rho(&self, theta: f64) -> f64 {
         let t = (theta / self.theta_max).clamp(0.0, 1.0);
         let r = self.rho_0 + (self.rho_m - self.rho_0) * t.powf(self.a);
-        r.clamp(-0.999, 0.999)
+        r.clamp(-RHO_CLAMP, RHO_CLAMP)
     }
 
     pub fn rho_0(&self) -> f64 {
