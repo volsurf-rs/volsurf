@@ -35,6 +35,7 @@ pub mod error;
 pub mod implied;
 pub mod local_vol;
 mod optim;
+mod serde_raw;
 pub mod smile;
 pub mod surface;
 pub mod types;

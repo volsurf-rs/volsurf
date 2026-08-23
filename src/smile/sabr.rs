@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme, black_vega_weight, prepare_market_vols};
 use crate::error::{self, VolSurfError};
+use crate::serde_raw::validated_serde;
 use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::ArbitrageReport;
@@ -91,42 +92,14 @@ pub struct SabrSmile {
     nu: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SabrSmileRaw {
+validated_serde!(SabrSmile => SabrSmileRaw {
     forward: f64,
     expiry: f64,
     alpha: f64,
     beta: f64,
     rho: f64,
     nu: f64,
-}
-
-impl TryFrom<SabrSmileRaw> for SabrSmile {
-    type Error = VolSurfError;
-    fn try_from(raw: SabrSmileRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.forward,
-            raw.expiry,
-            raw.alpha,
-            raw.beta,
-            raw.rho,
-            raw.nu,
-        )
-    }
-}
-
-impl From<SabrSmile> for SabrSmileRaw {
-    fn from(s: SabrSmile) -> Self {
-        Self {
-            forward: s.forward,
-            expiry: s.expiry,
-            alpha: s.alpha,
-            beta: s.beta,
-            rho: s.rho,
-            nu: s.nu,
-        }
-    }
-}
+});
 
 impl SabrSmile {
     /// Create a SABR smile from calibrated parameters.

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme, prepare_market_vols};
 use crate::error::{self, VolSurfError};
+use crate::serde_raw::validated_serde;
 use crate::smile::arbitrage::ArbitrageReport;
 use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::CALENDAR_ARB_TOL;
@@ -97,30 +98,17 @@ pub struct PerTenorFit {
 #[serde(try_from = "EssviSliceRaw", into = "EssviSliceRaw")]
 pub struct EssviSlice(SsviSlice);
 
-#[derive(Serialize, Deserialize)]
-struct EssviSliceRaw {
+validated_serde!(@shadow EssviSlice => EssviSliceRaw {
     forward: f64,
     expiry: f64,
     rho: f64,
     eta: f64,
     gamma: f64,
     theta: f64,
-}
+});
 
-impl TryFrom<EssviSliceRaw> for EssviSlice {
-    type Error = VolSurfError;
-    fn try_from(raw: EssviSliceRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.forward,
-            raw.expiry,
-            raw.rho,
-            raw.eta,
-            raw.gamma,
-            raw.theta,
-        )
-    }
-}
-
+// `EssviSlice` wraps `SsviSlice`, whose fields are private to `ssvi.rs`, so
+// this one reads through accessors rather than the macro's field access.
 impl From<EssviSlice> for EssviSliceRaw {
     fn from(s: EssviSlice) -> Self {
         Self {
@@ -278,8 +266,7 @@ pub struct EssviSurface {
     theta_max: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct EssviSurfaceRaw {
+validated_serde!(EssviSurface => EssviSurfaceRaw {
     rho_0: f64,
     rho_m: f64,
     a: f64,
@@ -288,38 +275,7 @@ struct EssviSurfaceRaw {
     tenors: Vec<f64>,
     forwards: Vec<f64>,
     thetas: Vec<f64>,
-}
-
-impl TryFrom<EssviSurfaceRaw> for EssviSurface {
-    type Error = VolSurfError;
-    fn try_from(raw: EssviSurfaceRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.rho_0,
-            raw.rho_m,
-            raw.a,
-            raw.eta,
-            raw.gamma,
-            raw.tenors,
-            raw.forwards,
-            raw.thetas,
-        )
-    }
-}
-
-impl From<EssviSurface> for EssviSurfaceRaw {
-    fn from(s: EssviSurface) -> Self {
-        Self {
-            rho_0: s.rho_0,
-            rho_m: s.rho_m,
-            a: s.a,
-            eta: s.eta,
-            gamma: s.gamma,
-            tenors: s.tenors,
-            forwards: s.forwards,
-            thetas: s.thetas,
-        }
-    }
-}
+});
 
 // Hendriks-Martini Eq. 5.7: upper bound on `a` for calendar no-arb.
 // Caller must check rho_diff != 0 before calling.

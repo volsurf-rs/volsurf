@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme};
 use crate::error::{self, VolSurfError};
+use crate::serde_raw::validated_serde;
 use crate::smile::arbitrage::{ArbitrageReport, density_from_g, gatheral_g, scan_g};
 use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::VolSurface;
@@ -100,42 +101,14 @@ pub struct SsviSurface {
     one_minus_rho_sq: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SsviSurfaceRaw {
+validated_serde!(SsviSurface => SsviSurfaceRaw {
     rho: f64,
     eta: f64,
     gamma: f64,
     tenors: Vec<f64>,
     forwards: Vec<f64>,
     thetas: Vec<f64>,
-}
-
-impl TryFrom<SsviSurfaceRaw> for SsviSurface {
-    type Error = VolSurfError;
-    fn try_from(raw: SsviSurfaceRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.rho,
-            raw.eta,
-            raw.gamma,
-            raw.tenors,
-            raw.forwards,
-            raw.thetas,
-        )
-    }
-}
-
-impl From<SsviSurface> for SsviSurfaceRaw {
-    fn from(s: SsviSurface) -> Self {
-        Self {
-            rho: s.rho,
-            eta: s.eta,
-            gamma: s.gamma,
-            tenors: s.tenors,
-            forwards: s.forwards,
-            thetas: s.thetas,
-        }
-    }
-}
+});
 
 impl SsviSurface {
     /// Create an SSVI surface from global parameters and per-tenor data.
@@ -631,42 +604,14 @@ pub struct SsviSlice {
     one_minus_rho_sq: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SsviSliceRaw {
+validated_serde!(SsviSlice => SsviSliceRaw {
     forward: f64,
     expiry: f64,
     rho: f64,
     eta: f64,
     gamma: f64,
     theta: f64,
-}
-
-impl TryFrom<SsviSliceRaw> for SsviSlice {
-    type Error = VolSurfError;
-    fn try_from(raw: SsviSliceRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.forward,
-            raw.expiry,
-            raw.rho,
-            raw.eta,
-            raw.gamma,
-            raw.theta,
-        )
-    }
-}
-
-impl From<SsviSlice> for SsviSliceRaw {
-    fn from(s: SsviSlice) -> Self {
-        Self {
-            forward: s.forward,
-            expiry: s.expiry,
-            rho: s.rho,
-            eta: s.eta,
-            gamma: s.gamma,
-            theta: s.theta,
-        }
-    }
-}
+});
 
 impl SsviSlice {
     /// Create an SSVI slice at a fixed tenor.

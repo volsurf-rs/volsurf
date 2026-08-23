@@ -19,6 +19,7 @@ use nalgebra::{DMatrix, DVector};
 
 use crate::calibration::{DataFilter, WeightingScheme, black_vega_weight, prepare_market_vols};
 use crate::error::{self, VolSurfError};
+use crate::serde_raw::validated_serde;
 use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, density_from_g, gatheral_g, scan_g};
@@ -310,8 +311,7 @@ pub struct SviSmile {
     sigma: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SviSmileRaw {
+validated_serde!(SviSmile => SviSmileRaw {
     forward: f64,
     expiry: f64,
     a: f64,
@@ -319,36 +319,7 @@ struct SviSmileRaw {
     rho: f64,
     m: f64,
     sigma: f64,
-}
-
-impl TryFrom<SviSmileRaw> for SviSmile {
-    type Error = VolSurfError;
-    fn try_from(raw: SviSmileRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.forward,
-            raw.expiry,
-            raw.a,
-            raw.b,
-            raw.rho,
-            raw.m,
-            raw.sigma,
-        )
-    }
-}
-
-impl From<SviSmile> for SviSmileRaw {
-    fn from(s: SviSmile) -> Self {
-        Self {
-            forward: s.forward,
-            expiry: s.expiry,
-            a: s.a,
-            b: s.b,
-            rho: s.rho,
-            m: s.m,
-            sigma: s.sigma,
-        }
-    }
-}
+});
 
 impl SviSmile {
     /// Create an SVI smile from calibrated parameters.

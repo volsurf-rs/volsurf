@@ -18,6 +18,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
+use crate::serde_raw::validated_serde;
 use crate::smile::SmileSection;
 use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
 use crate::types::{Strike, Variance, Vol};
@@ -59,31 +60,12 @@ pub struct SplineSmile {
     coeffs: Vec<SplineCoeff>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SplineSmileRaw {
+validated_serde!(SplineSmile => SplineSmileRaw {
     forward: f64,
     expiry: f64,
     strikes: Vec<f64>,
     variances: Vec<f64>,
-}
-
-impl TryFrom<SplineSmileRaw> for SplineSmile {
-    type Error = VolSurfError;
-    fn try_from(raw: SplineSmileRaw) -> Result<Self, Self::Error> {
-        Self::new(raw.forward, raw.expiry, raw.strikes, raw.variances)
-    }
-}
-
-impl From<SplineSmile> for SplineSmileRaw {
-    fn from(s: SplineSmile) -> Self {
-        Self {
-            forward: s.forward,
-            expiry: s.expiry,
-            strikes: s.strikes,
-            variances: s.variances,
-        }
-    }
-}
+});
 
 impl SplineSmile {
     /// Create a spline smile from strike-variance pairs.

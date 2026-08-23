@@ -18,8 +18,9 @@
 use crate::error::VolSurfError;
 use crate::implied::black::{self, BlackImpliedVol};
 use crate::implied::normal::{self, NormalImpliedVol};
+use crate::implied::{PriceDomain, validate_implied_inputs, validate_pricing_inputs};
 use crate::types::{OptionType, Vol};
-use crate::validate::{validate_non_negative, validate_positive};
+use crate::validate::{validate_in_range, validate_positive};
 
 /// Displaced diffusion implied volatility calculator.
 ///
@@ -42,11 +43,7 @@ impl DisplacedImpliedVol {
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if `beta` is not in \[0, 1\].
     pub fn new(beta: f64) -> crate::error::Result<Self> {
-        if !(0.0..=1.0).contains(&beta) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("beta must be in [0, 1], got {beta}"),
-            });
-        }
+        validate_in_range(beta, 0.0, 1.0, "beta")?;
         Ok(Self { beta })
     }
 
@@ -79,10 +76,7 @@ impl DisplacedImpliedVol {
         expiry: f64,
         option_type: OptionType,
     ) -> crate::error::Result<Vol> {
-        validate_non_negative(option_price, "option_price")?;
-        validate_positive(forward, "forward")?;
-        validate_positive(strike, "strike")?;
-        validate_positive(expiry, "expiry")?;
+        validate_implied_inputs(option_price, forward, strike, expiry, PriceDomain::Positive)?;
 
         if self.beta == 1.0 {
             return BlackImpliedVol::compute(option_price, forward, strike, expiry, option_type);
@@ -141,15 +135,8 @@ pub fn displaced_price(
     beta: f64,
     option_type: OptionType,
 ) -> crate::error::Result<f64> {
-    validate_positive(forward, "forward")?;
-    validate_positive(strike, "strike")?;
-    validate_non_negative(vol, "volatility")?;
-    validate_non_negative(expiry, "expiry")?;
-    if !(0.0..=1.0).contains(&beta) {
-        return Err(VolSurfError::InvalidInput {
-            message: format!("beta must be in [0, 1], got {beta}"),
-        });
-    }
+    validate_pricing_inputs(forward, strike, vol, expiry, PriceDomain::Positive)?;
+    validate_in_range(beta, 0.0, 1.0, "beta")?;
 
     if beta == 1.0 {
         return black::black_price(forward, strike, vol, expiry, option_type);
