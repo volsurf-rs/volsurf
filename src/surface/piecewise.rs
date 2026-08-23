@@ -550,7 +550,7 @@ mod tests {
         let smile = surface.smile_at(Tenor(1.0)).unwrap();
 
         for cfg in [
-            ArbitrageScanConfig::svi_default(),
+            ArbitrageScanConfig::wide(),
             ArbitrageScanConfig {
                 n_points: 61,
                 k_min: -1.5,

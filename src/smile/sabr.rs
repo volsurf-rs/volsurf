@@ -21,7 +21,6 @@ use crate::error::{self, VolSurfError};
 use crate::serde_raw::validated_serde;
 use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
-use crate::smile::arbitrage::ArbitrageReport;
 use crate::types::{Strike, Vol};
 use crate::validate::{
     validate_in_range, validate_non_negative, validate_open_unit_interval, validate_positive,
@@ -524,18 +523,13 @@ impl SmileSection for SabrSmile {
         "SABR"
     }
 
-    /// Check butterfly arbitrage by scanning risk-neutral density.
-    ///
-    /// Evaluates density on a grid of 200 points over k ∈ \[−2, 2\].
-    /// The range is narrower than SVI's \[−3, 3\] because the Hagan
-    /// approximation breaks down in deep wings. A point where `density()`
-    /// returns `Err` fails the whole scan, so a returned report always
-    /// covers every grid point.
+    /// The narrow grid, k ∈ \[−2, 2\]: the Hagan expansion breaks down in the
+    /// deep wings, and a scan out there reports that breakdown as arbitrage.
     ///
     /// # Reference
     /// Hagan et al. (2002), "Managing Smile Risk".
-    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        self.is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+    fn default_scan_config(&self) -> ArbitrageScanConfig {
+        ArbitrageScanConfig::narrow()
     }
 }
 

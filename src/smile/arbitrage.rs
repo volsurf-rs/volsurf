@@ -314,12 +314,12 @@ mod tests {
     // ========== ArbitrageScanConfig ==========
 
     #[test]
-    fn svi_default_config_matches_hardcoded() {
+    fn wide_config_matches_hardcoded() {
         use crate::smile::{ArbitrageScanConfig, SviSmile};
         let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.0, 0.3).unwrap();
         let default_report = svi.is_arbitrage_free().unwrap();
         let config_report = svi
-            .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+            .is_arbitrage_free_with(&ArbitrageScanConfig::wide())
             .unwrap();
         assert_eq!(default_report.is_free(), config_report.is_free());
         assert_eq!(
@@ -329,17 +329,69 @@ mod tests {
     }
 
     #[test]
-    fn sabr_default_config_matches_hardcoded() {
+    fn narrow_config_matches_hardcoded() {
         use crate::smile::{ArbitrageScanConfig, SabrSmile};
         let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
         let default_report = sabr.is_arbitrage_free().unwrap();
         let config_report = sabr
-            .is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+            .is_arbitrage_free_with(&ArbitrageScanConfig::narrow())
             .unwrap();
         assert_eq!(default_report.is_free(), config_report.is_free());
         assert_eq!(
             default_report.butterfly_violations.len(),
             config_report.butterfly_violations.len()
+        );
+    }
+
+    #[test]
+    fn default_config_is_the_wide_grid() {
+        use crate::smile::ArbitrageScanConfig;
+        assert_eq!(ArbitrageScanConfig::default(), ArbitrageScanConfig::wide());
+    }
+
+    #[test]
+    fn is_arbitrage_free_scans_the_models_own_default_grid() {
+        use crate::smile::{ArbitrageScanConfig, SmileSection};
+        use crate::types::{Strike, Vol};
+
+        /// Only quotable near the money, like a model whose expansion breaks
+        /// down in the wings.
+        #[derive(Debug)]
+        struct NarrowDomainSmile;
+
+        impl SmileSection for NarrowDomainSmile {
+            fn vol(&self, strike: Strike) -> error::Result<Vol> {
+                if (strike.0 / 100.0).ln().abs() > 1.0 {
+                    return Err(error::VolSurfError::NumericalError {
+                        message: "outside the model's domain".into(),
+                    });
+                }
+                Ok(Vol(0.20))
+            }
+            fn forward(&self) -> f64 {
+                100.0
+            }
+            fn expiry(&self) -> f64 {
+                1.0
+            }
+            fn model_name(&self) -> &'static str {
+                "NarrowDomain"
+            }
+            fn default_scan_config(&self) -> ArbitrageScanConfig {
+                ArbitrageScanConfig {
+                    n_points: 50,
+                    k_min: -0.5,
+                    k_max: 0.5,
+                }
+            }
+        }
+
+        assert!(NarrowDomainSmile.is_arbitrage_free().unwrap().is_free());
+        assert!(
+            NarrowDomainSmile
+                .is_arbitrage_free_with(&ArbitrageScanConfig::wide())
+                .is_err(),
+            "the wide grid leaves the model's domain, so only the override saves the default check"
         );
     }
 
@@ -373,7 +425,7 @@ mod tests {
         use crate::smile::{ArbitrageScanConfig, SabrSmile};
         let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
         let wide = sabr
-            .is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+            .is_arbitrage_free_with(&ArbitrageScanConfig::narrow())
             .unwrap();
         let narrow = sabr
             .is_arbitrage_free_with(&ArbitrageScanConfig {

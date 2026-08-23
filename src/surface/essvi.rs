@@ -854,7 +854,7 @@ impl VolSurface for EssviSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        self.diagnostics_with(&ArbitrageScanConfig::svi_default())
+        self.diagnostics_with(&ArbitrageScanConfig::wide())
     }
 
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {

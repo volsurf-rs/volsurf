@@ -602,7 +602,7 @@ mod tests {
 
         let default = smile.is_arbitrage_free().unwrap();
         let explicit = smile
-            .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+            .is_arbitrage_free_with(&ArbitrageScanConfig::wide())
             .unwrap();
         assert!(
             !default.butterfly_violations.is_empty(),
@@ -684,7 +684,7 @@ mod tests {
         .unwrap();
 
         let err = smile
-            .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+            .is_arbitrage_free_with(&ArbitrageScanConfig::wide())
             .unwrap_err();
         let VolSurfError::InvalidInput { message } = &err else {
             panic!("expected InvalidInput, got {err}");

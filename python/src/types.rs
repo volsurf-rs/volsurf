@@ -142,16 +142,16 @@ impl PyArbitrageScanConfig {
     }
 
     #[staticmethod]
-    fn svi_default() -> Self {
+    fn wide() -> Self {
         Self {
-            inner: ArbitrageScanConfig::svi_default(),
+            inner: ArbitrageScanConfig::wide(),
         }
     }
 
     #[staticmethod]
-    fn sabr_default() -> Self {
+    fn narrow() -> Self {
         Self {
-            inner: ArbitrageScanConfig::sabr_default(),
+            inner: ArbitrageScanConfig::narrow(),
         }
     }
 

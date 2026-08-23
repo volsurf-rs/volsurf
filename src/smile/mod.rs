@@ -33,14 +33,26 @@ use crate::validate::validate_positive;
 /// k = ln(K/F) used when checking `is_arbitrage_free_with`.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ArbitrageScanConfig {
+    /// Sample points across the range, at least 2.
     pub n_points: usize,
+    /// Lower end of the scanned log-moneyness range.
     pub k_min: f64,
+    /// Upper end of the scanned log-moneyness range, greater than `k_min`.
     pub k_max: f64,
 }
 
+impl Default for ArbitrageScanConfig {
+    fn default() -> Self {
+        Self::wide()
+    }
+}
+
 impl ArbitrageScanConfig {
-    /// Default for SVI and SSVI models: 200 points over [-3, 3].
-    pub fn svi_default() -> Self {
+    /// 200 points over k ∈ \[−3, 3\], the default grid.
+    ///
+    /// Wide enough for models valid across the whole wing — SVI, SSVI and
+    /// eSSVI scan an analytical g-function, which stays well-behaved out there.
+    pub fn wide() -> Self {
         Self {
             n_points: 200,
             k_min: -3.0,
@@ -48,10 +60,12 @@ impl ArbitrageScanConfig {
         }
     }
 
-    /// Default for SABR model: 200 points over [-2, 2].
+    /// 200 points over k ∈ \[−2, 2\].
     ///
-    /// Narrower range than SVI because Hagan formula breaks down in deep wings.
-    pub fn sabr_default() -> Self {
+    /// For models whose own approximation breaks down before the deep wings do,
+    /// which would otherwise report the breakdown as arbitrage. SABR uses this:
+    /// the Hagan expansion loses accuracy past |k| ≈ 2.
+    pub fn narrow() -> Self {
         Self {
             n_points: 200,
             k_min: -2.0,
@@ -175,13 +189,24 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// Human-readable model name (e.g. "SVI", "SABR", "CubicSpline").
     fn model_name(&self) -> &'static str;
 
+    /// The scan grid [`is_arbitrage_free`](SmileSection::is_arbitrage_free)
+    /// runs on.
+    ///
+    /// Override in models that are only accurate over part of the wing, so a
+    /// caller asking for the default check gets this model's own domain rather
+    /// than the crate-wide [`wide`](ArbitrageScanConfig::wide) grid.
+    fn default_scan_config(&self) -> ArbitrageScanConfig {
+        ArbitrageScanConfig::wide()
+    }
+
     /// Check whether this smile is free of butterfly arbitrage.
     ///
-    /// Uses model-specific defaults for scan grid. Override this or
-    /// [`is_arbitrage_free_with`](SmileSection::is_arbitrage_free_with)
-    /// for custom grid parameters.
+    /// Scans [`default_scan_config`](SmileSection::default_scan_config).
+    /// Override that to change the grid; override
+    /// [`is_arbitrage_free_with`](SmileSection::is_arbitrage_free_with) to
+    /// change how the grid is scanned.
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        self.is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+        self.is_arbitrage_free_with(&self.default_scan_config())
     }
 
     /// Check butterfly arbitrage with custom scan grid configuration.

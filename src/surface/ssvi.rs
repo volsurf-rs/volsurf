@@ -472,7 +472,7 @@ impl VolSurface for SsviSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        self.diagnostics_with(&ArbitrageScanConfig::svi_default())
+        self.diagnostics_with(&ArbitrageScanConfig::wide())
     }
 
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
@@ -717,16 +717,12 @@ impl SmileSection for SsviSlice {
 
     /// Check butterfly arbitrage by scanning the Gatheral g-function.
     ///
-    /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
-    /// Points where g(k) < −tol are recorded as [`crate::smile::ButterflyViolation`]s
-    /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
+    /// Evaluates g(k) over the configured grid. Points where g(k) < −tol are
+    /// recorded as [`crate::smile::ButterflyViolation`]s with the actual
+    /// risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
     ///
     /// # Reference
     /// Gatheral & Jacquier (2014), Theorem 4.1.
-    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        self.is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
-    }
-
     fn is_arbitrage_free_with(
         &self,
         config: &ArbitrageScanConfig,

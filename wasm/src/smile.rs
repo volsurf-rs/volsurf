@@ -140,15 +140,15 @@ impl WasmArbitrageScanConfig {
         }
     }
 
-    pub fn svi_default() -> WasmArbitrageScanConfig {
+    pub fn wide() -> WasmArbitrageScanConfig {
         Self {
-            inner: ArbitrageScanConfig::svi_default(),
+            inner: ArbitrageScanConfig::wide(),
         }
     }
 
-    pub fn sabr_default() -> WasmArbitrageScanConfig {
+    pub fn narrow() -> WasmArbitrageScanConfig {
         Self {
-            inner: ArbitrageScanConfig::sabr_default(),
+            inner: ArbitrageScanConfig::narrow(),
         }
     }
 
