@@ -35,12 +35,12 @@ use crate::smile::arbitrage::{ArbitrageReport, density_from_g, gatheral_g, scan_
 use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics, surface_diagnostics};
+use crate::surface::calib::{check_theta_monotone, optimize_eta_gamma, validate_calibration_grid};
 use crate::surface::interp::strike_grid;
 use crate::surface::{CALENDAR_ARB_TOL, CALENDAR_CHECK_GRID_SIZE};
 use crate::types::{Strike, Tenor, Variance, Vol};
 use crate::validate::{
-    validate_in_range, validate_open_unit_interval, validate_positive, validate_positive_slice,
-    validate_surface_grid,
+    validate_in_range, validate_open_unit_interval, validate_positive, validate_surface_grid,
 };
 
 /// Evaluate the shared SSVI/eSSVI total-variance kernel.
@@ -295,7 +295,6 @@ impl SsviSurface {
         tracing::debug!(n_tenors = tenors.len(), "SSVI calibration started");
 
         const MIN_TENORS: usize = 2;
-        const GRID_N: usize = 15;
 
         if tenors.len() < MIN_TENORS {
             return Err(VolSurfError::InvalidInput {
@@ -305,18 +304,7 @@ impl SsviSurface {
                 ),
             });
         }
-        if tenors.len() != forwards.len() || tenors.len() != market_data.len() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors, forwards, and market_data must have the same length: {}, {}, {}",
-                    tenors.len(),
-                    forwards.len(),
-                    market_data.len()
-                ),
-            });
-        }
-        validate_positive_slice(tenors, "tenors")?;
-        validate_positive_slice(forwards, "forwards")?;
+        validate_calibration_grid(tenors, forwards, market_data.len())?;
 
         // Stage 1: Per-tenor SVI calibration
         let n_tenors = tenors.len();
@@ -346,23 +334,7 @@ impl SsviSurface {
             rho_sum += svi.rho();
         }
 
-        for (i, w) in thetas.windows(2).enumerate() {
-            if w[1] <= w[0] {
-                return Err(VolSurfError::CalibrationError {
-                    message: format!(
-                        "per-tenor SVI calibration produced non-monotone ATM variances: \
-                         theta[{i}]={:.6} >= theta[{}]={:.6} (tenors {}, {})",
-                        w[0],
-                        i + 1,
-                        w[1],
-                        tenors[i],
-                        tenors[i + 1]
-                    ),
-                    model: "SSVI",
-                    rms_error: None,
-                });
-            }
-        }
+        check_theta_monotone(&thetas, tenors, "SSVI")?;
 
         // Average rho from per-tenor SVI fits, clamped to valid range
         let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
@@ -404,43 +376,7 @@ impl SsviSurface {
             rss
         };
 
-        // Grid search over (eta, gamma)
-        let eta_lo = 0.01_f64;
-        let eta_hi = 3.0_f64;
-        let gamma_lo = 0.0_f64;
-        let gamma_hi = 1.0_f64;
-
-        let (best_eta, best_gamma, _best_rss) = crate::optim::grid_search_2d(
-            GRID_N,
-            |ie| eta_lo + (eta_hi - eta_lo) * ie as f64 / (GRID_N - 1) as f64,
-            |ig| gamma_lo + (gamma_hi - gamma_lo) * ig as f64 / (GRID_N - 1) as f64,
-            objective,
-        )
-        .ok_or_else(|| VolSurfError::CalibrationError {
-            message: "grid search found no valid starting point".into(),
-            model: "SSVI",
-            rms_error: None,
-        })?;
-
-        // Nelder-Mead refinement
-        let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
-        let step_gamma = (gamma_hi - gamma_lo) / (GRID_N as f64) * 0.5;
-
-        let nm_config = crate::optim::NelderMeadConfig::calibration();
-        let nm_result = crate::optim::nelder_mead_2d(
-            objective, best_eta, best_gamma, step_eta, step_gamma, &nm_config,
-        );
-
-        let opt_eta = nm_result.x.max(1e-6);
-        let opt_gamma = nm_result.y.clamp(0.0, 1.0);
-
-        // Compute RMS for diagnostics
-        let n_points = all_points.len();
-        let rms = if n_points > 0 {
-            (nm_result.fval / n_points as f64).sqrt()
-        } else {
-            0.0
-        };
+        let (opt_eta, opt_gamma, rms) = optimize_eta_gamma(objective, all_points.len(), "SSVI")?;
 
         #[cfg(feature = "logging")]
         tracing::debug!(

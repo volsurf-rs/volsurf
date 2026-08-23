@@ -11,6 +11,7 @@
 
 pub mod arbitrage;
 pub mod builder;
+pub(crate) mod calib;
 pub mod essvi;
 pub(crate) mod interp;
 pub mod piecewise;
