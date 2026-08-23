@@ -31,7 +31,7 @@ use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::EXPIRY_MATCH_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{SurfaceDiagnostics, surface_diagnostics};
-use crate::surface::interp::strike_grid;
+use crate::surface::interp::{TenorPosition, locate_tenor, strike_grid};
 use crate::types::{Strike, Tenor, Variance};
 use crate::validate::{validate_positive, validate_positive_slice, validate_strictly_increasing};
 
@@ -146,30 +146,22 @@ impl PiecewiseSurface {
         }
     }
 
-    /// Find the bracketing tenor indices for a given expiry.
-    ///
-    /// Returns `(TenorPosition, left_index)` where left_index is the
-    /// index of the tenor <= expiry.
     fn locate_tenor(&self, expiry: f64) -> TenorPosition {
-        let n = self.tenors.len();
+        locate_tenor(&self.tenors, expiry)
+    }
 
-        // Check for exact match (within tolerance)
-        for (i, &t) in self.tenors.iter().enumerate() {
-            if (expiry - t).abs() < EXPIRY_MATCH_TOL {
-                return TenorPosition::Exact(i);
-            }
-        }
-
-        if expiry < self.tenors[0] {
-            return TenorPosition::Before;
-        }
-        if expiry > self.tenors[n - 1] {
-            return TenorPosition::After;
-        }
-
-        // Binary search for bracketing interval
-        let right = self.tenors.partition_point(|&t| t < expiry);
-        TenorPosition::Between(right - 1, right)
+    /// The two `diagnostics` entry points differ only in how each smile is
+    /// asked to report itself; the forwards and the variance closure are shared.
+    fn diagnostics_via<R>(&self, report_at: R) -> error::Result<SurfaceDiagnostics>
+    where
+        R: Fn(usize) -> error::Result<crate::smile::ArbitrageReport>,
+    {
+        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
+        surface_diagnostics(&self.tenors, &forwards, report_at, |i, strike| {
+            self.smiles[i]
+                .variance(Strike(strike))
+                .map(|variance| variance.0)
+        })
     }
 }
 
@@ -217,17 +209,6 @@ impl SmileSection for SharedSmile {
     ) -> error::Result<crate::smile::ArbitrageReport> {
         self.0.is_arbitrage_free_with(config)
     }
-}
-
-enum TenorPosition {
-    /// Exactly matches tenor at index i.
-    Exact(usize),
-    /// Before the first tenor.
-    Before,
-    /// After the last tenor.
-    After,
-    /// Between tenors[i] and tenors[j].
-    Between(usize, usize),
 }
 
 impl VolSurface for PiecewiseSurface {
@@ -295,31 +276,11 @@ impl VolSurface for PiecewiseSurface {
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
-        surface_diagnostics(
-            &self.tenors,
-            &forwards,
-            |i| self.smiles[i].is_arbitrage_free(),
-            |i, strike| {
-                self.smiles[i]
-                    .variance(Strike(strike))
-                    .map(|variance| variance.0)
-            },
-        )
+        self.diagnostics_via(|i| self.smiles[i].is_arbitrage_free())
     }
 
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
-        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
-        surface_diagnostics(
-            &self.tenors,
-            &forwards,
-            |i| self.smiles[i].is_arbitrage_free_with(config),
-            |i, strike| {
-                self.smiles[i]
-                    .variance(Strike(strike))
-                    .map(|variance| variance.0)
-            },
-        )
+        self.diagnostics_via(|i| self.smiles[i].is_arbitrage_free_with(config))
     }
 
     fn tenors(&self) -> &[f64] {

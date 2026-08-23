@@ -1,5 +1,34 @@
 use crate::surface::EXPIRY_MATCH_TOL;
 
+/// Where an expiry falls relative to a strictly increasing tenor grid.
+pub(crate) enum TenorPosition {
+    /// Matches `tenors[i]` within [`EXPIRY_MATCH_TOL`].
+    Exact(usize),
+    /// Before the first tenor.
+    Before,
+    /// After the last tenor.
+    After,
+    /// Strictly between `tenors[i]` and `tenors[j]`, with `j == i + 1`.
+    Between(usize, usize),
+}
+
+/// Locate `expiry` on a strictly increasing, non-empty tenor grid.
+pub(crate) fn locate_tenor(tenors: &[f64], expiry: f64) -> TenorPosition {
+    for (i, &t) in tenors.iter().enumerate() {
+        if (expiry - t).abs() < EXPIRY_MATCH_TOL {
+            return TenorPosition::Exact(i);
+        }
+    }
+    if expiry < tenors[0] {
+        return TenorPosition::Before;
+    }
+    if expiry > tenors[tenors.len() - 1] {
+        return TenorPosition::After;
+    }
+    let right = tenors.partition_point(|&t| t < expiry);
+    TenorPosition::Between(right - 1, right)
+}
+
 /// Construct the standard log-spaced strike grid from 0.5·F to 2.0·F.
 pub(crate) fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
     let log_min = (0.5_f64).ln();
@@ -27,28 +56,18 @@ pub(crate) fn interpolate_theta_forward(
     debug_assert_eq!(tenors.len(), forwards.len());
     let n = tenors.len();
 
-    for (i, &t) in tenors.iter().enumerate() {
-        if (expiry - t).abs() < EXPIRY_MATCH_TOL {
-            return (thetas[i], forwards[i]);
+    match locate_tenor(tenors, expiry) {
+        TenorPosition::Exact(i) => (thetas[i], forwards[i]),
+        TenorPosition::Before => (thetas[0] * expiry / tenors[0], forwards[0]),
+        TenorPosition::After => (thetas[n - 1] * expiry / tenors[n - 1], forwards[n - 1]),
+        TenorPosition::Between(left, right) => {
+            let alpha = (expiry - tenors[left]) / (tenors[right] - tenors[left]);
+            let theta = (1.0 - alpha) * thetas[left] + alpha * thetas[right];
+            let forward =
+                (forwards[left].ln() * (1.0 - alpha) + forwards[right].ln() * alpha).exp();
+            (theta, forward)
         }
     }
-
-    if expiry < tenors[0] {
-        let theta = thetas[0] * expiry / tenors[0];
-        return (theta, forwards[0]);
-    }
-
-    if expiry > tenors[n - 1] {
-        let theta = thetas[n - 1] * expiry / tenors[n - 1];
-        return (theta, forwards[n - 1]);
-    }
-
-    let right = tenors.partition_point(|&t| t < expiry);
-    let left = right - 1;
-    let alpha = (expiry - tenors[left]) / (tenors[right] - tenors[left]);
-    let theta = (1.0 - alpha) * thetas[left] + alpha * thetas[right];
-    let forward = (forwards[left].ln() * (1.0 - alpha) + forwards[right].ln() * alpha).exp();
-    (theta, forward)
 }
 
 #[cfg(test)]
