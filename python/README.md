@@ -159,6 +159,9 @@ b.weighting(WeightingScheme.vega())
 The same options reach single-tenor fits through
 `SviSmile.calibrate_with_config(forward, expiry, market_vols, filter, weighting, seed)`.
 Pass `seed` to warm-start from prior parameters.
+`SplineSmile.calibrate_with_config(forward, expiry, market_vols, filter)` takes the
+filter only — a spline passes through every surviving quote, so there is no
+residual for a weighting to act on.
 
 ## Implied volatility
 

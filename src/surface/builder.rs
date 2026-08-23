@@ -875,7 +875,8 @@ mod tests {
             .model(SmileModel::CubicSpline)
             .add_tenor(0.25, &strikes, &vols)
             .build();
-        // SplineSmile::new rejects non-strictly-increasing strikes
+        // `calibrate_with_config` sorts the quotes and catches the shared strike
+        // itself, before the knots ever reach `new`
         assert!(
             result.is_err(),
             "duplicate strikes should cause build to fail"

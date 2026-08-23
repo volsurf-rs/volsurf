@@ -130,7 +130,9 @@ class TestSplineCalibrateWithConfig:
         market = self._market_data()
         a = SplineSmile.calibrate(100.0, 1.0, market)
         b = SplineSmile.calibrate_with_config(100.0, 1.0, market)
-        assert abs(a.vol(100.0) - b.vol(100.0)) < 1e-12
+        # Probe off-knot in the wing: a spline reproduces every surviving knot
+        # exactly, so only a point like this reveals a dropped 60/170.
+        assert abs(a.vol(150.0) - b.vol(150.0)) < 1e-12
 
     def test_filter_drops_the_wings(self):
         market = self._market_data()
