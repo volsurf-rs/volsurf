@@ -92,6 +92,27 @@ pub(crate) fn density_from_g(strike: f64, k: f64, w: f64, g: f64) -> f64 {
     g * n_d2 / (strike * sqrt_w)
 }
 
+/// The scan grid: `config.n_points` evenly spaced log-moneyness points across
+/// `[k_min, k_max]`, endpoints included.
+///
+/// `config.validate()` rejects `n_points < 2`, so the divisor is never zero.
+fn k_grid(config: &ArbitrageScanConfig) -> impl Iterator<Item = f64> + '_ {
+    let span = config.k_max - config.k_min;
+    let last = (config.n_points - 1) as f64;
+    (0..config.n_points).map(move |i| config.k_min + span * i as f64 / last)
+}
+
+/// Evaluate the density at one grid point, tagging failures with the strike.
+fn violation_at<D>(strike: f64, density: &D) -> error::Result<ButterflyViolation>
+where
+    D: Fn(f64) -> error::Result<f64>,
+{
+    let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
+        message: format!("arbitrage scan failed to evaluate density at strike {strike}: {e}"),
+    })?;
+    Ok(ButterflyViolation { strike, density: d })
+}
+
 /// Scan a log-moneyness grid for negative risk-neutral density.
 ///
 /// Returns `Err` if any grid point cannot be evaluated, so `Ok` guarantees the
@@ -107,15 +128,10 @@ where
 {
     config.validate()?;
     let mut violations = Vec::new();
-    for i in 0..config.n_points {
-        let k =
-            config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
-        let strike = forward * k.exp();
-        let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
-            message: format!("arbitrage scan failed to evaluate density at strike {strike}: {e}"),
-        })?;
-        if d < -DENSITY_NEG_TOL {
-            violations.push(ButterflyViolation { strike, density: d });
+    for k in k_grid(config) {
+        let violation = violation_at(forward * k.exp(), &density)?;
+        if violation.density < -DENSITY_NEG_TOL {
+            violations.push(violation);
         }
     }
     Ok(ArbitrageReport {
@@ -141,17 +157,9 @@ where
 {
     config.validate()?;
     let mut violations = Vec::new();
-    for i in 0..config.n_points {
-        let k =
-            config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
+    for k in k_grid(config) {
         if g_at_k(k) < -BUTTERFLY_G_TOL {
-            let strike = forward * k.exp();
-            let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
-                message: format!(
-                    "arbitrage scan failed to evaluate density at strike {strike}: {e}"
-                ),
-            })?;
-            violations.push(ButterflyViolation { strike, density: d });
+            violations.push(violation_at(forward * k.exp(), &density)?);
         }
     }
     Ok(ArbitrageReport {

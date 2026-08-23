@@ -708,6 +708,21 @@ impl SsviSlice {
         (self.theta / 2.0) * phi * phi * self.one_minus_rho_sq / (r * r * r)
     }
 
+    /// Total variance at `strike`, with the non-negativity guard `vol` and
+    /// `variance` share. `density` guards separately: it needs `w > 0` for the
+    /// `1/(K·√w)` factor, and says so in its own error.
+    fn checked_variance(&self, strike: Strike) -> error::Result<f64> {
+        validate_positive(strike.0, "strike")?;
+        let k = (strike.0 / self.forward).ln();
+        let w = self.total_variance(k);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("SSVI total variance is negative: w({k}) = {w}"),
+            });
+        }
+        Ok(w)
+    }
+
     // g(k) = (1 − k·w'/(2w))² − (w')²/4·(1/w + 1/4) + w''/2
     // g(k) ≥ 0 ⟺ no butterfly arbitrage (Gatheral & Jacquier 2014, §4)
     fn g_function(&self, k: f64) -> f64 {
@@ -720,27 +735,12 @@ impl SsviSlice {
 
 impl SmileSection for SsviSlice {
     fn vol(&self, strike: Strike) -> error::Result<Vol> {
-        validate_positive(strike.0, "strike")?;
-        let k = (strike.0 / self.forward).ln();
-        let w = self.total_variance(k);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("SSVI total variance is negative: w({k}) = {w}"),
-            });
-        }
+        let w = self.checked_variance(strike)?;
         Ok(Vol((w / self.expiry).sqrt()))
     }
 
     fn variance(&self, strike: Strike) -> error::Result<Variance> {
-        validate_positive(strike.0, "strike")?;
-        let k = (strike.0 / self.forward).ln();
-        let w = self.total_variance(k);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("SSVI total variance is negative: w({k}) = {w}"),
-            });
-        }
-        Ok(Variance(w))
+        Ok(Variance(self.checked_variance(strike)?))
     }
 
     fn forward(&self) -> f64 {

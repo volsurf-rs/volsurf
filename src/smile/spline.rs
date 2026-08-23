@@ -152,6 +152,19 @@ impl SplineSmile {
     ///
     /// Uses flat extrapolation outside the knot range and Horner-form
     /// polynomial evaluation on interior intervals.
+    /// Interpolated total variance at `strike`, rejecting the negative values a
+    /// cubic can undershoot to between non-negative knots.
+    fn checked_variance(&self, strike: Strike) -> error::Result<f64> {
+        validate_positive(strike.0, "strike")?;
+        let w = self.eval_variance(strike.0);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("negative interpolated variance {w} at strike {strike}"),
+            });
+        }
+        Ok(w)
+    }
+
     fn eval_variance(&self, strike: f64) -> f64 {
         let n = self.strikes.len();
         // Flat extrapolation
@@ -229,25 +242,12 @@ fn build_spline_coefficients(x: &[f64], y: &[f64], n: usize) -> Vec<SplineCoeff>
 
 impl SmileSection for SplineSmile {
     fn vol(&self, strike: Strike) -> error::Result<Vol> {
-        validate_positive(strike.0, "strike")?;
-        let w = self.eval_variance(strike.0);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("negative interpolated variance {w} at strike {strike}"),
-            });
-        }
+        let w = self.checked_variance(strike)?;
         Ok(Vol((w / self.expiry).sqrt()))
     }
 
     fn variance(&self, strike: Strike) -> error::Result<Variance> {
-        validate_positive(strike.0, "strike")?;
-        let w = self.eval_variance(strike.0);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("negative interpolated variance {w} at strike {strike}"),
-            });
-        }
-        Ok(Variance(w))
+        Ok(Variance(self.checked_variance(strike)?))
     }
 
     fn forward(&self) -> f64 {
