@@ -169,7 +169,9 @@ impl SplineSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for non-positive strikes or vols,
-    /// or if fewer than 3 quotes are supplied.
+    /// if fewer than 3 quotes are supplied, or if two quotes share a strike — a
+    /// spline interpolates, so unlike SVI and SABR it cannot absorb a repeated
+    /// strike (a call and a put on the same strike) into a least-squares fit.
     pub fn calibrate(forward: f64, expiry: f64, market_vols: &[(f64, f64)]) -> error::Result<Self> {
         Self::calibrate_with_config(forward, expiry, market_vols, DataFilter::default())
     }
@@ -182,8 +184,11 @@ impl SplineSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for non-positive strikes or vols,
-    /// or if fewer than 3 quotes are supplied, and
-    /// [`VolSurfError::CalibrationError`] if `filter` leaves fewer than 3.
+    /// if fewer than 3 quotes are supplied, or if two surviving quotes share a
+    /// strike — a spline interpolates, so unlike SVI and SABR it cannot absorb
+    /// a repeated strike (a call and a put on the same strike) into a
+    /// least-squares fit. Returns [`VolSurfError::CalibrationError`] if
+    /// `filter` leaves fewer than 3 quotes.
     pub fn calibrate_with_config(
         forward: f64,
         expiry: f64,
@@ -420,6 +425,18 @@ mod tests {
     #[test]
     fn calibrate_rejects_fewer_than_3_quotes() {
         let quotes = [(90.0, 0.24), (100.0, 0.20)];
+        assert!(matches!(
+            SplineSmile::calibrate(100.0, 1.0, &quotes),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    /// A call and a put quoted on the same strike is a common raw-chain shape.
+    /// SVI and SABR absorb the pair into a least-squares fit; a spline
+    /// interpolates, so it has to reject it.
+    #[test]
+    fn calibrate_rejects_duplicate_strikes() {
+        let quotes = [(90.0, 0.24), (100.0, 0.20), (100.0, 0.21), (110.0, 0.24)];
         assert!(matches!(
             SplineSmile::calibrate(100.0, 1.0, &quotes),
             Err(VolSurfError::InvalidInput { .. })

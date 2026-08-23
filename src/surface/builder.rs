@@ -860,7 +860,8 @@ mod tests {
             .model(SmileModel::CubicSpline)
             .add_tenor(0.25, &strikes, &vols)
             .build();
-        // The filter drops the NaN strike, leaving too few points to calibrate
+        // `calibrate_with_config` validates every quote before the filter runs, so
+        // the NaN strike errors outright rather than being filtered out
         assert!(result.is_err(), "NaN strike should cause build to fail");
     }
 

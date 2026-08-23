@@ -186,6 +186,19 @@ class TestSplineSmile:
         assert smile.forward == 100.0
         assert smile.expiry == 1.0
 
+    def test_calibrate_reproduces_the_quoted_vols(self):
+        # Deliberately unsorted: calibrate sorts, the constructor would reject.
+        quotes = [(110.0, 0.22), (90.0, 0.24), (100.0, 0.20), (120.0, 0.26)]
+        smile = SplineSmile.calibrate(100.0, 2.0, quotes)
+        for strike, vol in quotes:
+            assert abs(smile.vol(strike) - vol) < 1e-12
+        assert smile.forward == 100.0
+        assert smile.expiry == 2.0
+
+    def test_calibrate_rejects_fewer_than_3_quotes(self):
+        with pytest.raises(ValueError):
+            SplineSmile.calibrate(100.0, 1.0, [(90.0, 0.24), (100.0, 0.20)])
+
     def test_construct_valid_5_points(self):
         smile = SplineSmile(
             100.0, 1.0,

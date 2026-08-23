@@ -209,6 +209,10 @@ impl SmileSection for SharedSmile {
     ) -> error::Result<crate::smile::ArbitrageReport> {
         self.0.is_arbitrage_free_with(config)
     }
+
+    fn default_scan_config(&self) -> ArbitrageScanConfig {
+        self.0.default_scan_config()
+    }
 }
 
 impl VolSurface for PiecewiseSurface {
@@ -291,8 +295,8 @@ impl VolSurface for PiecewiseSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::smile::SviSmile;
     use crate::smile::spline::SplineSmile;
+    use crate::smile::{SabrSmile, SviSmile};
     use crate::types::{Strike, Tenor, Vol};
     use approx::assert_abs_diff_eq;
 
@@ -538,6 +542,19 @@ mod tests {
                 epsilon = 1e-14
             );
         }
+    }
+
+    /// The scan *width* must come from the stored model too. SABR narrows the
+    /// default band because the Hagan expansion breaks down in the deep wings;
+    /// falling through to the trait default would scan it over `wide()` and
+    /// report that breakdown as arbitrage.
+    #[test]
+    fn smile_at_exact_tenor_delegates_the_default_scan_config() {
+        let sabr = SabrSmile::new(100.0, 1.0, 0.20, 0.5, -0.3, 0.4).unwrap();
+        let surface = PiecewiseSurface::new(vec![1.0], vec![Box::new(sabr)]).unwrap();
+
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
+        assert_eq!(smile.default_scan_config(), ArbitrageScanConfig::narrow());
     }
 
     /// The scan must come from the stored model, not from a spline resampling

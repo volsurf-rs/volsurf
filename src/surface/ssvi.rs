@@ -1305,6 +1305,64 @@ mod tests {
     }
 
     #[test]
+    fn calibrate_with_config_defaults_matches_calibrate() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
+
+        let plain = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
+        let configured = SsviSurface::calibrate_with_config(
+            &tenors,
+            &forwards,
+            &market_data,
+            DataFilter::default(),
+            WeightingScheme::default(),
+        )
+        .unwrap();
+
+        assert_abs_diff_eq!(plain.rho(), configured.rho(), epsilon = 1e-12);
+        assert_abs_diff_eq!(plain.eta(), configured.eta(), epsilon = 1e-12);
+        assert_abs_diff_eq!(plain.gamma(), configured.gamma(), epsilon = 1e-12);
+        for (a, b) in plain.thetas().iter().zip(configured.thetas()) {
+            assert_abs_diff_eq!(a, b, epsilon = 1e-12);
+        }
+    }
+
+    #[test]
+    fn calibrate_with_config_filter_changes_the_fit() {
+        // A wing-trimming filter drops the outer strikes the wide ladder
+        // supplies, so the fit is driven by different data.
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
+
+        let plain = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
+        let trimmed = SsviSurface::calibrate_with_config(
+            &tenors,
+            &forwards,
+            &market_data,
+            DataFilter {
+                max_log_moneyness: Some(0.20),
+                ..DataFilter::default()
+            },
+            WeightingScheme::default(),
+        )
+        .unwrap();
+
+        let drift = (plain.rho() - trimmed.rho()).abs()
+            + (plain.eta() - trimmed.eta()).abs()
+            + (plain.gamma() - trimmed.gamma()).abs();
+        assert!(
+            drift > 1e-6,
+            "a wing-trimming filter should move the fit, drift was {drift}"
+        );
+    }
+
+    #[test]
     fn calibrate_round_trip_2_tenors() {
         // Minimum: 2 tenors
         let original = SsviSurface::new(

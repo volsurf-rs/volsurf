@@ -367,9 +367,9 @@ impl EssviSurface {
     /// (or handled automatically by `from_per_tenor()`).
     ///
     /// # Arguments
-    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
     /// * `tenors` — Expiry times in years, all positive and finite
     /// * `forwards` — Forward prices at each tenor, all positive and finite
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for length mismatches or
@@ -678,9 +678,9 @@ impl EssviSurface {
     /// results before the global fit.
     ///
     /// # Arguments
-    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
     /// * `tenors` — Expiry times in years, all positive and finite
     /// * `forwards` — Forward prices at each tenor, all positive and finite
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (≥ 5 per tenor)
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for invalid inputs (< 2 tenors,
@@ -1968,6 +1968,76 @@ mod tests {
         let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let rms = rms_vol_error(&calibrated, &tenors, &market_data);
         assert!(rms < 0.005, "round-trip RMS {rms} should be < 0.005");
+    }
+
+    #[test]
+    fn calibrate_with_config_defaults_matches_calibrate() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
+
+        let plain = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
+        let configured = EssviSurface::calibrate_with_config(
+            &tenors,
+            &forwards,
+            &market_data,
+            DataFilter::default(),
+            WeightingScheme::default(),
+        )
+        .unwrap();
+
+        assert_abs_diff_eq!(plain.rho_0(), configured.rho_0(), epsilon = 1e-12);
+        assert_abs_diff_eq!(plain.rho_m(), configured.rho_m(), epsilon = 1e-12);
+        assert_abs_diff_eq!(
+            plain.rho_exponent(),
+            configured.rho_exponent(),
+            epsilon = 1e-12
+        );
+        assert_abs_diff_eq!(plain.eta(), configured.eta(), epsilon = 1e-12);
+        assert_abs_diff_eq!(plain.gamma(), configured.gamma(), epsilon = 1e-12);
+    }
+
+    #[test]
+    fn fit_per_tenor_with_config_filter_changes_the_fit() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0; 4];
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
+
+        let plain = EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).unwrap();
+        let trimmed = EssviSurface::fit_per_tenor_with_config(
+            &tenors,
+            &forwards,
+            &market_data,
+            DataFilter {
+                max_log_moneyness: Some(0.20),
+                ..DataFilter::default()
+            },
+            WeightingScheme::default(),
+        )
+        .unwrap();
+
+        for (a, b) in plain.iter().zip(&trimmed) {
+            assert_eq!(a.market_data.len(), 15);
+            assert_eq!(
+                b.market_data.len(),
+                11,
+                "the band should drop the four outer strikes"
+            );
+        }
+
+        let drift: f64 = plain
+            .iter()
+            .zip(&trimmed)
+            .map(|(a, b)| (a.svi.b() - b.svi.b()).abs())
+            .sum();
+        assert!(
+            drift > 1e-6,
+            "a wing-trimming filter should move the fitted wing slope, drift was {drift}"
+        );
     }
 
     #[test]

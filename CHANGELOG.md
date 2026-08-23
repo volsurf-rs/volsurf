@@ -74,8 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EssviSurface::a()` is `rho_exponent()`. `rho()` everywhere else in the crate
   reads a stored parameter; on `EssviSurface` alone it evaluated a function.
   `a` is the exponent in ρ(θ) = ρ₀ + (ρₘ − ρ₀)(θ/θ_max)^a — still the name of
-  the constructor argument, which follows the paper. Every `EssviSurface`
-  accessor now carries a doc comment.
+  the constructor argument, which follows the paper. The `a` half lands in the
+  bindings too: the Python getter `EssviSurface.a` and the WASM getter
+  `WasmEssviSurface.a` are `rho_exponent`, and unlike the Rust rename those
+  fail at runtime — `essvi.a` raises `AttributeError` in Python and is
+  `undefined` in JS. (`rho_at` is not exposed in either binding.) Every
+  `EssviSurface` accessor now carries a doc comment.
 - **BREAKING**: `EssviSurface::calendar_check_structural()` is
   `calendar_violations_structural()`, matching the `VolSurface::calendar_violations()`
   it sits beside.
@@ -85,6 +89,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   analytic density, and its wing behaviour — previously `smile_at(T).vol(K)`
   and `black_vol(T, K)` disagreed outside `[0.5F, 2F]` on the same surface.
   Off-grid expiries are still resampled onto a spline.
+- On `SmileModel::CubicSpline`, `SurfaceBuilder::build()` now validates each
+  quote before applying the `DataFilter`, so a non-finite or non-positive vol
+  errors with `InvalidInput` instead of being filtered out and fitted around.
+  The spline arm routes through `SplineSmile::calibrate_with_config`, which
+  aligns it with the SVI and SABR arms. A build with a `min_vol` filter and one
+  zero or NaN vol in a chain that previously succeeded on the surviving quotes
+  now fails that tenor.
 - `ArbitrageScanConfig` is re-exported at the crate root, alongside `DataFilter`.
 - SVI's calibration is split into named stages (weighting, vol-cliff filter,
   ATM interpolation, multi-start search, ATM sanity check) that are unit-tested

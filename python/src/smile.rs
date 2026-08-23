@@ -215,6 +215,13 @@ impl PySplineSmile {
         let inner = SplineSmile::new(forward, expiry, strikes, variances).map_err(to_py_err)?;
         Ok(Self { inner })
     }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, market_vols))]
+    fn calibrate(forward: f64, expiry: f64, market_vols: Vec<(f64, f64)>) -> PyResult<Self> {
+        let inner = SplineSmile::calibrate(forward, expiry, &market_vols).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
 }
 
 impl_smile_methods!(PySplineSmile);

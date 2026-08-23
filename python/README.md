@@ -103,7 +103,7 @@ To see how well each tenor fit, run the first stage on its own.
 `EssviSurface.from_per_tenor(fits)` turns that list into the surface.
 
 ```python
-fits = EssviSurface.fit_per_tenor([market_3m, market_1y], [0.25, 1.0], [100.0, 100.0])
+fits = EssviSurface.fit_per_tenor([0.25, 1.0], [100.0, 100.0], [market_3m, market_1y])
 print([f.rms_error for f in fits])
 surface = EssviSurface.from_per_tenor(fits)
 ```
