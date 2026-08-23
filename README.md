@@ -34,6 +34,7 @@ Volatility surface construction for equity and FX derivatives.
 - `DataFilter` drops wing strikes, sub-floor vols, and vol cliffs before fitting
 - `WeightingScheme` weights the least-squares fit by vega or uniformly (Zeliade 2009, Hagan 2002)
 - Warm-starting from prior parameters; SVI falls back to grid search when a seeded fit diverges
+- `SurfaceBuilder::calibrator()` accepts any `SmileCalibrator`, so a model defined outside the crate fits each tenor like a built-in one
 
 **Implied Volatility**
 - **Black** (lognormal) implied vol via Jackel rational approximation (near-machine-precision)
@@ -49,7 +50,7 @@ Volatility surface construction for equity and FX derivatives.
 - Immutable surfaces -- no observer pattern
 - Thread-safe -- all types are `Send + Sync`
 - Zero-alloc vol queries after construction
-- Newtypes for type safety (`Vol`, `NormalVol`, `Variance`, `Strike`, `Tenor`)
+- Newtypes for type safety (`Vol`, `NormalVol`, `DisplacedVol`, `Variance`, `Strike`, `Tenor`)
 - Serde serialization on all model structs and value types
 
 ## Installation
@@ -200,7 +201,7 @@ volsurf
 │   ├── black      BlackImpliedVol, black_price
 │   ├── normal     NormalImpliedVol, normal_price
 │   └── displaced  DisplacedImpliedVol, displaced_price
-├── smile
+├── smile          SmileSection, SmileCalibrator
 │   ├── svi        SviSmile (Gatheral 2006)
 │   ├── sabr       SabrSmile (Hagan 2002)
 │   ├── spline     SplineSmile (cubic on variance)
@@ -212,7 +213,7 @@ volsurf
 │   ├── builder    SurfaceBuilder, SmileModel
 │   └── arbitrage  SurfaceDiagnostics, CalendarViolation
 ├── local_vol      LocalVol trait, DupireLocalVol (Dupire 1994), BoundaryLocalVol
-└── types          Strike, Tenor, Vol, NormalVol, Variance, OptionType
+└── types          Strike, Tenor, Vol, NormalVol, DisplacedVol, Variance, OptionType
 ```
 
 ## Benchmarks
@@ -253,7 +254,7 @@ Measured with Criterion.rs on Apple Silicon. All performance targets exceeded.
 ### Python
 
 ```bash
-pip install volsurf
+maturin develop --release -m python/Cargo.toml
 ```
 
 Built with PyO3. See [`python/README.md`](python/README.md) for the API and usage examples.
