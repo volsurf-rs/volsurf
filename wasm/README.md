@@ -194,6 +194,21 @@ const restored = WasmSviSmile.from_json(json);
 </script>
 ```
 
+## Demo
+
+`wasm/demo.html` is a self-contained page that calibrates SVI and SABR smiles in the
+browser and plots the smile grid, term structure, risk-neutral density, and delta smile.
+
+It imports `./pkg/volsurf_wasm.js`, which is gitignored, so build first — and serve over
+HTTP, since ES modules and `fetch` of the `.wasm` do not work from `file://`:
+
+```bash
+wasm-pack build wasm/ --target web
+python3 -m http.server --directory wasm 8000
+```
+
+Then open <http://localhost:8000/demo.html>.
+
 ## License
 
 Apache-2.0
