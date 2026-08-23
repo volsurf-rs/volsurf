@@ -219,9 +219,9 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// A returned report covers the whole grid actually scanned: if the density
     /// cannot be evaluated at any point, this returns `Err` rather than a partial
     /// scan. Implementations may first narrow `config` to their own domain of
-    /// validity — [`SplineSmile`] clips to its knot
-    /// range, since it flat-extrapolates beyond it — so a clean report is not on
-    /// its own proof that every point of `config` was examined.
+    /// validity — [`SplineSmile`] clips to its knot range, since it
+    /// flat-extrapolates beyond it — so a clean report is not on its own proof
+    /// that every point of `config` was examined.
     fn is_arbitrage_free_with(
         &self,
         config: ArbitrageScanConfig,
@@ -326,7 +326,8 @@ pub trait SmileCalibrator: Send + Sync + std::fmt::Debug {
     /// Returns [`VolSurfError::InvalidInput`](crate::VolSurfError::InvalidInput)
     /// for malformed quotes and
     /// [`VolSurfError::CalibrationError`](crate::VolSurfError::CalibrationError)
-    /// if the fit does not converge.
+    /// if the fit does not converge, or if the filter leaves fewer than
+    /// [`min_strikes`](Self::min_strikes) quotes.
     fn calibrate(
         &self,
         forward: f64,
