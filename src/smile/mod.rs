@@ -219,7 +219,7 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// A returned report covers the whole grid actually scanned: if the density
     /// cannot be evaluated at any point, this returns `Err` rather than a partial
     /// scan. Implementations may first narrow `config` to their own domain of
-    /// validity — [`SplineSmile`](crate::smile::SplineSmile) clips to its knot
+    /// validity — [`SplineSmile`] clips to its knot
     /// range, since it flat-extrapolates beyond it — so a clean report is not on
     /// its own proof that every point of `config` was examined.
     fn is_arbitrage_free_with(
@@ -318,9 +318,9 @@ pub trait SmileCalibrator: Send + Sync + std::fmt::Debug {
     /// Fit the model to `market_vols`, a slice of `(strike, implied_vol)` pairs.
     ///
     /// `filter` is applied to the quotes before fitting; `weighting` sets the
-    /// per-quote weights in the objective. Implementations should route both
-    /// through [`prepare_market_vols`](crate::calibration::prepare_market_vols)
-    /// so filtering behaves consistently across models.
+    /// per-quote weights in the objective. Filter first, then weight, and treat
+    /// a filter that leaves fewer points than the model needs as an error
+    /// rather than fitting the remainder.
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`](crate::VolSurfError::InvalidInput)

@@ -309,7 +309,7 @@ impl SurfaceBuilder {
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if the calibrator's own
     /// parameters are invalid — checked before any tenor data, see
-    /// [`SmileCalibrator::validate`](crate::SmileCalibrator::validate) — if
+    /// [`SmileCalibrator::validate`] — if
     /// tenor data is invalid, or if `spot`/`rate` are missing while a tenor
     /// still needs its forward derived; tenors added via
     /// [`add_tenor_with_forward`](Self::add_tenor_with_forward) need neither.
