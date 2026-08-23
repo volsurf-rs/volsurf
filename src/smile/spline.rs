@@ -297,10 +297,10 @@ impl SmileSection for SplineSmile {
         if lo >= hi {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
-                    "knot range [{}, {}] spans {} in log-moneyness, less than the {} needed to clear both boundary insets, leaving nothing scannable",
+                    "knot strikes [{}, {}] span {} in log-moneyness, not more than the {} needed to clear both boundary insets, leaving nothing scannable",
                     self.strikes[0],
                     self.strikes[last],
-                    (self.strikes[last] / self.strikes[0]).ln(),
+                    hi - lo + 2.0 * KNOT_EDGE_INSET,
                     2.0 * KNOT_EDGE_INSET
                 ),
             });
@@ -689,7 +689,7 @@ mod tests {
         let VolSurfError::InvalidInput { message } = &err else {
             panic!("expected InvalidInput, got {err}");
         };
-        assert!(message.contains("knot range"), "{message}");
+        assert!(message.contains("knot strikes"), "{message}");
         assert!(message.contains("in log-moneyness"), "{message}");
         assert!(message.contains("boundary insets"), "{message}");
     }
