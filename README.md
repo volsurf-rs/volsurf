@@ -22,7 +22,7 @@ Volatility surface construction for equity and FX derivatives.
 - **Piecewise** per-tenor surfaces with linear variance interpolation
 - **Builder API** with SVI/SABR/spline model selection, dividend yield, per-tenor forward override
 - Ragged strike grids -- different strikes per tenor, no rectangular matrix assumption
-- `VolSurface::forward(expiry)` reads the forward off the surface without building a smile section
+- `VolSurface::forward(expiry)` -- built-in surfaces read the forward off their stored or interpolated data instead of building a smile section
 
 **Arbitrage Detection**
 - Butterfly arbitrage via analytical g-function (SVI) and numerical density scan (SABR)
