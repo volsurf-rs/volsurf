@@ -733,7 +733,7 @@ impl EssviSurface {
     /// ρ(θ) = ρ₀ + (ρₘ − ρ₀) · (θ / θ_max)^a
     /// ```
     ///
-    /// Result is clamped to (−0.999, 0.999).
+    /// Result is clamped strictly inside (−1, 1) by `surface::calib::RHO_CLAMP`.
     pub fn rho(&self, theta: f64) -> f64 {
         let t = (theta / self.theta_max).clamp(0.0, 1.0);
         let r = self.rho_0 + (self.rho_m - self.rho_0) * t.powf(self.a);
