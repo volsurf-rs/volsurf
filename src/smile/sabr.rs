@@ -18,11 +18,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme, black_vega_weight, prepare_market_vols};
 use crate::error::{self, VolSurfError};
+use crate::serde_raw::validated_serde;
 use crate::smile::ArbitrageScanConfig;
 use crate::smile::SmileSection;
-use crate::smile::arbitrage::ArbitrageReport;
 use crate::types::{Strike, Vol};
-use crate::validate::{validate_non_negative, validate_positive};
+use crate::validate::{
+    validate_in_range, validate_non_negative, validate_open_unit_interval, validate_positive,
+};
 
 const TAYLOR_Z_TOL: f64 = 1e-6;
 
@@ -89,42 +91,14 @@ pub struct SabrSmile {
     nu: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SabrSmileRaw {
+validated_serde!(SabrSmile => SabrSmileRaw {
     forward: f64,
     expiry: f64,
     alpha: f64,
     beta: f64,
     rho: f64,
     nu: f64,
-}
-
-impl TryFrom<SabrSmileRaw> for SabrSmile {
-    type Error = VolSurfError;
-    fn try_from(raw: SabrSmileRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.forward,
-            raw.expiry,
-            raw.alpha,
-            raw.beta,
-            raw.rho,
-            raw.nu,
-        )
-    }
-}
-
-impl From<SabrSmile> for SabrSmileRaw {
-    fn from(s: SabrSmile) -> Self {
-        Self {
-            forward: s.forward,
-            expiry: s.expiry,
-            alpha: s.alpha,
-            beta: s.beta,
-            rho: s.rho,
-            nu: s.nu,
-        }
-    }
-}
+});
 
 impl SabrSmile {
     /// Create a SABR smile from calibrated parameters.
@@ -153,17 +127,8 @@ impl SabrSmile {
         validate_positive(expiry, "expiry")?;
         validate_positive(alpha, "alpha")?;
 
-        if !(0.0..=1.0).contains(&beta) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("beta must be in [0, 1], got {beta}"),
-            });
-        }
-
-        if rho.abs() >= 1.0 || rho.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("rho must be in (-1, 1), got {rho}"),
-            });
-        }
+        validate_in_range(beta, 0.0, 1.0, "SABR beta")?;
+        validate_open_unit_interval(rho, "rho")?;
 
         validate_non_negative(nu, "nu")?;
 
@@ -293,8 +258,8 @@ impl SabrSmile {
             expiry,
             beta,
             market_vols,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
     }
@@ -320,8 +285,8 @@ impl SabrSmile {
         expiry: f64,
         beta: f64,
         market_vols: &[(f64, f64)],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        filter: DataFilter,
+        weighting: WeightingScheme,
         seed: Option<&SabrSmile>,
     ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
@@ -339,11 +304,7 @@ impl SabrSmile {
 
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
-        if !(0.0..=1.0).contains(&beta) || !beta.is_finite() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("beta must be in [0, 1], got {beta}"),
-            });
-        }
+        validate_in_range(beta, 0.0, 1.0, "SABR beta")?;
         if market_vols.len() < MIN_POINTS {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
@@ -562,18 +523,13 @@ impl SmileSection for SabrSmile {
         "SABR"
     }
 
-    /// Check butterfly arbitrage by scanning risk-neutral density.
-    ///
-    /// Evaluates density on a grid of 200 points over k ∈ \[−2, 2\].
-    /// The range is narrower than SVI's \[−3, 3\] because the Hagan
-    /// approximation breaks down in deep wings. A point where `density()`
-    /// returns `Err` fails the whole scan, so a returned report always
-    /// covers every grid point.
+    /// The narrow grid, k ∈ \[−2, 2\]: the Hagan expansion breaks down in the
+    /// deep wings, and a scan out there reports that breakdown as arbitrage.
     ///
     /// # Reference
     /// Hagan et al. (2002), "Managing Smile Risk".
-    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        self.is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+    fn default_scan_config(&self) -> ArbitrageScanConfig {
+        ArbitrageScanConfig::narrow()
     }
 }
 
@@ -2312,8 +2268,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             None,
         )
         .unwrap();
@@ -2337,8 +2293,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            DataFilter::default(),
+            WeightingScheme::default(),
             Some(&smile),
         );
         assert!(
@@ -2367,8 +2323,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &filter,
-            &WeightingScheme::default(),
+            filter,
+            WeightingScheme::default(),
             None,
         );
         assert!(result.is_ok());
@@ -2389,8 +2345,8 @@ mod tests {
             0.5,
             0.5,
             &market,
-            &DataFilter::default(),
-            &WeightingScheme::Vega,
+            DataFilter::default(),
+            WeightingScheme::Vega,
             None,
         );
         assert!(result.is_ok(), "vega weighting should produce valid fit");

@@ -52,8 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         forward,
         expiry,
         &market,
-        &filter,
-        &WeightingScheme::default(),
+        filter,
+        WeightingScheme::default(),
         None,
     )?;
     let unfiltered = SviSmile::calibrate(forward, expiry, &market)?;
@@ -78,16 +78,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         forward,
         expiry,
         &clean,
-        &DataFilter::default(),
-        &WeightingScheme::Vega,
+        DataFilter::default(),
+        WeightingScheme::Vega,
         None,
     )?;
     let uniform = SviSmile::calibrate_with_config(
         forward,
         expiry,
         &clean,
-        &DataFilter::default(),
-        &WeightingScheme::Uniform,
+        DataFilter::default(),
+        WeightingScheme::Uniform,
         None,
     )?;
 
@@ -115,8 +115,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         forward,
         expiry,
         &clean,
-        &DataFilter::default(),
-        &WeightingScheme::default(),
+        DataFilter::default(),
+        WeightingScheme::default(),
         Some(&cold),
     )?;
     let warm_ms = t_warm.elapsed();
@@ -178,8 +178,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         expiry,
         0.5,
         &sabr_data,
-        &DataFilter::default(),
-        &WeightingScheme::default(),
+        DataFilter::default(),
+        WeightingScheme::default(),
         Some(&sabr1),
     )?;
 

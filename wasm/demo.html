@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>volsurf — Interactive Vol Surface</title>
-<script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.0.min.js"
+        integrity="sha384-TAqBiqItCr14J//ULLD26bSQ8Z6uPnlisSwkvWaqP8SCSiDkgR8jNknuAv8uxSOT"
+        crossorigin="anonymous"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600&display=swap');
-
   :root {
     --bg: #0b0e11;
     --panel: #0e1117;
@@ -177,7 +177,7 @@
     color: var(--bg);
     border: none;
     border-radius: 4px;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Inter', -apple-system, sans-serif;
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
@@ -246,7 +246,7 @@
     position: absolute;
     top: 6px;
     left: 10px;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Inter', -apple-system, sans-serif;
     font-size: 9px;
     font-weight: 600;
     text-transform: uppercase;
@@ -375,15 +375,16 @@
 
 <script type="module">
 import init, {
-  WasmSviSmile, WasmSabrSmile, WasmSurfaceBuilder, version
+  WasmSviSmile, WasmSabrSmile, version
 } from './pkg/volsurf_wasm.js';
 
 const COLORS = ['#f0883e','#d2a038','#3fb950','#58a6ff','#bc8cff'];
 const AXIS_COMMON = {
   gridcolor: '#161b22', zerolinecolor: '#21262d', gridwidth: 1,
   tickfont: { size: 9, color: '#9da5b0' },
-  titlefont: { size: 10, color: '#d4dae2' },
+  title: { font: { size: 10, color: '#d4dae2' } },
 };
+const axis = (base, text, extra = {}) => ({ ...base, title: { ...base.title, text }, ...extra });
 const LAYOUT_BASE = {
   paper_bgcolor: '#0e1117',
   plot_bgcolor: '#0e1117',
@@ -447,16 +448,6 @@ function bsDelta(fwd, strike, vol, expiry) {
   return cdf(d1);
 }
 
-function strikeAtDelta(fwd, targetDelta, vol, expiry) {
-  let lo = fwd * 0.01, hi = fwd * 5.0;
-  for (let i = 0; i < 60; i++) {
-    const mid = (lo + hi) / 2;
-    const d = bsDelta(fwd, mid, vol, expiry);
-    if (d > targetDelta) lo = mid; else hi = mid;
-  }
-  return (lo + hi) / 2;
-}
-
 function strikeAtDeltaSmile(fwd, targetDelta, volFn, expiry) {
   let lo = fwd * 0.01, hi = fwd * 5.0;
   for (let i = 0; i < 60; i++) {
@@ -506,14 +497,23 @@ function renderTenorInputs(tenors) {
   });
 }
 
+// Number('') is 0, so blank fields have to become NaN before the finiteness check can see them
+const parseQuotes = raw => raw.split(',').map(s => s.trim() === '' ? NaN : Number(s));
+
 function getTenorData() {
   const rows = document.querySelectorAll('.tenor-row');
-  return Array.from(rows).map((row, i) => {
+  return Array.from(rows).map(row => {
     const expiry = parseFloat(row.dataset.expiry);
     const label = row.dataset.label;
-    const strikes = row.querySelector('[data-field="strikes"]').value.split(',').map(Number);
-    const vols = row.querySelector('[data-field="vols"]').value.split(',').map(Number);
-    return { expiry, label, strikes, vols };
+    const strikes = parseQuotes(row.querySelector('[data-field="strikes"]').value);
+    const vols = parseQuotes(row.querySelector('[data-field="vols"]').value);
+    // calibrate rejects non-finite quotes with a generic error — name the bad field here instead
+    const error = strikes.length !== vols.length
+      ? `${strikes.length} strikes vs ${vols.length} vols`
+      : [...strikes, ...vols].some(v => !Number.isFinite(v))
+        ? 'non-numeric quote'
+        : null;
+    return { expiry, label, strikes, vols, error };
   });
 }
 
@@ -531,6 +531,13 @@ function buildSurface() {
   const failed = [];
 
   for (const t of tenorData) {
+    if (t.error) {
+      failed.push(`${t.label}: ${t.error}`);
+      smiles.push(null);
+      atmVols.push(null);
+      continue;
+    }
+
     const fwd = spot * Math.exp(rate * t.expiry);
     const flat = new Float64Array(t.strikes.length * 2);
     for (let i = 0; i < t.strikes.length; i++) {
@@ -549,7 +556,7 @@ function buildSurface() {
       atmVols.push(smile.vol(fwd) * 100);
     } catch (e) {
       console.error(`Calibration failed for ${t.label}:`, e);
-      failed.push(t.label);
+      failed.push(`${t.label}: calibration`);
       smiles.push(null);
       atmVols.push(null);
     }
@@ -573,7 +580,7 @@ function setStatus(failed) {
     el.textContent = '\u25CF ready';
     el.style.color = '';
   } else {
-    el.textContent = `\u25CF calibration failed: ${failed.join(', ')}`;
+    el.textContent = `\u25CF failed: ${failed.join(', ')}`;
     el.style.color = '#f85149';
   }
 }
@@ -596,7 +603,7 @@ function plotSmile(smiles) {
     plot_bgcolor: '#0e1117',
     font: { family: 'JetBrains Mono, monospace', size: 7, color: '#9da5b0' },
     margin: { t: 18, r: 6, b: 24, l: 34 },
-    xaxis: { ...AXIS_COMMON, tickfont: { size: 7, color: '#9da5b0' }, range: [85, 115] },
+    xaxis: { ...AXIS_COMMON, tickfont: { size: 7, color: '#9da5b0' } },
     yaxis: { ...AXIS_COMMON, tickfont: { size: 7, color: '#9da5b0' } },
     showlegend: false,
     shapes: [{ type: 'line', x0: 100, x1: 100, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.5, dash: 'dot' } }],
@@ -620,14 +627,17 @@ function plotSmile(smiles) {
     const fwd = s.fwd;
     const nPts = 150;
     const xs = [], ys = [], xm = [], ym = [];
-    for (let j = 0; j <= nPts; j++) {
-      const m = 0.85 + (0.30 * j / nPts);
-      xs.push(m * 100);
-      try { ys.push(s.smile.vol(m * fwd) * 100); } catch { ys.push(null); }
-    }
     for (let j = 0; j < s.strikes.length; j++) {
       xm.push(s.strikes[j] / fwd * 100);
       ym.push(s.vols[j] * 100);
+    }
+    // span the tenor's own quotes — presets widen with expiry, a fixed window clips them
+    const xLo = Math.min(...xm), xHi = Math.max(...xm);
+    const xPad = (xHi - xLo) * 0.03;
+    for (let j = 0; j <= nPts; j++) {
+      const m = (xLo + (xHi - xLo) * j / nPts) / 100;
+      xs.push(m * 100);
+      try { ys.push(s.smile.vol(m * fwd) * 100); } catch { ys.push(null); }
     }
 
     // clamp y-axis to market data range so SVI wings don't blow up the scale
@@ -642,12 +652,16 @@ function plotSmile(smiles) {
       { x: xs, y: ys, mode: 'lines', line: { color, width: 1.5 } },
       { x: xm, y: ym, mode: 'markers', marker: { color, size: 3.5, symbol: 'circle-open', line: { width: 1, color } } },
     ];
-    const thisLayout = { ...miniLayout, yaxis: { ...miniLayout.yaxis, range: [yLo, yHi] } };
+    const thisLayout = structuredClone(miniLayout);
+    thisLayout.xaxis.range = [xLo - xPad, xHi + xPad];
+    thisLayout.yaxis.range = [yLo, yHi];
     Plotly.react(plotDiv, traces, thisLayout, { responsive: true, displayModeBar: false });
   });
 }
 
 function plotTermStructure(smiles, atmVols) {
+  // Plotly writes computed ranges back into the layout it is handed — never give it the shared base
+  const layout = structuredClone(LAYOUT_BASE);
   const xs = [], ys = [], labels = [];
   smiles.forEach((s, i) => {
     if (!s || atmVols[i] === null) return;
@@ -657,7 +671,7 @@ function plotTermStructure(smiles, atmVols) {
   });
 
   if (!ys.length) {
-    Plotly.react('chart-term', [], LAYOUT_BASE, { responsive: true, displayModeBar: false });
+    Plotly.react('chart-term', [], layout, { responsive: true, displayModeBar: false });
     return;
   }
 
@@ -679,24 +693,14 @@ function plotTermStructure(smiles, atmVols) {
     line: { width: 0 }, showlegend: false, hoverinfo: 'skip',
   }];
 
-  const layout = {
-    ...LAYOUT_BASE,
-    showlegend: false,
-    xaxis: {
-      ...LAYOUT_BASE.xaxis,
-      title: { text: '' },
-      tickvals: xs, ticktext: labels,
-    },
-    yaxis: {
-      ...LAYOUT_BASE.yaxis,
-      title: { text: 'ATM IV %' },
-      range: [yMin - yPad, yMax + yPad],
-    },
-  };
+  layout.showlegend = false;
+  layout.xaxis = axis(layout.xaxis, '', { tickvals: xs, ticktext: labels });
+  layout.yaxis = axis(layout.yaxis, 'ATM IV %', { range: [yMin - yPad, yMax + yPad] });
   Plotly.react('chart-term', traces, layout, { responsive: true, displayModeBar: false });
 }
 
 function plotDensity(smiles, spot, rate) {
+  const layout = structuredClone(LAYOUT_BASE);
   const indices = smiles.length <= 3
     ? smiles.map((_, i) => i)
     : [0, Math.floor(smiles.length / 2), smiles.length - 1];
@@ -721,16 +725,14 @@ function plotDensity(smiles, spot, rate) {
     });
   });
 
-  const layout = {
-    ...LAYOUT_BASE,
-    xaxis: { ...LAYOUT_BASE.xaxis, title: { text: 'Moneyness %' }, range: [90, 110] },
-    yaxis: { ...LAYOUT_BASE.yaxis, title: { text: 'q(K)' } },
-    shapes: [{ type: 'line', x0: 100, x1: 100, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.7, dash: 'dot' } }],
-  };
+  layout.xaxis = axis(layout.xaxis, 'Moneyness %', { range: [90, 110] });
+  layout.yaxis = axis(layout.yaxis, 'q(K)');
+  layout.shapes = [{ type: 'line', x0: 100, x1: 100, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.7, dash: 'dot' } }];
   Plotly.react('chart-density', traces, layout, { responsive: true, displayModeBar: false });
 }
 
 function plotDeltaSmile(smiles) {
+  const layout = structuredClone(LAYOUT_BASE);
   const traces = [];
   const nPts = 200;
   smiles.forEach((s, i) => {
@@ -764,12 +766,9 @@ function plotDeltaSmile(smiles) {
     });
   });
 
-  const layout = {
-    ...LAYOUT_BASE,
-    xaxis: { ...LAYOUT_BASE.xaxis, title: { text: 'Call Delta' }, range: [0.05, 0.95], dtick: 0.1 },
-    yaxis: { ...LAYOUT_BASE.yaxis, title: { text: 'IV %' } },
-    shapes: [{ type: 'line', x0: 0.5, x1: 0.5, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.7, dash: 'dot' } }],
-  };
+  layout.xaxis = axis(layout.xaxis, 'Call Delta', { range: [0.05, 0.95], dtick: 0.1 });
+  layout.yaxis = axis(layout.yaxis, 'IV %');
+  layout.shapes = [{ type: 'line', x0: 0.5, x1: 0.5, y0: 0, y1: 1, yref: 'paper', line: { color: '#d29922', width: 0.7, dash: 'dot' } }];
   Plotly.react('chart-delta', traces, layout, { responsive: true, displayModeBar: false });
 }
 
@@ -806,10 +805,11 @@ function showParams(smiles) {
       const k25p = strikeAtDeltaSmile(s.fwd, 0.75, volFn, s.expiry);
       const vol25c = volFn(k25c);
       const vol25p = volFn(k25p);
-      const slope = (vol25p - vol25c) / 50 * 1000;
+      // vol points per delta point across the 25d put → 25d call span (0.50 = 50 delta pts)
+      const slope = (vol25p - vol25c) * 100 / 50;
       const bf = (vol25p + vol25c - 2 * atmVol) * 100;
       html += `<div style="padding-left:30px">`
-        + `<span class="label">slope=</span><span class="val">${slope.toFixed(1)}</span> `
+        + `<span class="label">slope=</span><span class="val">${slope.toFixed(3)}</span><span class="label">%/Δpt</span> `
         + `<span class="label">bf=</span><span class="val">${bf.toFixed(2)}%</span>`
         + `</div>`;
     } catch {

@@ -14,7 +14,7 @@ Volatility surface construction for equity and FX derivatives.
 **Smile Models**
 - **SVI** (Gatheral 2006) -- 5-parameter with quasi-explicit calibration (Zeliade 2009), analytical g-function density, butterfly arbitrage detection
 - **SABR** (Hagan 2002) -- 4-parameter with Hagan closed-form, analytic alpha + Nelder-Mead calibration, 12-digit accuracy vs reference values
-- **Cubic spline** -- non-parametric on total variance, Thomas algorithm O(n), flat extrapolation
+- **Cubic spline** -- non-parametric on total variance, Thomas algorithm O(n), flat extrapolation, `SplineSmile::calibrate` fits market quotes directly
 
 **Surface Construction**
 - **SSVI** global parameterization (Gatheral-Jacquier 2014) with two-stage calibration
@@ -22,6 +22,7 @@ Volatility surface construction for equity and FX derivatives.
 - **Piecewise** per-tenor surfaces with linear variance interpolation
 - **Builder API** with SVI/SABR/spline model selection, dividend yield, per-tenor forward override
 - Ragged strike grids -- different strikes per tenor, no rectangular matrix assumption
+- `VolSurface::forward(expiry)` -- built-in surfaces read the forward off their stored or interpolated data instead of building a smile section
 
 **Arbitrage Detection**
 - Butterfly arbitrage via analytical g-function (SVI) and numerical density scan (SABR)
@@ -34,6 +35,7 @@ Volatility surface construction for equity and FX derivatives.
 - `DataFilter` drops wing strikes, sub-floor vols, and vol cliffs before fitting
 - `WeightingScheme` weights the least-squares fit by vega or uniformly (Zeliade 2009, Hagan 2002)
 - Warm-starting from prior parameters; SVI falls back to grid search when a seeded fit diverges
+- `SurfaceBuilder::calibrator()` accepts any `SmileCalibrator`, so a model defined outside the crate fits each tenor like a built-in one
 
 **Implied Volatility**
 - **Black** (lognormal) implied vol via Jackel rational approximation (near-machine-precision)
@@ -49,20 +51,20 @@ Volatility surface construction for equity and FX derivatives.
 - Immutable surfaces -- no observer pattern
 - Thread-safe -- all types are `Send + Sync`
 - Zero-alloc vol queries after construction
-- Newtypes for type safety (`Vol`, `NormalVol`, `Variance`, `Strike`, `Tenor`)
+- Newtypes for type safety (`Vol`, `NormalVol`, `DisplacedVol`, `Variance`, `Strike`, `Tenor`)
 - Serde serialization on all model structs and value types
 
 ## Installation
 
 ```toml
 [dependencies]
-volsurf = "3.0"
+volsurf = "4.0"
 ```
 
 Optional features:
 
 ```toml
-volsurf = { version = "3.0", features = ["parallel", "logging"] }
+volsurf = { version = "4.0", features = ["parallel", "logging"] }
 ```
 
 | Feature | Description |
@@ -143,9 +145,9 @@ let data_1y: Vec<(f64, f64)> = (0..10)
     .collect();
 
 let surface = EssviSurface::calibrate(
-    &[data_3m, data_1y],
     &[0.25, 1.0],       // tenors
     &[100.0, 100.0],    // forwards
+    &[data_3m, data_1y],
 )?;
 
 let vol = surface.black_vol(Tenor(0.5), Strike(95.0))?;
@@ -200,19 +202,19 @@ volsurf
 │   ├── black      BlackImpliedVol, black_price
 │   ├── normal     NormalImpliedVol, normal_price
 │   └── displaced  DisplacedImpliedVol, displaced_price
-├── smile
+├── smile          SmileSection, SmileCalibrator
 │   ├── svi        SviSmile (Gatheral 2006)
 │   ├── sabr       SabrSmile (Hagan 2002)
 │   ├── spline     SplineSmile (cubic on variance)
 │   └── arbitrage  ArbitrageReport, ButterflyViolation, ArbitrageScanConfig
-├── surface
+├── surface        VolSurface
 │   ├── ssvi       SsviSurface (Gatheral-Jacquier 2014)
 │   ├── essvi      EssviSurface, EssviSlice (Hendriks-Martini 2019)
 │   ├── piecewise  PiecewiseSurface (per-tenor interpolation)
 │   ├── builder    SurfaceBuilder, SmileModel
 │   └── arbitrage  SurfaceDiagnostics, CalendarViolation
 ├── local_vol      LocalVol trait, DupireLocalVol (Dupire 1994), BoundaryLocalVol
-└── types          Strike, Tenor, Vol, NormalVol, Variance, OptionType
+└── types          Strike, Tenor, Vol, NormalVol, DisplacedVol, Variance, OptionType
 ```
 
 ## Benchmarks
@@ -253,7 +255,7 @@ Measured with Criterion.rs on Apple Silicon. All performance targets exceeded.
 ### Python
 
 ```bash
-pip install volsurf
+maturin develop --release -m python/Cargo.toml
 ```
 
 Built with PyO3. See [`python/README.md`](python/README.md) for the API and usage examples.
@@ -272,7 +274,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history. Recent releases:
 
 | Version | Name | Key Features |
 |---------|------|--------------|
-| **v3.0** | **Strict Contracts** | **Silent calibration and arbitrage-scan fallbacks are now errors; `StickyKind` removed, `NormalVol` newtype** |
+| **v4.0** | **Open Calibration** | **`SmileCalibrator` extension point, `VolSurface::forward`, `SplineSmile::calibrate`, Python 3.10+** |
+| v3.0 | Strict Contracts | Silent calibration and arbitrage-scan fallbacks are now errors; `StickyKind` removed, `NormalVol` newtype |
 | v2.4 | Published | Internal consolidation, Python/WASM CI, first crates.io release since 2.1 |
 | v2.3 | WASM Parity | Implied vol, conventions, and local vol in the WASM bindings |
 | v2.2 | Local Vol Boundary | `BoundaryLocalVol` small-time adapter, `with_boundary()` |

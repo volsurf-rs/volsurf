@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Surface arb-free: {}", diag.is_free());
 
     // Analytical calendar check (SSVI-specific)
-    let cal_violations = surface.calendar_arb_analytical();
+    let cal_violations = surface.calendar_violations().unwrap();
     println!("Analytical calendar violations: {}", cal_violations.len());
 
     // ---------------------------------------------------------------
@@ -153,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Result<_, _>>()?;
 
-    let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards)?;
+    let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data)?;
 
     println!(
         "Original:   rho={:.4}, eta={:.4}, gamma={:.4}",

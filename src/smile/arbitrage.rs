@@ -92,6 +92,27 @@ pub(crate) fn density_from_g(strike: f64, k: f64, w: f64, g: f64) -> f64 {
     g * n_d2 / (strike * sqrt_w)
 }
 
+/// The scan grid: `config.n_points` evenly spaced log-moneyness points across
+/// `[k_min, k_max]`, endpoints included.
+///
+/// `config.validate()` rejects `n_points < 2`, so the divisor is never zero.
+fn k_grid(config: ArbitrageScanConfig) -> impl Iterator<Item = f64> {
+    let span = config.k_max - config.k_min;
+    let last = (config.n_points - 1) as f64;
+    (0..config.n_points).map(move |i| config.k_min + span * i as f64 / last)
+}
+
+/// Evaluate the density at one grid point, tagging failures with the strike.
+fn violation_at<D>(strike: f64, density: &D) -> error::Result<ButterflyViolation>
+where
+    D: Fn(f64) -> error::Result<f64>,
+{
+    let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
+        message: format!("arbitrage scan failed to evaluate density at strike {strike}: {e}"),
+    })?;
+    Ok(ButterflyViolation { strike, density: d })
+}
+
 /// Scan a log-moneyness grid for negative risk-neutral density.
 ///
 /// Returns `Err` if any grid point cannot be evaluated, so `Ok` guarantees the
@@ -99,7 +120,7 @@ pub(crate) fn density_from_g(strike: f64, k: f64, w: f64, g: f64) -> f64 {
 pub(crate) fn scan_density<F>(
     expiry: f64,
     forward: f64,
-    config: &ArbitrageScanConfig,
+    config: ArbitrageScanConfig,
     density: F,
 ) -> error::Result<ArbitrageReport>
 where
@@ -107,15 +128,10 @@ where
 {
     config.validate()?;
     let mut violations = Vec::new();
-    for i in 0..config.n_points {
-        let k =
-            config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
-        let strike = forward * k.exp();
-        let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
-            message: format!("arbitrage scan failed to evaluate density at strike {strike}: {e}"),
-        })?;
-        if d < -DENSITY_NEG_TOL {
-            violations.push(ButterflyViolation { strike, density: d });
+    for k in k_grid(config) {
+        let violation = violation_at(forward * k.exp(), &density)?;
+        if violation.density < -DENSITY_NEG_TOL {
+            violations.push(violation);
         }
     }
     Ok(ArbitrageReport {
@@ -131,7 +147,7 @@ where
 pub(crate) fn scan_g<G, D>(
     expiry: f64,
     forward: f64,
-    config: &ArbitrageScanConfig,
+    config: ArbitrageScanConfig,
     g_at_k: G,
     density: D,
 ) -> error::Result<ArbitrageReport>
@@ -141,17 +157,9 @@ where
 {
     config.validate()?;
     let mut violations = Vec::new();
-    for i in 0..config.n_points {
-        let k =
-            config.k_min + (config.k_max - config.k_min) * i as f64 / (config.n_points - 1) as f64;
+    for k in k_grid(config) {
         if g_at_k(k) < -BUTTERFLY_G_TOL {
-            let strike = forward * k.exp();
-            let d = density(strike).map_err(|e| error::VolSurfError::NumericalError {
-                message: format!(
-                    "arbitrage scan failed to evaluate density at strike {strike}: {e}"
-                ),
-            })?;
-            violations.push(ButterflyViolation { strike, density: d });
+            violations.push(violation_at(forward * k.exp(), &density)?);
         }
     }
     Ok(ArbitrageReport {
@@ -287,7 +295,7 @@ mod tests {
             k_min: -1.0,
             k_max: 1.0,
         };
-        let scanned = scan_density(1.0, 100.0, &config, |strike| {
+        let scanned = scan_density(1.0, 100.0, config, |strike| {
             if (50.0..200.0).contains(&strike) {
                 Err(error::VolSurfError::NumericalError {
                     message: "model breakdown".into(),
@@ -306,12 +314,12 @@ mod tests {
     // ========== ArbitrageScanConfig ==========
 
     #[test]
-    fn svi_default_config_matches_hardcoded() {
+    fn wide_config_matches_hardcoded() {
         use crate::smile::{ArbitrageScanConfig, SviSmile};
         let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.0, 0.3).unwrap();
         let default_report = svi.is_arbitrage_free().unwrap();
         let config_report = svi
-            .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+            .is_arbitrage_free_with(ArbitrageScanConfig::wide())
             .unwrap();
         assert_eq!(default_report.is_free(), config_report.is_free());
         assert_eq!(
@@ -321,17 +329,69 @@ mod tests {
     }
 
     #[test]
-    fn sabr_default_config_matches_hardcoded() {
+    fn narrow_config_matches_hardcoded() {
         use crate::smile::{ArbitrageScanConfig, SabrSmile};
         let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
         let default_report = sabr.is_arbitrage_free().unwrap();
         let config_report = sabr
-            .is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+            .is_arbitrage_free_with(ArbitrageScanConfig::narrow())
             .unwrap();
         assert_eq!(default_report.is_free(), config_report.is_free());
         assert_eq!(
             default_report.butterfly_violations.len(),
             config_report.butterfly_violations.len()
+        );
+    }
+
+    #[test]
+    fn default_config_is_the_wide_grid() {
+        use crate::smile::ArbitrageScanConfig;
+        assert_eq!(ArbitrageScanConfig::default(), ArbitrageScanConfig::wide());
+    }
+
+    #[test]
+    fn is_arbitrage_free_scans_the_models_own_default_grid() {
+        use crate::smile::{ArbitrageScanConfig, SmileSection};
+        use crate::types::{Strike, Vol};
+
+        /// Only quotable near the money, like a model whose expansion breaks
+        /// down in the wings.
+        #[derive(Debug)]
+        struct NarrowDomainSmile;
+
+        impl SmileSection for NarrowDomainSmile {
+            fn vol(&self, strike: Strike) -> error::Result<Vol> {
+                if (strike.0 / 100.0).ln().abs() > 1.0 {
+                    return Err(error::VolSurfError::NumericalError {
+                        message: "outside the model's domain".into(),
+                    });
+                }
+                Ok(Vol(0.20))
+            }
+            fn forward(&self) -> f64 {
+                100.0
+            }
+            fn expiry(&self) -> f64 {
+                1.0
+            }
+            fn model_name(&self) -> &'static str {
+                "NarrowDomain"
+            }
+            fn default_scan_config(&self) -> ArbitrageScanConfig {
+                ArbitrageScanConfig {
+                    n_points: 50,
+                    k_min: -0.5,
+                    k_max: 0.5,
+                }
+            }
+        }
+
+        assert!(NarrowDomainSmile.is_arbitrage_free().unwrap().is_free());
+        assert!(
+            NarrowDomainSmile
+                .is_arbitrage_free_with(ArbitrageScanConfig::wide())
+                .is_err(),
+            "the wide grid leaves the model's domain, so only the override saves the default check"
         );
     }
 
@@ -341,14 +401,14 @@ mod tests {
         // Params that produce wing violations
         let svi = SviSmile::new(100.0, 1.0, 0.04, 0.4, -0.9, 0.1, 0.2).unwrap();
         let coarse = svi
-            .is_arbitrage_free_with(&ArbitrageScanConfig {
+            .is_arbitrage_free_with(ArbitrageScanConfig {
                 n_points: 20,
                 k_min: -3.0,
                 k_max: 3.0,
             })
             .unwrap();
         let fine = svi
-            .is_arbitrage_free_with(&ArbitrageScanConfig {
+            .is_arbitrage_free_with(ArbitrageScanConfig {
                 n_points: 500,
                 k_min: -3.0,
                 k_max: 3.0,
@@ -365,10 +425,10 @@ mod tests {
         use crate::smile::{ArbitrageScanConfig, SabrSmile};
         let sabr = SabrSmile::new(100.0, 1.0, 0.3, 0.5, -0.5, 2.0).unwrap();
         let wide = sabr
-            .is_arbitrage_free_with(&ArbitrageScanConfig::sabr_default())
+            .is_arbitrage_free_with(ArbitrageScanConfig::narrow())
             .unwrap();
         let narrow = sabr
-            .is_arbitrage_free_with(&ArbitrageScanConfig {
+            .is_arbitrage_free_with(ArbitrageScanConfig {
                 n_points: 200,
                 k_min: -0.5,
                 k_max: 0.5,
@@ -389,7 +449,7 @@ mod tests {
             k_min: -3.0,
             k_max: 3.0,
         };
-        assert!(svi.is_arbitrage_free_with(&config).is_err());
+        assert!(svi.is_arbitrage_free_with(config).is_err());
     }
 
     #[test]
@@ -401,7 +461,7 @@ mod tests {
             k_min: 3.0,
             k_max: -3.0,
         };
-        assert!(svi.is_arbitrage_free_with(&config).is_err());
+        assert!(svi.is_arbitrage_free_with(config).is_err());
     }
 
     #[test]
@@ -413,6 +473,6 @@ mod tests {
             k_min: f64::NAN,
             k_max: 3.0,
         };
-        assert!(svi.is_arbitrage_free_with(&config).is_err());
+        assert!(svi.is_arbitrage_free_with(config).is_err());
     }
 }

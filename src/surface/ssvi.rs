@@ -30,14 +30,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::calibration::{DataFilter, WeightingScheme};
 use crate::error::{self, VolSurfError};
+use crate::serde_raw::validated_serde;
 use crate::smile::arbitrage::{ArbitrageReport, density_from_g, gatheral_g, scan_g};
 use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{CalendarViolation, SurfaceDiagnostics, surface_diagnostics};
+use crate::surface::calib::{
+    RHO_CLAMP, check_theta_monotone, optimize_eta_gamma, validate_calibration_grid,
+};
 use crate::surface::interp::strike_grid;
 use crate::surface::{CALENDAR_ARB_TOL, CALENDAR_CHECK_GRID_SIZE};
 use crate::types::{Strike, Tenor, Variance, Vol};
-use crate::validate::{validate_positive, validate_surface_grid};
+use crate::validate::{
+    validate_in_range, validate_open_unit_interval, validate_positive, validate_surface_grid,
+};
 
 /// Evaluate the shared SSVI/eSSVI total-variance kernel.
 pub(crate) fn ssvi_total_variance(theta: f64, k: f64, rho: f64, eta: f64, gamma: f64) -> f64 {
@@ -97,42 +103,14 @@ pub struct SsviSurface {
     one_minus_rho_sq: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SsviSurfaceRaw {
+validated_serde!(SsviSurface => SsviSurfaceRaw {
     rho: f64,
     eta: f64,
     gamma: f64,
     tenors: Vec<f64>,
     forwards: Vec<f64>,
     thetas: Vec<f64>,
-}
-
-impl TryFrom<SsviSurfaceRaw> for SsviSurface {
-    type Error = VolSurfError;
-    fn try_from(raw: SsviSurfaceRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.rho,
-            raw.eta,
-            raw.gamma,
-            raw.tenors,
-            raw.forwards,
-            raw.thetas,
-        )
-    }
-}
-
-impl From<SsviSurface> for SsviSurfaceRaw {
-    fn from(s: SsviSurface) -> Self {
-        Self {
-            rho: s.rho,
-            eta: s.eta,
-            gamma: s.gamma,
-            tenors: s.tenors,
-            forwards: s.forwards,
-            thetas: s.thetas,
-        }
-    }
-}
+});
 
 impl SsviSurface {
     /// Create an SSVI surface from global parameters and per-tenor data.
@@ -156,17 +134,9 @@ impl SsviSurface {
         thetas: Vec<f64>,
     ) -> error::Result<Self> {
         // Scalar validation
-        if rho.abs() >= 1.0 || rho.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("|rho| must be less than 1, got {rho}"),
-            });
-        }
+        validate_open_unit_interval(rho, "rho")?;
         validate_positive(eta, "eta")?;
-        if !gamma.is_finite() || !(0.0..=1.0).contains(&gamma) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("gamma must be in [0, 1], got {gamma}"),
-            });
-        }
+        validate_in_range(gamma, 0.0, 1.0, "gamma")?;
 
         validate_surface_grid(&tenors, &forwards, &thetas)?;
 
@@ -194,11 +164,6 @@ impl SsviSurface {
     /// Term structure decay parameter γ.
     pub fn gamma(&self) -> f64 {
         self.gamma
-    }
-
-    /// Per-tenor expiries.
-    pub fn tenors(&self) -> &[f64] {
-        &self.tenors
     }
 
     /// Forward prices at each tenor.
@@ -254,45 +219,6 @@ impl SsviSurface {
         0.5 * (1.0 + self.rho * u * (1.0 - self.gamma) + r - self.gamma * u * (u + self.rho) / r)
     }
 
-    /// Analytical calendar arbitrage check for this SSVI surface.
-    ///
-    /// Scans `∂w/∂θ` (see `dw_dtheta`) on a grid of
-    /// `(θ, k)` points at each consecutive tenor pair. Returns calendar
-    /// violations where the derivative is negative, indicating total
-    /// variance would decrease with increasing ATM variance.
-    ///
-    /// For valid SSVI surfaces with power-law `φ(θ) = η/θ^γ`, `γ ∈ [0, 1]`,
-    /// and `|ρ| < 1`, this always returns an empty vector because `∂w/∂θ ≥ 0`
-    /// is mathematically guaranteed. The scan serves as empirical confirmation
-    /// of the analytical bound.
-    ///
-    /// # References
-    /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
-    pub fn calendar_arb_analytical(&self) -> Vec<CalendarViolation> {
-        let mut violations = Vec::new();
-
-        for i in 0..self.tenors.len().saturating_sub(1) {
-            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
-            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
-
-            for &strike in &grid {
-                let k_short = (strike / self.forwards[i]).ln();
-                if self.dw_dtheta(self.thetas[i], k_short) < -CALENDAR_ARB_TOL {
-                    let k_long = (strike / self.forwards[i + 1]).ln();
-                    violations.push(CalendarViolation {
-                        strike,
-                        tenor_short: self.tenors[i],
-                        tenor_long: self.tenors[i + 1],
-                        variance_short: self.total_variance_at(self.thetas[i], k_short),
-                        variance_long: self.total_variance_at(self.thetas[i + 1], k_long),
-                    });
-                }
-            }
-        }
-
-        violations
-    }
-
     /// Interpolate `(θ, F)` at an arbitrary expiry.
     ///
     /// - **Exact match** (within 1e-10): uses stored values directly.
@@ -311,9 +237,9 @@ impl SsviSurface {
     /// 2. Global optimization of (η, γ) with ρ fixed from the SVI average
     ///
     /// # Arguments
-    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (min 5 per tenor)
     /// * `tenors` — Expiry times in years (min 2, all positive)
     /// * `forwards` — Forward prices at each tenor (all positive)
+    /// * `market_data` — Per-tenor slices of (strike, implied_vol) pairs (min 5 per tenor)
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] for insufficient or invalid data,
@@ -337,41 +263,40 @@ impl SsviSurface {
     ///     (100.0, 0.20), (105.0, 0.22), (110.0, 0.24), (120.0, 0.28),
     /// ];
     /// let surface = SsviSurface::calibrate(
-    ///     &[data_3m, data_1y],
     ///     &[0.25, 1.0],
     ///     &[100.0, 100.0],
+    ///     &[data_3m, data_1y],
     /// )?;
     /// let vol = surface.black_vol(Tenor(0.5), Strike(100.0))?;
     /// assert!(vol.0 > 0.0);
     /// # Ok::<(), volsurf::VolSurfError>(())
     /// ```
     pub fn calibrate(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
+        market_data: &[Vec<(f64, f64)>],
     ) -> error::Result<Self> {
         Self::calibrate_with_config(
-            market_data,
             tenors,
             forwards,
-            &DataFilter::default(),
-            &WeightingScheme::default(),
+            market_data,
+            DataFilter::default(),
+            WeightingScheme::default(),
         )
     }
 
     /// Calibrate SSVI surface with configurable per-tenor filtering and weighting.
     pub fn calibrate_with_config(
-        market_data: &[Vec<(f64, f64)>],
         tenors: &[f64],
         forwards: &[f64],
-        filter: &DataFilter,
-        weighting: &WeightingScheme,
+        market_data: &[Vec<(f64, f64)>],
+        filter: DataFilter,
+        weighting: WeightingScheme,
     ) -> error::Result<Self> {
         #[cfg(feature = "logging")]
         tracing::debug!(n_tenors = tenors.len(), "SSVI calibration started");
 
         const MIN_TENORS: usize = 2;
-        const GRID_N: usize = 15;
 
         if tenors.len() < MIN_TENORS {
             return Err(VolSurfError::InvalidInput {
@@ -381,30 +306,7 @@ impl SsviSurface {
                 ),
             });
         }
-        if tenors.len() != forwards.len() || tenors.len() != market_data.len() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!(
-                    "tenors, forwards, and market_data must have the same length: {}, {}, {}",
-                    tenors.len(),
-                    forwards.len(),
-                    market_data.len()
-                ),
-            });
-        }
-        for (i, &t) in tenors.iter().enumerate() {
-            if !t.is_finite() || t <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("tenors[{i}] must be positive and finite, got {t}"),
-                });
-            }
-        }
-        for (i, &f) in forwards.iter().enumerate() {
-            if !f.is_finite() || f <= 0.0 {
-                return Err(VolSurfError::InvalidInput {
-                    message: format!("forwards[{i}] must be positive and finite, got {f}"),
-                });
-            }
-        }
+        validate_calibration_grid(tenors, forwards, market_data.len())?;
 
         // Stage 1: Per-tenor SVI calibration
         let n_tenors = tenors.len();
@@ -434,26 +336,10 @@ impl SsviSurface {
             rho_sum += svi.rho();
         }
 
-        for (i, w) in thetas.windows(2).enumerate() {
-            if w[1] <= w[0] {
-                return Err(VolSurfError::CalibrationError {
-                    message: format!(
-                        "per-tenor SVI calibration produced non-monotone ATM variances: \
-                         theta[{i}]={:.6} >= theta[{}]={:.6} (tenors {}, {})",
-                        w[0],
-                        i + 1,
-                        w[1],
-                        tenors[i],
-                        tenors[i + 1]
-                    ),
-                    model: "SSVI",
-                    rms_error: None,
-                });
-            }
-        }
+        check_theta_monotone(&thetas, tenors, "SSVI")?;
 
         // Average rho from per-tenor SVI fits, clamped to valid range
-        let rho_global = (rho_sum / n_tenors as f64).clamp(-0.999, 0.999);
+        let rho_global = (rho_sum / n_tenors as f64).clamp(-RHO_CLAMP, RHO_CLAMP);
 
         // Prepare observation triples from filtered data so Stage 2 optimizes
         // against the same points that Stage 1 SVI was calibrated on.
@@ -492,43 +378,7 @@ impl SsviSurface {
             rss
         };
 
-        // Grid search over (eta, gamma)
-        let eta_lo = 0.01_f64;
-        let eta_hi = 3.0_f64;
-        let gamma_lo = 0.0_f64;
-        let gamma_hi = 1.0_f64;
-
-        let (best_eta, best_gamma, _best_rss) = crate::optim::grid_search_2d(
-            GRID_N,
-            |ie| eta_lo + (eta_hi - eta_lo) * ie as f64 / (GRID_N - 1) as f64,
-            |ig| gamma_lo + (gamma_hi - gamma_lo) * ig as f64 / (GRID_N - 1) as f64,
-            objective,
-        )
-        .ok_or_else(|| VolSurfError::CalibrationError {
-            message: "grid search found no valid starting point".into(),
-            model: "SSVI",
-            rms_error: None,
-        })?;
-
-        // Nelder-Mead refinement
-        let step_eta = (eta_hi - eta_lo) / (GRID_N as f64) * 0.5;
-        let step_gamma = (gamma_hi - gamma_lo) / (GRID_N as f64) * 0.5;
-
-        let nm_config = crate::optim::NelderMeadConfig::calibration();
-        let nm_result = crate::optim::nelder_mead_2d(
-            objective, best_eta, best_gamma, step_eta, step_gamma, &nm_config,
-        );
-
-        let opt_eta = nm_result.x.max(1e-6);
-        let opt_gamma = nm_result.y.clamp(0.0, 1.0);
-
-        // Compute RMS for diagnostics
-        let n_points = all_points.len();
-        let rms = if n_points > 0 {
-            (nm_result.fval / n_points as f64).sqrt()
-        } else {
-            0.0
-        };
+        let (opt_eta, opt_gamma, rms) = optimize_eta_gamma(objective, all_points.len(), "SSVI")?;
 
         #[cfg(feature = "logging")]
         tracing::debug!(
@@ -570,6 +420,11 @@ impl VolSurface for SsviSurface {
         Ok(Variance(w))
     }
 
+    fn forward(&self, expiry: Tenor) -> error::Result<f64> {
+        validate_positive(expiry.0, "expiry")?;
+        Ok(self.theta_and_forward_at(expiry.0).1)
+    }
+
     fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {
         validate_positive(expiry.0, "expiry")?;
         let (theta, forward) = self.theta_and_forward_at(expiry.0);
@@ -577,11 +432,50 @@ impl VolSurface for SsviSurface {
         Ok(Box::new(slice))
     }
 
-    fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        self.diagnostics_with(&ArbitrageScanConfig::svi_default())
+    /// Exact calendar arbitrage check for this SSVI surface.
+    ///
+    /// Scans `∂w/∂θ` (see `dw_dtheta`) on a grid of
+    /// `(θ, k)` points at each consecutive tenor pair. Returns calendar
+    /// violations where the derivative is negative, indicating total
+    /// variance would decrease with increasing ATM variance.
+    ///
+    /// For valid SSVI surfaces with power-law `φ(θ) = η/θ^γ`, `γ ∈ [0, 1]`,
+    /// and `|ρ| < 1`, this always returns an empty vector because `∂w/∂θ ≥ 0`
+    /// is mathematically guaranteed. The scan serves as empirical confirmation
+    /// of the analytical bound.
+    ///
+    /// # References
+    /// - Gatheral, J. & Jacquier, A. "Arbitrage-free SVI Volatility Surfaces" (2014), Theorem 4.2
+    fn calendar_violations(&self) -> error::Result<Vec<CalendarViolation>> {
+        let mut violations = Vec::new();
+
+        for i in 0..self.tenors.len().saturating_sub(1) {
+            let f_avg = 0.5 * (self.forwards[i] + self.forwards[i + 1]);
+            let grid = strike_grid(f_avg, CALENDAR_CHECK_GRID_SIZE);
+
+            for &strike in &grid {
+                let k_short = (strike / self.forwards[i]).ln();
+                if self.dw_dtheta(self.thetas[i], k_short) < -CALENDAR_ARB_TOL {
+                    let k_long = (strike / self.forwards[i + 1]).ln();
+                    violations.push(CalendarViolation {
+                        strike,
+                        tenor_short: self.tenors[i],
+                        tenor_long: self.tenors[i + 1],
+                        variance_short: self.total_variance_at(self.thetas[i], k_short),
+                        variance_long: self.total_variance_at(self.thetas[i + 1], k_long),
+                    });
+                }
+            }
+        }
+
+        Ok(violations)
     }
 
-    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
+    fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
+        self.diagnostics_with(ArbitrageScanConfig::wide())
+    }
+
+    fn diagnostics_with(&self, config: ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
         surface_diagnostics(
             &self.tenors,
             &self.forwards,
@@ -648,42 +542,14 @@ pub struct SsviSlice {
     one_minus_rho_sq: f64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SsviSliceRaw {
+validated_serde!(SsviSlice => SsviSliceRaw {
     forward: f64,
     expiry: f64,
     rho: f64,
     eta: f64,
     gamma: f64,
     theta: f64,
-}
-
-impl TryFrom<SsviSliceRaw> for SsviSlice {
-    type Error = VolSurfError;
-    fn try_from(raw: SsviSliceRaw) -> Result<Self, Self::Error> {
-        Self::new(
-            raw.forward,
-            raw.expiry,
-            raw.rho,
-            raw.eta,
-            raw.gamma,
-            raw.theta,
-        )
-    }
-}
-
-impl From<SsviSlice> for SsviSliceRaw {
-    fn from(s: SsviSlice) -> Self {
-        Self {
-            forward: s.forward,
-            expiry: s.expiry,
-            rho: s.rho,
-            eta: s.eta,
-            gamma: s.gamma,
-            theta: s.theta,
-        }
-    }
-}
+});
 
 impl SsviSlice {
     /// Create an SSVI slice at a fixed tenor.
@@ -721,17 +587,9 @@ impl SsviSlice {
     ) -> error::Result<Self> {
         validate_positive(forward, "forward")?;
         validate_positive(expiry, "expiry")?;
-        if rho.abs() >= 1.0 || rho.is_nan() {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("|rho| must be less than 1, got {rho}"),
-            });
-        }
+        validate_open_unit_interval(rho, "rho")?;
         validate_positive(eta, "eta")?;
-        if !gamma.is_finite() || !(0.0..=1.0).contains(&gamma) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("gamma must be in [0, 1], got {gamma}"),
-            });
-        }
+        validate_in_range(gamma, 0.0, 1.0, "gamma")?;
         validate_positive(theta, "theta")?;
         Ok(Self {
             forward,
@@ -788,6 +646,21 @@ impl SsviSlice {
         (self.theta / 2.0) * phi * phi * self.one_minus_rho_sq / (r * r * r)
     }
 
+    /// Total variance at `strike`, with the non-negativity guard `vol` and
+    /// `variance` share. `density` guards separately: it needs `w > 0` for the
+    /// `1/(K·√w)` factor, and says so in its own error.
+    fn checked_variance(&self, strike: Strike) -> error::Result<f64> {
+        validate_positive(strike.0, "strike")?;
+        let k = (strike.0 / self.forward).ln();
+        let w = self.total_variance(k);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("SSVI total variance is negative: w({k}) = {w}"),
+            });
+        }
+        Ok(w)
+    }
+
     // g(k) = (1 − k·w'/(2w))² − (w')²/4·(1/w + 1/4) + w''/2
     // g(k) ≥ 0 ⟺ no butterfly arbitrage (Gatheral & Jacquier 2014, §4)
     fn g_function(&self, k: f64) -> f64 {
@@ -800,27 +673,12 @@ impl SsviSlice {
 
 impl SmileSection for SsviSlice {
     fn vol(&self, strike: Strike) -> error::Result<Vol> {
-        validate_positive(strike.0, "strike")?;
-        let k = (strike.0 / self.forward).ln();
-        let w = self.total_variance(k);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("SSVI total variance is negative: w({k}) = {w}"),
-            });
-        }
+        let w = self.checked_variance(strike)?;
         Ok(Vol((w / self.expiry).sqrt()))
     }
 
     fn variance(&self, strike: Strike) -> error::Result<Variance> {
-        validate_positive(strike.0, "strike")?;
-        let k = (strike.0 / self.forward).ln();
-        let w = self.total_variance(k);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("SSVI total variance is negative: w({k}) = {w}"),
-            });
-        }
-        Ok(Variance(w))
+        Ok(Variance(self.checked_variance(strike)?))
     }
 
     fn forward(&self) -> f64 {
@@ -859,19 +717,15 @@ impl SmileSection for SsviSlice {
 
     /// Check butterfly arbitrage by scanning the Gatheral g-function.
     ///
-    /// Evaluates g(k) on a grid of 200 points over k ∈ \[−3, 3\].
-    /// Points where g(k) < −tol are recorded as [`crate::smile::ButterflyViolation`]s
-    /// with the actual risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
+    /// Evaluates g(k) over the configured grid. Points where g(k) < −tol are
+    /// recorded as [`crate::smile::ButterflyViolation`]s with the actual
+    /// risk-neutral density q(K) = g(k)·n(d₂)/(K·√w).
     ///
     /// # Reference
     /// Gatheral & Jacquier (2014), Theorem 4.1.
-    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        self.is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
-    }
-
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         scan_g(
             self.expiry,
@@ -886,6 +740,7 @@ impl SmileSection for SsviSlice {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{strike_ladder, synthetic_surface_data};
     use approx::assert_abs_diff_eq;
 
     /// Canonical SSVI parameters for a typical equity surface.
@@ -921,9 +776,30 @@ mod tests {
     }
 
     #[test]
+    fn forward_matches_the_smile_the_surface_would_return() {
+        let s = equity_surface();
+        for &t in &[0.1, 0.25, 0.4, 1.0, 3.0] {
+            assert_abs_diff_eq!(
+                s.forward(Tenor(t)).unwrap(),
+                s.smile_at(Tenor(t)).unwrap().forward(),
+                epsilon = 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn forward_rejects_non_positive_expiry() {
+        let s = equity_surface();
+        assert!(matches!(
+            s.forward(Tenor(0.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
     fn calendar_arb_single_tenor_empty() {
         let surface = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.04]).unwrap();
-        let violations = surface.calendar_arb_analytical();
+        let violations = surface.calendar_violations().unwrap();
         assert!(violations.is_empty());
     }
 
@@ -1404,37 +1280,16 @@ mod tests {
 
     // ========== Calibration tests (T09) ==========
 
-    /// Generate synthetic SSVI market data by sampling a known surface.
-    fn synthetic_ssvi_data(
-        surface: &SsviSurface,
-        tenors: &[f64],
-        strikes_per_tenor: &[Vec<f64>],
-    ) -> Vec<Vec<(f64, f64)>> {
-        tenors
-            .iter()
-            .zip(strikes_per_tenor)
-            .map(|(&t, strikes)| {
-                strikes
-                    .iter()
-                    .map(|&k| (k, surface.black_vol(Tenor(t), Strike(k)).unwrap().0))
-                    .collect()
-            })
-            .collect()
-    }
-
     #[test]
     fn calibrate_round_trip_equity() {
         // Create a known SSVI surface, sample it, calibrate, compare.
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         let mut total_rss = 0.0;
         let mut n_points = 0;
@@ -1447,6 +1302,64 @@ mod tests {
         }
         let rms = (total_rss / n_points as f64).sqrt();
         assert!(rms < 0.005, "round-trip RMS {rms} should be < 0.005");
+    }
+
+    #[test]
+    fn calibrate_with_config_defaults_matches_calibrate() {
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
+
+        let plain = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
+        let configured = SsviSurface::calibrate_with_config(
+            &tenors,
+            &forwards,
+            &market_data,
+            DataFilter::default(),
+            WeightingScheme::default(),
+        )
+        .unwrap();
+
+        assert_abs_diff_eq!(plain.rho(), configured.rho(), epsilon = 1e-12);
+        assert_abs_diff_eq!(plain.eta(), configured.eta(), epsilon = 1e-12);
+        assert_abs_diff_eq!(plain.gamma(), configured.gamma(), epsilon = 1e-12);
+        for (a, b) in plain.thetas().iter().zip(configured.thetas()) {
+            assert_abs_diff_eq!(a, b, epsilon = 1e-12);
+        }
+    }
+
+    #[test]
+    fn calibrate_with_config_filter_changes_the_fit() {
+        // A wing-trimming filter drops the outer strikes the wide ladder
+        // supplies, so the fit is driven by different data.
+        let original = equity_surface();
+        let tenors = vec![0.25, 0.5, 1.0, 2.0];
+        let forwards = vec![100.0, 100.0, 100.0, 100.0];
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
+
+        let plain = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
+        let trimmed = SsviSurface::calibrate_with_config(
+            &tenors,
+            &forwards,
+            &market_data,
+            DataFilter {
+                max_log_moneyness: Some(0.20),
+                ..DataFilter::default()
+            },
+            WeightingScheme::default(),
+        )
+        .unwrap();
+
+        let drift = (plain.rho() - trimmed.rho()).abs()
+            + (plain.eta() - trimmed.eta()).abs()
+            + (plain.gamma() - trimmed.gamma()).abs();
+        assert!(
+            drift > 1e-6,
+            "a wing-trimming filter should move the fit, drift was {drift}"
+        );
     }
 
     #[test]
@@ -1463,13 +1376,10 @@ mod tests {
         .unwrap();
         let tenors = vec![0.5, 1.0];
         let forwards = vec![100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..10).map(|i| 75.0 + 5.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 10, 75.0, 5.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         let mut total_rss = 0.0;
         let mut n_points = 0;
@@ -1505,9 +1415,9 @@ mod tests {
             .iter()
             .map(|&f| (0..10).map(|i| f * 0.8 + f * 0.04 * i as f64).collect())
             .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
         let mut total_rss = 0.0;
         let mut n_points = 0;
@@ -1534,7 +1444,7 @@ mod tests {
             (105.0, 0.2),
             (110.0, 0.2),
         ]];
-        let result = SsviSurface::calibrate(&data, &[1.0], &[100.0]);
+        let result = SsviSurface::calibrate(&[1.0], &[100.0], &data);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -1563,7 +1473,7 @@ mod tests {
             ],
         ];
         // tenors has 2 but forwards has 1
-        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[100.0]);
+        let result = SsviSurface::calibrate(&[0.5, 1.0], &[100.0], &data);
         assert!(result.is_err());
     }
 
@@ -1585,7 +1495,7 @@ mod tests {
                 (110.0, 0.2),
             ],
         ];
-        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[-100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.5, 1.0], &[-100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -1607,7 +1517,7 @@ mod tests {
                 (110.0, 0.2),
             ],
         ];
-        let result = SsviSurface::calibrate(&data, &[0.0, 1.0], &[100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.0, 1.0], &[100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -1634,7 +1544,7 @@ mod tests {
         let market_data = vec![short_tenor_data, long_tenor_data];
         let tenors = vec![0.25, 1.0];
         let forwards = vec![100.0, 100.0];
-        let result = SsviSurface::calibrate(&market_data, &tenors, &forwards);
+        let result = SsviSurface::calibrate(&tenors, &forwards, &market_data);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -1658,13 +1568,10 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         assert!(calibrated.rho().abs() < 1.0, "rho out of range");
         assert!(calibrated.eta() > 0.0, "eta must be positive");
         assert!(
@@ -1682,13 +1589,10 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let diag = calibrated.diagnostics().unwrap();
         assert!(
             diag.is_free(),
@@ -1702,13 +1606,10 @@ mod tests {
         let original = equity_surface();
         let tenors = vec![0.25, 0.5, 1.0, 2.0];
         let forwards = vec![100.0, 100.0, 100.0, 100.0];
-        let strikes: Vec<Vec<f64>> = tenors
-            .iter()
-            .map(|_| (0..15).map(|i| 70.0 + 4.0 * i as f64).collect())
-            .collect();
-        let market_data = synthetic_ssvi_data(&original, &tenors, &strikes);
+        let strikes = strike_ladder(tenors.len(), 15, 70.0, 4.0);
+        let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
-        let calibrated = SsviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+        let calibrated = SsviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
         let thetas = calibrated.thetas();
         for w in thetas.windows(2) {
             assert!(
@@ -1738,7 +1639,7 @@ mod tests {
             make_smile(100.0, 0.50), // short tenor: very high vol (earnings)
             make_smile(100.0, 0.20), // long tenor: normal vol
         ];
-        let result = SsviSurface::calibrate(&data, &[0.25, 0.50], &[100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.25, 0.50], &[100.0, 100.0], &data);
         let err = result.unwrap_err();
         assert!(matches!(err, VolSurfError::CalibrationError { .. }));
         let msg = err.to_string();
@@ -1755,7 +1656,7 @@ mod tests {
             vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
             vec![(90.0, 0.3), (100.0, 0.25), (110.0, 0.3)],
         ];
-        let result = SsviSurface::calibrate(&data, &[0.5, 1.0], &[100.0, 100.0]);
+        let result = SsviSurface::calibrate(&[0.5, 1.0], &[100.0, 100.0], &data);
         assert!(result.is_err());
     }
 
@@ -1992,10 +1893,10 @@ mod tests {
     }
 
     #[test]
-    fn calendar_arb_analytical_clean_for_valid_surface() {
+    fn calendar_violations_analytical_clean_for_valid_surface() {
         // Valid SSVI surface: analytical check returns no violations.
         let s = equity_surface();
-        let violations = s.calendar_arb_analytical();
+        let violations = s.calendar_violations().unwrap();
         assert!(
             violations.is_empty(),
             "valid SSVI should be analytically calendar-arb-free, got {} violations",
@@ -2004,12 +1905,12 @@ mod tests {
     }
 
     #[test]
-    fn calendar_arb_analytical_and_numerical_agree() {
+    fn calendar_violations_analytical_and_numerical_agree() {
         // Both numerical (diagnostics) and analytical checks agree:
         // no calendar violations for a valid SSVI surface.
         let s = equity_surface();
         let diag = s.diagnostics().unwrap();
-        let analytical = s.calendar_arb_analytical();
+        let analytical = s.calendar_violations().unwrap();
         assert!(
             diag.calendar_violations.is_empty(),
             "numerical check should find no violations"
@@ -2057,14 +1958,14 @@ mod tests {
     }
 
     #[test]
-    fn calendar_arb_analytical_single_tenor() {
+    fn calendar_violations_analytical_single_tenor() {
         // Single tenor: no consecutive pairs, so no calendar violations.
         let s = SsviSurface::new(-0.3, 0.5, 0.5, vec![1.0], vec![100.0], vec![0.16]).unwrap();
-        assert!(s.calendar_arb_analytical().is_empty());
+        assert!(s.calendar_violations().unwrap().is_empty());
     }
 
     #[test]
-    fn calendar_arb_analytical_differing_forwards() {
+    fn calendar_violations_analytical_differing_forwards() {
         let s = SsviSurface::new(
             -0.3,
             0.5,
@@ -2075,7 +1976,7 @@ mod tests {
         )
         .unwrap();
 
-        let analytical = s.calendar_arb_analytical();
+        let analytical = s.calendar_violations().unwrap();
         assert!(
             analytical.is_empty(),
             "valid SSVI with differing forwards should be arb-free, got {} violations",
@@ -2106,7 +2007,7 @@ mod tests {
             diag.calendar_violations.is_empty(),
             "barely increasing thetas should still pass numerical calendar checks"
         );
-        let analytical = s.calendar_arb_analytical();
+        let analytical = s.calendar_violations().unwrap();
         assert!(
             analytical.is_empty(),
             "barely increasing thetas should still pass analytical calendar checks"
@@ -2281,9 +2182,9 @@ mod tests {
             let vol_m = s.vol(Strike(strike - h)).unwrap().0;
             let vol_0 = s.vol(Strike(strike)).unwrap().0;
             let vol_p = s.vol(Strike(strike + h)).unwrap().0;
-            let c_m = black_price(f, strike - h, vol_m, t, OptionType::Call).unwrap();
-            let c_0 = black_price(f, strike, vol_0, t, OptionType::Call).unwrap();
-            let c_p = black_price(f, strike + h, vol_p, t, OptionType::Call).unwrap();
+            let c_m = black_price(f, strike - h, Vol(vol_m), t, OptionType::Call).unwrap();
+            let c_0 = black_price(f, strike, Vol(vol_0), t, OptionType::Call).unwrap();
+            let c_p = black_price(f, strike + h, Vol(vol_p), t, OptionType::Call).unwrap();
             let numerical = (c_p - 2.0 * c_0 + c_m) / (h * h);
             let analytical = s.density(Strike(strike)).unwrap();
             assert_abs_diff_eq!(analytical, numerical, epsilon = 1e-4);
@@ -2296,18 +2197,25 @@ mod tests {
         assert_send_sync::<SsviSlice>();
     }
 
+    /// `validated_serde!` passes its field list positionally into `new()`, so a
+    /// reordered list would still compile and silently remap ρ/η/γ/θ. Distinct
+    /// η and γ and an off-ATM query are what make such a swap visible — ATM,
+    /// `w(0) = θ` regardless of the other three.
     #[test]
     fn slice_serde_round_trip() {
-        let s = equity_slice();
+        let s = SsviSlice::new(100.0, 1.0, -0.3, 0.7, 0.4, 0.16).unwrap();
         let json = serde_json::to_string(&s).unwrap();
         let s2: SsviSlice = serde_json::from_str(&json).unwrap();
         assert_eq!(s.forward(), s2.forward());
         assert_eq!(s.expiry(), s2.expiry());
         assert_eq!(s.theta(), s2.theta());
+        assert_eq!(s.rho(), s2.rho());
+        assert_eq!(s.eta(), s2.eta());
+        assert_eq!(s.gamma(), s2.gamma());
         // Verify vol agrees after deserialization
         assert_abs_diff_eq!(
-            s.vol(Strike(100.0)).unwrap().0,
-            s2.vol(Strike(100.0)).unwrap().0,
+            s.vol(Strike(90.0)).unwrap().0,
+            s2.vol(Strike(90.0)).unwrap().0,
             epsilon = 1e-14
         );
     }

@@ -55,14 +55,32 @@ where
         .map(report_at)
         .collect::<error::Result<Vec<_>>>()?;
 
-    let mut calendar_violations = Vec::new();
+    Ok(SurfaceDiagnostics {
+        smile_reports,
+        calendar_violations: calendar_scan(tenors, forwards, variance_at)?,
+    })
+}
+
+/// Scan adjacent tenor pairs for total variance decreasing in time.
+///
+/// `variance_at(i, strike)` gives total variance at `tenors[i]`. Strikes come
+/// from a log-spaced grid around the average of each pair's forwards.
+pub(crate) fn calendar_scan<V>(
+    tenors: &[f64],
+    forwards: &[f64],
+    variance_at: V,
+) -> error::Result<Vec<CalendarViolation>>
+where
+    V: Fn(usize, f64) -> error::Result<f64>,
+{
+    let mut violations = Vec::new();
     for i in 0..tenors.len().saturating_sub(1) {
         let forward = 0.5 * (forwards[i] + forwards[i + 1]);
         for strike in strike_grid(forward, CALENDAR_CHECK_GRID_SIZE) {
             let variance_short = variance_at(i, strike)?;
             let variance_long = variance_at(i + 1, strike)?;
             if variance_long < variance_short - CALENDAR_ARB_TOL {
-                calendar_violations.push(CalendarViolation {
+                violations.push(CalendarViolation {
                     strike,
                     tenor_short: tenors[i],
                     tenor_long: tenors[i + 1],
@@ -72,11 +90,7 @@ where
             }
         }
     }
-
-    Ok(SurfaceDiagnostics {
-        smile_reports,
-        calendar_violations,
-    })
+    Ok(violations)
 }
 
 #[cfg(test)]

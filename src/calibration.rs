@@ -58,7 +58,7 @@ pub enum WeightingScheme {
 pub fn apply_filter(
     market_vols: &[(f64, f64)],
     forward: f64,
-    filter: &DataFilter,
+    filter: DataFilter,
 ) -> Vec<(f64, f64)> {
     market_vols
         .iter()
@@ -92,7 +92,7 @@ pub fn apply_filter(
 pub(crate) fn prepare_market_vols(
     market_vols: &[(f64, f64)],
     forward: f64,
-    filter: &DataFilter,
+    filter: DataFilter,
     min_points: usize,
     model: &'static str,
 ) -> crate::error::Result<Vec<(f64, f64)>> {
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn default_filter_passes_everything() {
         let data = vec![(90.0, 0.25), (100.0, 0.20), (110.0, 0.22)];
-        let result = apply_filter(&data, 100.0, &DataFilter::default());
+        let result = apply_filter(&data, 100.0, DataFilter::default());
         assert_eq!(result, data);
     }
 
@@ -141,7 +141,7 @@ mod tests {
             max_log_moneyness: Some(0.5),
             ..Default::default()
         };
-        let result = apply_filter(&data, 100.0, &filter);
+        let result = apply_filter(&data, 100.0, filter);
         assert_eq!(result, vec![(90.0, 0.25), (100.0, 0.20), (110.0, 0.22)]);
     }
 
@@ -157,7 +157,7 @@ mod tests {
             min_vol: Some(0.01),
             ..Default::default()
         };
-        let result = apply_filter(&data, 100.0, &filter);
+        let result = apply_filter(&data, 100.0, filter);
         assert_eq!(result, vec![(90.0, 0.25), (100.0, 0.20)]);
     }
 
@@ -175,13 +175,13 @@ mod tests {
             min_vol: Some(0.01),
             ..Default::default()
         };
-        let result = apply_filter(&data, 100.0, &filter);
+        let result = apply_filter(&data, 100.0, filter);
         assert_eq!(result, vec![(100.0, 0.20), (105.0, 0.22)]);
     }
 
     #[test]
     fn empty_input() {
-        let result = apply_filter(&[], 100.0, &DataFilter::default());
+        let result = apply_filter(&[], 100.0, DataFilter::default());
         assert!(result.is_empty());
     }
 
@@ -192,28 +192,28 @@ mod tests {
             max_log_moneyness: Some(0.1),
             ..Default::default()
         };
-        let result = apply_filter(&data, 100.0, &filter);
+        let result = apply_filter(&data, 100.0, filter);
         assert!(result.is_empty());
     }
 
     #[test]
     fn nan_strike_excluded() {
         let data = vec![(f64::NAN, 0.20), (100.0, 0.20)];
-        let result = apply_filter(&data, 100.0, &DataFilter::default());
+        let result = apply_filter(&data, 100.0, DataFilter::default());
         assert_eq!(result, vec![(100.0, 0.20)]);
     }
 
     #[test]
     fn nan_vol_excluded_unconditionally() {
         let data = vec![(100.0, f64::NAN), (100.0, 0.20)];
-        let result = apply_filter(&data, 100.0, &DataFilter::default());
+        let result = apply_filter(&data, 100.0, DataFilter::default());
         assert_eq!(result, vec![(100.0, 0.20)]);
     }
 
     #[test]
     fn inf_vol_excluded_unconditionally() {
         let data = vec![(100.0, f64::INFINITY), (100.0, 0.20)];
-        let result = apply_filter(&data, 100.0, &DataFilter::default());
+        let result = apply_filter(&data, 100.0, DataFilter::default());
         assert_eq!(result, vec![(100.0, 0.20)]);
     }
 
@@ -224,7 +224,7 @@ mod tests {
             min_vol: Some(0.01),
             ..Default::default()
         };
-        let result = apply_filter(&data, 100.0, &filter);
+        let result = apply_filter(&data, 100.0, filter);
         assert_eq!(result, vec![(100.0, 0.20)]);
     }
 
@@ -235,7 +235,7 @@ mod tests {
             max_log_moneyness: Some(0.5),
             ..Default::default()
         };
-        let result = apply_filter(&data, 0.0, &filter);
+        let result = apply_filter(&data, 0.0, filter);
         assert!(result.is_empty());
     }
 
@@ -246,7 +246,7 @@ mod tests {
             vol_cliff_filter: Some(true),
             ..Default::default()
         };
-        let result = apply_filter(&data, 100.0, &filter);
+        let result = apply_filter(&data, 100.0, filter);
         assert_eq!(
             result.len(),
             3,
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn preserves_input_order() {
         let data = vec![(110.0, 0.22), (90.0, 0.25), (100.0, 0.20)];
-        let result = apply_filter(&data, 100.0, &DataFilter::default());
+        let result = apply_filter(&data, 100.0, DataFilter::default());
         assert_eq!(result, data);
     }
 
@@ -302,7 +302,7 @@ mod tests {
             max_log_moneyness: Some(0.01),
             ..Default::default()
         };
-        let err = prepare_market_vols(&data, 100.0, &filter, 2, "SVI").unwrap_err();
+        let err = prepare_market_vols(&data, 100.0, filter, 2, "SVI").unwrap_err();
         assert!(
             matches!(
                 err,
@@ -327,7 +327,7 @@ mod tests {
             max_log_moneyness: Some(0.01),
             ..Default::default()
         };
-        let kept = prepare_market_vols(&data, 100.0, &filter, 1, "SVI").unwrap();
+        let kept = prepare_market_vols(&data, 100.0, filter, 1, "SVI").unwrap();
         assert_eq!(kept, vec![(100.0, 0.2)]);
     }
 

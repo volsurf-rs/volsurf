@@ -7,14 +7,14 @@
 //!
 //! Run with: `cargo run --example implied_vol`
 
-use volsurf::OptionType;
 use volsurf::implied::{BlackImpliedVol, black_price};
+use volsurf::{OptionType, Vol};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let forward = 100.0;
     let strike = 105.0;
     let expiry = 0.5; // 6 months
-    let vol = 0.25; // 25% implied vol
+    let vol = Vol(0.25); // 25% implied vol
 
     // ---------------------------------------------------------------
     // 1. Price a call and a put
@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Forward: {forward}");
     println!("  Strike:  {strike}");
     println!("  Expiry:  {expiry}y");
-    println!("  Vol:     {:.0}%", vol * 100.0);
+    println!("  Vol:     {:.0}%", vol.0 * 100.0);
     println!();
     println!("  Call price: {call_price:.6}");
     println!("  Put price:  {put_price:.6}");
@@ -47,13 +47,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nImplied vol extraction (Jäckel)");
     println!("  From call: {:.12}", iv_call.0);
     println!("  From put:  {:.12}", iv_put.0);
-    println!("  Input vol: {:.12}", vol);
+    println!("  Input vol: {:.12}", vol.0);
 
     // ---------------------------------------------------------------
     // 3. Round-trip accuracy
     // ---------------------------------------------------------------
 
-    let call_reprice = black_price(forward, strike, iv_call.0, expiry, OptionType::Call)?;
+    let call_reprice = black_price(forward, strike, iv_call, expiry, OptionType::Call)?;
     let round_trip_error = (call_price - call_reprice).abs();
     println!("\nRound-trip accuracy");
     println!("  Original price:  {call_price:.15}");
@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for k in [80.0, 90.0, 95.0, 100.0, 105.0, 110.0, 120.0] {
         let price = black_price(forward, k, vol, expiry, OptionType::Call)?;
         let iv = BlackImpliedVol::compute(price, forward, k, expiry, OptionType::Call)?;
-        let reprice = black_price(forward, k, iv.0, expiry, OptionType::Call)?;
+        let reprice = black_price(forward, k, iv, expiry, OptionType::Call)?;
         let err = (price - reprice).abs();
         println!("{k:>8.0} {price:>12.6} {:>11.8}% {err:>14.2e}", iv.0);
     }

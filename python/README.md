@@ -11,8 +11,8 @@ Not yet on PyPI — build from source with [maturin](https://www.maturin.rs):
 maturin develop --release -m python/Cargo.toml
 ```
 
-Requires Python 3.9 or later and a Rust toolchain. NumPy is the only runtime
-dependency. Tested against Python 3.9 and 3.14.
+Requires Python 3.10 or later and a Rust toolchain. NumPy is the only runtime
+dependency. Tested against Python 3.10 and 3.14.
 
 ## Build a surface
 
@@ -73,6 +73,7 @@ sabr = SabrSmile(100.0, 1.0, 0.20, 0.5, -0.3, 0.4)     # forward, expiry, alpha,
 
 market = [(80.0, 0.28), (90.0, 0.24), (100.0, 0.20), (110.0, 0.24), (120.0, 0.28)]
 fitted = SviSmile.calibrate(100.0, 1.0, market)
+spline = SplineSmile.calibrate(100.0, 1.0, market)  # interpolates, so no two quotes may share a strike
 ```
 
 ## Global surfaces
@@ -91,19 +92,19 @@ ssvi = SsviSurface(
 )
 
 essvi = EssviSurface.calibrate(
-    [market_3m, market_1y],   # per-tenor [(strike, vol), ...]
     [0.25, 1.0],              # tenors
     [100.0, 100.0],           # forwards
+    [market_3m, market_1y],   # per-tenor [(strike, vol), ...]
 )
 ```
 
 To see how well each tenor fit, run the first stage on its own.
-`EssviSurface.fit_per_tenor(market_data, tenors, forwards)` returns a list of
+`EssviSurface.fit_per_tenor(tenors, forwards, market_data)` returns a list of
 `PerTenorFit` — each with `rms_error`, `theta`, and the fitted `svi` slice — and
 `EssviSurface.from_per_tenor(fits)` turns that list into the surface.
 
 ```python
-fits = EssviSurface.fit_per_tenor([market_3m, market_1y], [0.25, 1.0], [100.0, 100.0])
+fits = EssviSurface.fit_per_tenor([0.25, 1.0], [100.0, 100.0], [market_3m, market_1y])
 print([f.rms_error for f in fits])
 surface = EssviSurface.from_per_tenor(fits)
 ```
@@ -158,6 +159,9 @@ b.weighting(WeightingScheme.vega())
 The same options reach single-tenor fits through
 `SviSmile.calibrate_with_config(forward, expiry, market_vols, filter, weighting, seed)`.
 Pass `seed` to warm-start from prior parameters.
+`SplineSmile.calibrate_with_config(forward, expiry, market_vols, filter)` takes the
+filter only — a spline passes through every surviving quote, so there is no
+residual for a weighting to act on.
 
 ## Implied volatility
 

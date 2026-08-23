@@ -354,7 +354,7 @@ proptest! {
     /// calendar arbitrage as detected by the analytical g-function check
     /// (Gatheral-Jacquier Theorem 4.2).
     #[test]
-    fn ssvi_calendar_arb_analytical_empty(
+    fn ssvi_calendar_violations_analytical_empty(
         rho in -0.9_f64..0.9,
         eta in 0.1_f64..2.0,
         gamma in 0.0_f64..1.0,
@@ -372,7 +372,7 @@ proptest! {
         prop_assume!(surface_result.is_ok());
 
         let surface = surface_result.unwrap();
-        let violations = surface.calendar_arb_analytical();
+        let violations = surface.calendar_violations().unwrap();
 
         prop_assert!(
             violations.is_empty(),

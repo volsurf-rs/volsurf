@@ -17,11 +17,23 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::{DataFilter, prepare_market_vols};
 use crate::error::{self, VolSurfError};
-use crate::smile::SmileSection;
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
+use crate::serde_raw::validated_serde;
+use crate::smile::arbitrage::{ArbitrageReport, scan_density};
+use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::types::{Strike, Variance, Vol};
 use crate::validate::validate_positive;
+
+/// Half-width to step in from the boundary knots when scanning for arbitrage.
+///
+/// [`SmileSection::density`] centers its finite difference on `K · 1e-4`, which
+/// is ~1e-4 in log-moneyness; an order of magnitude of margin keeps the whole
+/// stencil clear of the knot boundary.
+const KNOT_EDGE_INSET: f64 = 1e-3;
+
+/// Fewest quotes a cubic spline can be fitted through.
+const MIN_POINTS: usize = 3;
 
 /// Coefficients for one cubic polynomial interval.
 ///
@@ -59,31 +71,12 @@ pub struct SplineSmile {
     coeffs: Vec<SplineCoeff>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SplineSmileRaw {
+validated_serde!(SplineSmile => SplineSmileRaw {
     forward: f64,
     expiry: f64,
     strikes: Vec<f64>,
     variances: Vec<f64>,
-}
-
-impl TryFrom<SplineSmileRaw> for SplineSmile {
-    type Error = VolSurfError;
-    fn try_from(raw: SplineSmileRaw) -> Result<Self, Self::Error> {
-        Self::new(raw.forward, raw.expiry, raw.strikes, raw.variances)
-    }
-}
-
-impl From<SplineSmile> for SplineSmileRaw {
-    fn from(s: SplineSmile) -> Self {
-        Self {
-            forward: s.forward,
-            expiry: s.expiry,
-            strikes: s.strikes,
-            variances: s.variances,
-        }
-    }
-}
+});
 
 impl SplineSmile {
     /// Create a spline smile from strike-variance pairs.
@@ -119,9 +112,9 @@ impl SplineSmile {
                 ),
             });
         }
-        if strikes.len() < 3 {
+        if strikes.len() < MIN_POINTS {
             return Err(VolSurfError::InvalidInput {
-                message: "spline requires at least 3 data points".into(),
+                message: format!("spline requires at least {MIN_POINTS} data points"),
             });
         }
         for k in &strikes {
@@ -164,6 +157,99 @@ impl SplineSmile {
             variances,
             coeffs,
         })
+    }
+
+    /// Fit a spline through market (strike, implied vol) observations.
+    ///
+    /// Converts each quote to total variance σ²T and sorts by strike, which is
+    /// what [`new`](Self::new) wants and what every caller would otherwise
+    /// write for itself. Equivalent to
+    /// [`calibrate_with_config`](Self::calibrate_with_config) with the default
+    /// filter.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] for non-positive strikes or vols,
+    /// if fewer than 3 quotes are supplied, or if two quotes share a strike — a
+    /// spline interpolates, so unlike SVI and SABR it cannot absorb a repeated
+    /// strike (a call and a put on the same strike) into a least-squares fit.
+    pub fn calibrate(forward: f64, expiry: f64, market_vols: &[(f64, f64)]) -> error::Result<Self> {
+        Self::calibrate_with_config(forward, expiry, market_vols, DataFilter::default())
+    }
+
+    /// Fit a spline through market quotes, filtering them first.
+    ///
+    /// Takes no [`WeightingScheme`](crate::calibration::WeightingScheme): a
+    /// spline passes through every surviving quote exactly, so there is no
+    /// residual for a weight to bear on.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] for non-positive strikes or vols,
+    /// if fewer than 3 quotes are supplied, or if two surviving quotes share a
+    /// strike — a spline interpolates, so unlike SVI and SABR it cannot absorb
+    /// a repeated strike (a call and a put on the same strike) into a
+    /// least-squares fit; the message names the shared strike, since quotes are
+    /// sorted before fitting and an input position would not survive the sort.
+    /// Returns [`VolSurfError::CalibrationError`] if `filter` leaves fewer than
+    /// 3 quotes.
+    pub fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        market_vols: &[(f64, f64)],
+        filter: DataFilter,
+    ) -> error::Result<Self> {
+        validate_positive(forward, "forward")?;
+        validate_positive(expiry, "expiry")?;
+        if market_vols.len() < MIN_POINTS {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "at least {MIN_POINTS} market points required, got {}",
+                    market_vols.len()
+                ),
+            });
+        }
+        for &(strike, vol) in market_vols {
+            validate_positive(strike, "strike")?;
+            validate_positive(vol, "implied vol")?;
+        }
+
+        let quotes = prepare_market_vols(market_vols, forward, filter, MIN_POINTS, "CubicSpline")?;
+        let mut pairs: Vec<(f64, f64)> = quotes
+            .iter()
+            .map(|&(strike, vol)| (strike, vol * vol * expiry))
+            .collect();
+        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // `new` reports duplicates by position, which after this sort no longer
+        // matches anything the caller passed in. Name the strike instead.
+        if let Some(w) = pairs.windows(2).find(|w| w[1].0 <= w[0].0) {
+            return Err(VolSurfError::InvalidInput {
+                message: format!("two quotes share strike {}", w[0].0),
+            });
+        }
+        let (strikes, variances) = pairs.into_iter().unzip();
+        Self::new(forward, expiry, strikes, variances)
+    }
+
+    /// Knot strikes, in increasing order.
+    pub fn strikes(&self) -> &[f64] {
+        &self.strikes
+    }
+
+    /// Total variance σ²T at each knot strike.
+    pub fn variances(&self) -> &[f64] {
+        &self.variances
+    }
+
+    /// Interpolated total variance at `strike`, rejecting the negative values a
+    /// cubic can undershoot to between non-negative knots.
+    fn checked_variance(&self, strike: Strike) -> error::Result<f64> {
+        validate_positive(strike.0, "strike")?;
+        let w = self.eval_variance(strike.0);
+        if w < 0.0 {
+            return Err(VolSurfError::NumericalError {
+                message: format!("negative interpolated variance {w} at strike {strike}"),
+            });
+        }
+        Ok(w)
     }
 
     /// Evaluate the spline to get total variance at a given strike.
@@ -247,25 +333,12 @@ fn build_spline_coefficients(x: &[f64], y: &[f64], n: usize) -> Vec<SplineCoeff>
 
 impl SmileSection for SplineSmile {
     fn vol(&self, strike: Strike) -> error::Result<Vol> {
-        validate_positive(strike.0, "strike")?;
-        let w = self.eval_variance(strike.0);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("negative interpolated variance {w} at strike {strike}"),
-            });
-        }
+        let w = self.checked_variance(strike)?;
         Ok(Vol((w / self.expiry).sqrt()))
     }
 
     fn variance(&self, strike: Strike) -> error::Result<Variance> {
-        validate_positive(strike.0, "strike")?;
-        let w = self.eval_variance(strike.0);
-        if w < 0.0 {
-            return Err(VolSurfError::NumericalError {
-                message: format!("negative interpolated variance {w} at strike {strike}"),
-            });
-        }
-        Ok(Variance(w))
+        Ok(Variance(self.checked_variance(strike)?))
     }
 
     fn forward(&self) -> f64 {
@@ -280,29 +353,57 @@ impl SmileSection for SplineSmile {
         "CubicSpline"
     }
 
-    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        // Number of grid points for density-based arbitrage scan.
-        let n_samples = 200;
-        let k_min = self.strikes[0];
-        let k_max = self.strikes[self.strikes.len() - 1];
-        let dk = (k_max - k_min) / (n_samples as f64);
-
-        let mut violations = Vec::new();
-        for i in 1..n_samples {
-            let k = k_min + dk * (i as f64);
-            let d = self.density(Strike(k))?;
-            // Tolerance for negative density detection.
-            if d < -1e-8 {
-                violations.push(ButterflyViolation {
-                    strike: k,
-                    density: d,
-                });
-            }
+    /// Scans the density over the configured grid, clipped to the knot range.
+    ///
+    /// Outside `[K₀, Kₙ]` the spline flat-extrapolates, so the deep wings carry
+    /// no fitted information and the finite-difference density there is
+    /// dominated by cancellation error — far enough out it reads as ~1e-8 of
+    /// spurious negative density, which is enough to trip the tolerance. The
+    /// boundary knots themselves are excluded too: `w` is only C⁰ where the
+    /// spline meets its flat extrapolation, and a stencil straddling that kink
+    /// reports a large negative density that is not arbitrage. Interior knots
+    /// need no such treatment — a natural cubic spline is C² there.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] if nothing in `config` could be
+    /// meaningfully evaluated: either the knot span in log-moneyness is too
+    /// narrow to clear both boundary insets, leaving nothing usable whatever
+    /// the config, or the config is disjoint from the usable knot range. Each
+    /// case names its own cause.
+    fn is_arbitrage_free_with(
+        &self,
+        config: ArbitrageScanConfig,
+    ) -> error::Result<ArbitrageReport> {
+        config.validate()?;
+        let last = self.strikes.len() - 1;
+        let lo = (self.strikes[0] / self.forward).ln() + KNOT_EDGE_INSET;
+        let hi = (self.strikes[last] / self.forward).ln() - KNOT_EDGE_INSET;
+        if lo >= hi {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "knot strikes [{}, {}] span {} in log-moneyness, not more than the {} needed to clear both boundary insets, leaving nothing scannable",
+                    self.strikes[0],
+                    self.strikes[last],
+                    hi - lo + 2.0 * KNOT_EDGE_INSET,
+                    2.0 * KNOT_EDGE_INSET
+                ),
+            });
         }
-
-        Ok(ArbitrageReport {
-            expiry: self.expiry,
-            butterfly_violations: violations,
+        if config.k_max <= lo || config.k_min >= hi {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "scan range [{}, {}] does not overlap the spline's usable knot range [{lo}, {hi}]",
+                    config.k_min, config.k_max
+                ),
+            });
+        }
+        let clipped = ArbitrageScanConfig {
+            n_points: config.n_points,
+            k_min: config.k_min.max(lo),
+            k_max: config.k_max.min(hi),
+        };
+        scan_density(self.expiry, self.forward, clipped, |strike| {
+            self.density(Strike(strike))
         })
     }
 }
@@ -316,6 +417,64 @@ mod tests {
     /// Flat 20% vol smile for validation tests.
     fn make_flat_smile() -> SplineSmile {
         SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.04, 0.04, 0.04]).unwrap()
+    }
+
+    #[test]
+    fn calibrate_reproduces_the_quotes_it_was_given() {
+        // Deliberately unsorted: calibrate sorts, new() would reject.
+        let quotes = [(110.0, 0.22), (90.0, 0.24), (100.0, 0.20), (120.0, 0.26)];
+        let smile = SplineSmile::calibrate(100.0, 2.0, &quotes).unwrap();
+        for &(strike, vol) in &quotes {
+            assert_abs_diff_eq!(smile.vol(Strike(strike)).unwrap().0, vol, epsilon = 1e-12);
+        }
+        assert_eq!(smile.strikes(), &[90.0, 100.0, 110.0, 120.0]);
+        assert_abs_diff_eq!(smile.variances()[0], 0.24 * 0.24 * 2.0, epsilon = 1e-15);
+    }
+
+    #[test]
+    fn calibrate_rejects_fewer_than_3_quotes() {
+        let quotes = [(90.0, 0.24), (100.0, 0.20)];
+        assert!(matches!(
+            SplineSmile::calibrate(100.0, 1.0, &quotes),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    /// A call and a put quoted on the same strike is a common raw-chain shape.
+    /// SVI and SABR absorb the pair into a least-squares fit; a spline
+    /// interpolates, so it has to reject it.
+    #[test]
+    fn calibrate_rejects_duplicate_strikes() {
+        let quotes = [(90.0, 0.24), (100.0, 0.20), (100.0, 0.21), (110.0, 0.24)];
+        assert!(matches!(
+            SplineSmile::calibrate(100.0, 1.0, &quotes),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    /// Quotes are sorted before fitting, so a positional message would point at
+    /// whatever landed next to the duplicate rather than at what was passed.
+    #[test]
+    fn duplicate_strike_error_names_the_strike() {
+        let quotes = [(110.0, 0.24), (100.0, 0.20), (90.0, 0.24), (100.0, 0.21)];
+        let err = SplineSmile::calibrate(100.0, 1.0, &quotes).unwrap_err();
+        let VolSurfError::InvalidInput { message } = &err else {
+            panic!("expected InvalidInput, got {err}");
+        };
+        assert!(message.contains("share strike 100"), "{message}");
+    }
+
+    #[test]
+    fn calibrate_with_config_fails_when_the_filter_starves_the_fit() {
+        let quotes = [(60.0, 0.30), (100.0, 0.20), (170.0, 0.30)];
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.1),
+            ..DataFilter::default()
+        };
+        assert!(matches!(
+            SplineSmile::calibrate_with_config(100.0, 1.0, &quotes, filter),
+            Err(VolSurfError::CalibrationError { .. })
+        ));
     }
 
     #[test]
@@ -567,6 +726,129 @@ mod tests {
         }
         // Tolerance is generous: finite integration range + numerical density
         assert_abs_diff_eq!(integral, 1.0, epsilon = 0.10);
+    }
+
+    /// The trait's `is_arbitrage_free()` delegates to `is_arbitrage_free_with`,
+    /// so the two must not disagree about the scan domain the way they did when
+    /// this model carried its own hand-rolled knot-space scan. The dip fixture
+    /// makes both counts nonzero, so a divergent domain moves one of them.
+    #[test]
+    fn both_arbitrage_entry_points_agree() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![80.0, 90.0, 100.0, 110.0, 120.0],
+            vec![0.04, 0.04, 0.002, 0.04, 0.04],
+        )
+        .unwrap();
+
+        let default = smile.is_arbitrage_free().unwrap();
+        let explicit = smile
+            .is_arbitrage_free_with(ArbitrageScanConfig::wide())
+            .unwrap();
+        assert!(
+            !default.butterfly_violations.is_empty(),
+            "fixture must violate, else equal counts prove nothing"
+        );
+        assert_eq!(
+            default.butterfly_violations.len(),
+            explicit.butterfly_violations.len()
+        );
+    }
+
+    /// A config narrower than the knot range is honoured, not widened back out.
+    ///
+    /// The dip fixture violates only near ATM, so a window placed on the clean
+    /// left wing has to come back free while the default scan does not — which
+    /// fails if the window is widened, and fails differently if the clip's
+    /// `.max`/`.min` are swapped.
+    #[test]
+    fn scan_config_narrower_than_knots_is_respected() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![80.0, 90.0, 100.0, 110.0, 120.0],
+            vec![0.04, 0.04, 0.002, 0.04, 0.04],
+        )
+        .unwrap();
+
+        let narrow = ArbitrageScanConfig {
+            n_points: 20,
+            k_min: -0.22,
+            k_max: -0.19,
+        };
+        let report = smile.is_arbitrage_free_with(narrow).unwrap();
+        assert!(
+            report.is_free(),
+            "left wing is clean, got {} violations",
+            report.butterfly_violations.len()
+        );
+        assert!(!smile.is_arbitrage_free().unwrap().is_free());
+        assert_abs_diff_eq!(report.expiry, 1.0, epsilon = 1e-14);
+    }
+
+    /// Scanning a window with no knot coverage cannot be answered, so it errors
+    /// rather than reporting a clean surface it never examined.
+    #[test]
+    fn scan_disjoint_from_knot_range_errors() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![80.0, 90.0, 100.0, 110.0, 120.0],
+            vec![0.065, 0.045, 0.04, 0.045, 0.065],
+        )
+        .unwrap();
+
+        let far_wing = ArbitrageScanConfig {
+            n_points: 20,
+            k_min: 1.0,
+            k_max: 2.0,
+        };
+        let err = smile.is_arbitrage_free_with(far_wing).unwrap_err();
+        let VolSurfError::InvalidInput { message } = &err else {
+            panic!("expected InvalidInput, got {err}");
+        };
+        // Both ranges, so the requested one is recognisable as what was passed.
+        assert!(message.contains("[1, 2]"), "{message}");
+        assert!(message.contains("knot range"), "{message}");
+    }
+
+    /// A knot span narrower than the inset leaves nothing usable whatever the
+    /// config, so the error must not read as a complaint about the config.
+    #[test]
+    fn scan_of_ladder_narrower_than_the_inset_errors() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![99.95, 100.0, 100.05],
+            vec![0.04, 0.04, 0.04],
+        )
+        .unwrap();
+
+        let err = smile
+            .is_arbitrage_free_with(ArbitrageScanConfig::wide())
+            .unwrap_err();
+        let VolSurfError::InvalidInput { message } = &err else {
+            panic!("expected InvalidInput, got {err}");
+        };
+        assert!(message.contains("knot strikes"), "{message}");
+        assert!(message.contains("in log-moneyness"), "{message}");
+        assert!(message.contains("boundary insets"), "{message}");
+    }
+
+    /// Deliberately violated input: a variance dip sharp enough to drive the
+    /// risk-neutral density negative inside the knot range.
+    #[test]
+    fn concave_variance_dip_is_detected() {
+        let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
+        let variances = vec![0.04, 0.04, 0.002, 0.04, 0.04];
+        let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
+
+        let report = smile.is_arbitrage_free().unwrap();
+        assert!(
+            !report.is_free(),
+            "sharp variance dip should register butterfly arbitrage"
+        );
     }
 
     #[test]

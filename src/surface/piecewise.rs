@@ -23,6 +23,7 @@
 //! - After the last tenor: flat vol (variance scales as `wₙ · T/Tₙ`)
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::error::{self, VolSurfError};
 use crate::smile::spline::SplineSmile;
@@ -30,6 +31,7 @@ use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::surface::EXPIRY_MATCH_TOL;
 use crate::surface::VolSurface;
 use crate::surface::arbitrage::{SurfaceDiagnostics, surface_diagnostics};
+use crate::surface::interp::{TenorPosition, locate_tenor, strike_grid};
 use crate::types::{Strike, Tenor, Variance};
 use crate::validate::{validate_positive, validate_positive_slice, validate_strictly_increasing};
 
@@ -68,8 +70,9 @@ const SMILE_GRID_SIZE: usize = 51;
 pub struct PiecewiseSurface {
     /// Sorted tenors (time to expiry in years).
     tenors: Vec<f64>,
-    /// One smile section per tenor.
-    smiles: Vec<Box<dyn SmileSection>>,
+    /// One smile section per tenor, shared so `smile_at` can hand back the
+    /// stored object rather than a resampled copy of it.
+    smiles: Vec<Arc<dyn SmileSection>>,
 }
 
 impl fmt::Debug for PiecewiseSurface {
@@ -123,52 +126,93 @@ impl PiecewiseSurface {
             }
         }
 
+        let smiles = smiles.into_iter().map(Arc::from).collect();
         Ok(Self { tenors, smiles })
     }
 
-    /// Generate a strike grid for sampling smiles, centered on the forward.
-    ///
-    /// Uses log-spaced strikes from `0.5·F` to `2.0·F`.
-    fn strike_grid(forward: f64, n: usize) -> Vec<f64> {
-        super::interp::strike_grid(forward, n)
-    }
-
-    /// Find the bracketing tenor indices for a given expiry.
-    ///
-    /// Returns `(TenorPosition, left_index)` where left_index is the
-    /// index of the tenor <= expiry.
-    fn locate_tenor(&self, expiry: f64) -> TenorPosition {
-        let n = self.tenors.len();
-
-        // Check for exact match (within tolerance)
-        for (i, &t) in self.tenors.iter().enumerate() {
-            if (expiry - t).abs() < EXPIRY_MATCH_TOL {
-                return TenorPosition::Exact(i);
+    /// The forward at `expiry`: stored value on a tenor match, log-linear
+    /// between tenors, held flat outside the grid.
+    fn forward_at(&self, expiry: f64) -> f64 {
+        match self.locate_tenor(expiry) {
+            TenorPosition::Exact(i) => self.smiles[i].forward(),
+            TenorPosition::Before => self.smiles[0].forward(),
+            TenorPosition::After => self.smiles[self.smiles.len() - 1].forward(),
+            TenorPosition::Between(i, j) => {
+                let alpha = (expiry - self.tenors[i]) / (self.tenors[j] - self.tenors[i]);
+                let f1 = self.smiles[i].forward();
+                let f2 = self.smiles[j].forward();
+                (f1.ln() * (1.0 - alpha) + f2.ln() * alpha).exp()
             }
         }
+    }
 
-        if expiry < self.tenors[0] {
-            return TenorPosition::Before;
-        }
-        if expiry > self.tenors[n - 1] {
-            return TenorPosition::After;
-        }
+    fn locate_tenor(&self, expiry: f64) -> TenorPosition {
+        locate_tenor(&self.tenors, expiry)
+    }
 
-        // Binary search for bracketing interval
-        let right = self.tenors.partition_point(|&t| t < expiry);
-        TenorPosition::Between(right - 1, right)
+    /// The two `diagnostics` entry points differ only in how each smile is
+    /// asked to report itself; the forwards and the variance closure are shared.
+    fn diagnostics_via<R>(&self, report_at: R) -> error::Result<SurfaceDiagnostics>
+    where
+        R: Fn(usize) -> error::Result<crate::smile::ArbitrageReport>,
+    {
+        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
+        surface_diagnostics(&self.tenors, &forwards, report_at, |i, strike| {
+            self.smiles[i]
+                .variance(Strike(strike))
+                .map(|variance| variance.0)
+        })
     }
 }
 
-enum TenorPosition {
-    /// Exactly matches tenor at index i.
-    Exact(usize),
-    /// Before the first tenor.
-    Before,
-    /// After the last tenor.
-    After,
-    /// Between tenors[i] and tenors[j].
-    Between(usize, usize),
+/// A stored smile handed out by [`PiecewiseSurface::smile_at`].
+///
+/// `smile_at` must return an owned `Box<dyn SmileSection>`, and a trait object
+/// cannot be cloned — so sharing the original by reference count is what lets
+/// an exact tenor match return the caller's own calibrated model instead of a
+/// spline approximation of it. Every method forwards.
+#[derive(Debug)]
+struct SharedSmile(Arc<dyn SmileSection>);
+
+impl SmileSection for SharedSmile {
+    fn vol(&self, strike: Strike) -> error::Result<crate::types::Vol> {
+        self.0.vol(strike)
+    }
+
+    fn variance(&self, strike: Strike) -> error::Result<Variance> {
+        self.0.variance(strike)
+    }
+
+    fn density(&self, strike: Strike) -> error::Result<f64> {
+        self.0.density(strike)
+    }
+
+    fn forward(&self) -> f64 {
+        self.0.forward()
+    }
+
+    fn expiry(&self) -> f64 {
+        self.0.expiry()
+    }
+
+    fn model_name(&self) -> &'static str {
+        self.0.model_name()
+    }
+
+    fn is_arbitrage_free(&self) -> error::Result<crate::smile::ArbitrageReport> {
+        self.0.is_arbitrage_free()
+    }
+
+    fn is_arbitrage_free_with(
+        &self,
+        config: ArbitrageScanConfig,
+    ) -> error::Result<crate::smile::ArbitrageReport> {
+        self.0.is_arbitrage_free_with(config)
+    }
+
+    fn default_scan_config(&self) -> ArbitrageScanConfig {
+        self.0.default_scan_config()
+    }
 }
 
 impl VolSurface for PiecewiseSurface {
@@ -203,96 +247,44 @@ impl VolSurface for PiecewiseSurface {
         }
     }
 
+    fn forward(&self, expiry: Tenor) -> error::Result<f64> {
+        validate_positive(expiry.0, "expiry")?;
+        Ok(self.forward_at(expiry.0))
+    }
+
+    /// On an exact tenor match this returns the stored smile itself. Off-grid
+    /// expiries have no stored object, so they are resampled onto a cubic
+    /// spline over the log-spaced grid `[0.5·F, 2·F]`; outside that range the
+    /// spline flat-extrapolates, so prefer [`black_variance`](VolSurface::black_variance)
+    /// for deep-wing queries at interpolated tenors.
     fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {
         validate_positive(expiry.0, "expiry")?;
 
-        // Determine the forward and strike grid for the interpolated smile
-        let (forward, strikes, variances) = match self.locate_tenor(expiry.0) {
-            TenorPosition::Exact(i) => {
-                let fwd = self.smiles[i].forward();
-                let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
-                let vars: error::Result<Vec<f64>> = grid
-                    .iter()
-                    .map(|&k| self.smiles[i].variance(Strike(k)).map(|v| v.0))
-                    .collect();
-                (fwd, grid, vars?)
-            }
+        // Resampling a stored smile would swap its model identity, analytic
+        // density, and wing behaviour for the spline's, leaving `smile_at(T)`
+        // and `black_variance(T, ·)` disagreeing on the same surface.
+        if let TenorPosition::Exact(i) = self.locate_tenor(expiry.0) {
+            return Ok(Box::new(SharedSmile(Arc::clone(&self.smiles[i]))));
+        }
 
-            TenorPosition::Before => {
-                let fwd = self.smiles[0].forward();
-                let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
-                let t1 = self.tenors[0];
-                let scale = expiry.0 / t1;
-                let vars: error::Result<Vec<f64>> = grid
-                    .iter()
-                    .map(|&k| self.smiles[0].variance(Strike(k)).map(|v| v.0 * scale))
-                    .collect();
-                (fwd, grid, vars?)
-            }
+        let forward = self.forward_at(expiry.0);
+        let strikes = strike_grid(forward, SMILE_GRID_SIZE);
+        let variances = strikes
+            .iter()
+            .map(|&k| self.black_variance(expiry, Strike(k)).map(|w| w.0))
+            .collect::<error::Result<Vec<f64>>>()?;
 
-            TenorPosition::After => {
-                let n = self.tenors.len();
-                let fwd = self.smiles[n - 1].forward();
-                let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
-                let tn = self.tenors[n - 1];
-                let scale = expiry.0 / tn;
-                let vars: error::Result<Vec<f64>> = grid
-                    .iter()
-                    .map(|&k| self.smiles[n - 1].variance(Strike(k)).map(|v| v.0 * scale))
-                    .collect();
-                (fwd, grid, vars?)
-            }
-
-            TenorPosition::Between(i, j) => {
-                let f1 = self.smiles[i].forward();
-                let f2 = self.smiles[j].forward();
-                let t1 = self.tenors[i];
-                let t2 = self.tenors[j];
-                let alpha = (expiry.0 - t1) / (t2 - t1);
-                let fwd = (f1.ln() * (1.0 - alpha) + f2.ln() * alpha).exp();
-                let grid = Self::strike_grid(fwd, SMILE_GRID_SIZE);
-                let vars: error::Result<Vec<f64>> = grid
-                    .iter()
-                    .map(|&k| {
-                        let w1 = self.smiles[i].variance(Strike(k))?.0;
-                        let w2 = self.smiles[j].variance(Strike(k))?.0;
-                        Ok((1.0 - alpha) * w1 + alpha * w2)
-                    })
-                    .collect();
-                (fwd, grid, vars?)
-            }
-        };
-
-        let spline = SplineSmile::new(forward, expiry.0, strikes, variances)?;
-        Ok(Box::new(spline))
+        Ok(Box::new(SplineSmile::new(
+            forward, expiry.0, strikes, variances,
+        )?))
     }
 
     fn diagnostics(&self) -> error::Result<SurfaceDiagnostics> {
-        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
-        surface_diagnostics(
-            &self.tenors,
-            &forwards,
-            |i| self.smiles[i].is_arbitrage_free(),
-            |i, strike| {
-                self.smiles[i]
-                    .variance(Strike(strike))
-                    .map(|variance| variance.0)
-            },
-        )
+        self.diagnostics_via(|i| self.smiles[i].is_arbitrage_free())
     }
 
-    fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
-        let forwards: Vec<f64> = self.smiles.iter().map(|smile| smile.forward()).collect();
-        surface_diagnostics(
-            &self.tenors,
-            &forwards,
-            |i| self.smiles[i].is_arbitrage_free_with(config),
-            |i, strike| {
-                self.smiles[i]
-                    .variance(Strike(strike))
-                    .map(|variance| variance.0)
-            },
-        )
+    fn diagnostics_with(&self, config: ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics> {
+        self.diagnostics_via(|i| self.smiles[i].is_arbitrage_free_with(config))
     }
 
     fn tenors(&self) -> &[f64] {
@@ -304,6 +296,7 @@ impl VolSurface for PiecewiseSurface {
 mod tests {
     use super::*;
     use crate::smile::spline::SplineSmile;
+    use crate::smile::{SabrSmile, SviSmile};
     use crate::types::{Strike, Tenor, Vol};
     use approx::assert_abs_diff_eq;
 
@@ -517,6 +510,159 @@ mod tests {
         let vol = smile.vol(Strike(100.0)).unwrap();
         assert_abs_diff_eq!(vol.0, 0.20, epsilon = 1e-4);
         assert_abs_diff_eq!(smile.expiry(), 1.0, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn smile_at_exact_tenor_preserves_the_stored_model() {
+        let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.3, 0.0, 0.2).unwrap();
+        let surface = PiecewiseSurface::new(vec![1.0], vec![Box::new(svi.clone())]).unwrap();
+
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
+        assert_eq!(smile.model_name(), "SVI");
+        // Analytic SVI density, not a spline approximation of it.
+        assert_abs_diff_eq!(
+            smile.density(Strike(100.0)).unwrap(),
+            svi.density(Strike(100.0)).unwrap(),
+            epsilon = 1e-14
+        );
+    }
+
+    #[test]
+    fn smile_at_exact_tenor_agrees_with_black_variance_beyond_the_spline_grid() {
+        // Strikes outside [0.5F, 2F], where a resampled spline would
+        // flat-extrapolate while black_variance kept evaluating the model.
+        let svi = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.3, 0.0, 0.2).unwrap();
+        let surface = PiecewiseSurface::new(vec![1.0], vec![Box::new(svi)]).unwrap();
+
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
+        for &k in &[25.0, 40.0, 250.0, 400.0] {
+            assert_abs_diff_eq!(
+                smile.variance(Strike(k)).unwrap().0,
+                surface.black_variance(Tenor(1.0), Strike(k)).unwrap().0,
+                epsilon = 1e-14
+            );
+        }
+    }
+
+    /// The scan *width* must come from the stored model too. SABR narrows the
+    /// default band because the Hagan expansion breaks down in the deep wings;
+    /// falling through to the trait default would scan it over `wide()` and
+    /// report that breakdown as arbitrage.
+    #[test]
+    fn smile_at_exact_tenor_delegates_the_default_scan_config() {
+        let sabr = SabrSmile::new(100.0, 1.0, 0.20, 0.5, -0.3, 0.4).unwrap();
+        let surface = PiecewiseSurface::new(vec![1.0], vec![Box::new(sabr)]).unwrap();
+
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
+        assert_eq!(smile.default_scan_config(), ArbitrageScanConfig::narrow());
+    }
+
+    /// The scan must come from the stored model, not from a spline resampling
+    /// of it: this SVI's `g(k)` goes negative in the wings, and the analytic
+    /// scan and a resampled spline disagree about that.
+    #[test]
+    fn smile_at_exact_tenor_delegates_the_arbitrage_scan() {
+        let svi = SviSmile::new(100.0, 1.0, 0.001, 0.8, -0.7, 0.0, 0.05).unwrap();
+        let surface = PiecewiseSurface::new(vec![1.0], vec![Box::new(svi.clone())]).unwrap();
+        let smile = surface.smile_at(Tenor(1.0)).unwrap();
+
+        for cfg in [
+            ArbitrageScanConfig::wide(),
+            ArbitrageScanConfig {
+                n_points: 61,
+                k_min: -1.5,
+                k_max: 1.5,
+            },
+        ] {
+            let got = smile.is_arbitrage_free_with(cfg).unwrap();
+            let want = svi.is_arbitrage_free_with(cfg).unwrap();
+            assert!(!want.is_free(), "fixture should violate butterfly");
+            assert_abs_diff_eq!(got.expiry, want.expiry, epsilon = 1e-14);
+            assert_eq!(
+                got.butterfly_violations.len(),
+                want.butterfly_violations.len()
+            );
+            for (g, w) in got
+                .butterfly_violations
+                .iter()
+                .zip(&want.butterfly_violations)
+            {
+                assert_abs_diff_eq!(g.strike, w.strike, epsilon = 1e-14);
+                assert_abs_diff_eq!(g.density, w.density, epsilon = 1e-14);
+            }
+        }
+
+        // The no-config method routes through the model's own default grid.
+        let got = smile.is_arbitrage_free().unwrap();
+        let want = svi.is_arbitrage_free().unwrap();
+        assert_eq!(
+            got.butterfly_violations.len(),
+            want.butterfly_violations.len()
+        );
+    }
+
+    #[test]
+    fn forward_matches_the_smile_the_surface_would_return() {
+        let s1 = flat_smile(90.0, 0.5, 0.22);
+        let s2 = flat_smile(110.0, 1.0, 0.22);
+        let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
+
+        // Exact tenors, an interpolated one, and both extrapolation regimes.
+        for &t in &[0.25, 0.5, 0.75, 1.0, 2.0] {
+            assert_abs_diff_eq!(
+                surface.forward(Tenor(t)).unwrap(),
+                surface.smile_at(Tenor(t)).unwrap().forward(),
+                epsilon = 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn calendar_violations_default_is_clean_for_a_sane_surface() {
+        let s1 = flat_smile(100.0, 0.5, 0.20);
+        let s2 = flat_smile(100.0, 1.0, 0.20);
+        let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
+        assert!(surface.calendar_violations().unwrap().is_empty());
+    }
+
+    #[test]
+    fn calendar_violations_default_detects_variance_decreasing_in_time() {
+        // w(0.5) = 0.045 but w(1.0) = 0.01 — total variance falls with time.
+        let s1 = flat_smile(100.0, 0.5, 0.30);
+        let s2 = flat_smile(100.0, 1.0, 0.10);
+        let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
+
+        let violations = surface.calendar_violations().unwrap();
+        assert!(!violations.is_empty());
+        for v in &violations {
+            assert!(v.variance_long < v.variance_short);
+            assert_abs_diff_eq!(v.tenor_short, 0.5, epsilon = 1e-14);
+            assert_abs_diff_eq!(v.tenor_long, 1.0, epsilon = 1e-14);
+        }
+    }
+
+    #[test]
+    fn calendar_violations_is_reachable_through_dyn_vol_surface() {
+        let s1 = flat_smile(100.0, 0.5, 0.30);
+        let s2 = flat_smile(100.0, 1.0, 0.10);
+        let surface = PiecewiseSurface::new(vec![0.5, 1.0], vec![s1, s2]).unwrap();
+
+        let erased: &dyn VolSurface = &surface;
+        assert_eq!(
+            erased.calendar_violations().unwrap().len(),
+            surface.diagnostics().unwrap().calendar_violations.len(),
+            "the trait default should agree with the diagnostics scan"
+        );
+    }
+
+    #[test]
+    fn forward_rejects_non_positive_expiry() {
+        let s1 = flat_smile(100.0, 1.0, 0.20);
+        let surface = PiecewiseSurface::new(vec![1.0], vec![s1]).unwrap();
+        assert!(matches!(
+            surface.forward(Tenor(0.0)),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
     }
 
     #[test]

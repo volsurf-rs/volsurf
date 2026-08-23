@@ -1,4 +1,5 @@
 use volsurf::OptionType;
+use volsurf::types::{DisplacedVol, NormalVol, Vol};
 use wasm_bindgen::prelude::*;
 
 use crate::error::to_js_err;
@@ -38,7 +39,7 @@ pub fn black_price(
     expiry: f64,
     option_type: WasmOptionType,
 ) -> Result<f64, JsValue> {
-    volsurf::implied::black_price(forward, strike, vol, expiry, option_type.into())
+    volsurf::implied::black_price(forward, strike, Vol(vol), expiry, option_type.into())
         .map_err(to_js_err)
 }
 
@@ -51,7 +52,7 @@ pub fn normal_price(
     expiry: f64,
     option_type: WasmOptionType,
 ) -> Result<f64, JsValue> {
-    volsurf::implied::normal_price(forward, strike, vol, expiry, option_type.into())
+    volsurf::implied::normal_price(forward, strike, NormalVol(vol), expiry, option_type.into())
         .map_err(to_js_err)
 }
 
@@ -65,8 +66,15 @@ pub fn displaced_price(
     beta: f64,
     option_type: WasmOptionType,
 ) -> Result<f64, JsValue> {
-    volsurf::implied::displaced_price(forward, strike, vol, expiry, beta, option_type.into())
-        .map_err(to_js_err)
+    volsurf::implied::displaced_price(
+        forward,
+        strike,
+        DisplacedVol(vol),
+        expiry,
+        beta,
+        option_type.into(),
+    )
+    .map_err(to_js_err)
 }
 
 /// Black (lognormal) implied volatility extraction via Jäckel's algorithm.

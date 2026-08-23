@@ -151,16 +151,16 @@ fn eq_5_6_rho_boundaries_and_interpolation() {
     let theta_max = *thetas.last().unwrap();
 
     // ρ(0) = ρ₀
-    assert_abs_diff_eq!(s.rho(0.0), RHO_0, epsilon = 1e-14);
+    assert_abs_diff_eq!(s.rho_at(0.0), RHO_0, epsilon = 1e-14);
 
     // ρ(θ_max) = ρₘ
-    assert_abs_diff_eq!(s.rho(theta_max), RHO_M, epsilon = 1e-14);
+    assert_abs_diff_eq!(s.rho_at(theta_max), RHO_M, epsilon = 1e-14);
 
     // Intermediate values match closed-form
     for &theta in &thetas {
         let t = (theta / theta_max).powf(A_PARAM);
         let expected = RHO_0 + (RHO_M - RHO_0) * t;
-        assert_abs_diff_eq!(s.rho(theta), expected, epsilon = 1e-14);
+        assert_abs_diff_eq!(s.rho_at(theta), expected, epsilon = 1e-14);
     }
 }
 
@@ -171,8 +171,8 @@ fn eq_5_6_rho_monotone_with_paper_params() {
     let thetas = djx_thetas();
 
     for w in thetas.windows(2) {
-        let r_lo = s.rho(w[0]);
-        let r_hi = s.rho(w[1]);
+        let r_lo = s.rho_at(w[0]);
+        let r_hi = s.rho_at(w[1]);
         assert!(
             r_hi < r_lo,
             "ρ should decrease: ρ({})={r_lo} > ρ({})={r_hi}",
@@ -198,7 +198,7 @@ fn eq_5_7_paper_params_satisfy_constraint() {
     );
 
     // Surface construction succeeds
-    assert!(paper_surface().calendar_check_structural().is_empty());
+    assert!(paper_surface().calendar_violations_structural().is_empty());
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn thm_4_1_structural_check_paper_params() {
     // For power-law φ with γ≤1: γ_thm = 1−γ ∈ [0,1], always first branch of Eq 4.10
     // Condition: (δ + ρ·γ_thm)² ≤ γ_thm²
     for &theta in &thetas {
-        let rho = s.rho(theta);
+        let rho = s.rho_at(theta);
         let t = (theta / theta_max).clamp(0.0, 1.0);
         let delta = A_PARAM * (RHO_M - RHO_0) * t.powf(A_PARAM);
 
@@ -256,7 +256,7 @@ fn thm_4_1_structural_check_paper_params() {
     }
 
     // Full structural check via our code
-    assert!(s.calendar_check_structural().is_empty());
+    assert!(s.calendar_violations_structural().is_empty());
 }
 
 #[test]
@@ -456,7 +456,7 @@ fn calibrate_round_trip_paper_params() {
         })
         .collect();
 
-    let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
+    let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
 
     let mut total_rss = 0.0;
     let mut n = 0;
@@ -493,8 +493,8 @@ fn calibrate_paper_structural_check() {
         })
         .collect();
 
-    let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
-    let violations = calibrated.calendar_check_structural();
+    let calibrated = EssviSurface::calibrate(&tenors, &forwards, &market_data).unwrap();
+    let violations = calibrated.calendar_violations_structural();
     assert!(
         violations.is_empty(),
         "calibrated DJX surface should pass structural check, got {} violations",

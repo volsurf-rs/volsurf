@@ -193,7 +193,7 @@ fn essvi_construct_and_query() {
 
     assert!((surf.rho_0() - -0.4).abs() < 1e-12);
     assert!((surf.rho_m() - -0.2).abs() < 1e-12);
-    assert!((surf.a() - 0.3).abs() < 1e-12);
+    assert!((surf.rho_exponent() - 0.3).abs() < 1e-12);
     assert!((surf.eta() - 1.5).abs() < 1e-12);
     assert!((surf.gamma() - 0.5).abs() < 1e-12);
     assert!(surf.theta_max() > 0.0);
@@ -592,7 +592,7 @@ fn two_tenor_market_data() -> (Vec<f64>, Vec<usize>, Vec<f64>, Vec<f64>) {
 #[wasm_bindgen_test]
 fn ssvi_calibrate() {
     let (flat, sizes, tenors, fwds) = two_tenor_market_data();
-    let surf = WasmSsviSurface::calibrate(flat, sizes, tenors, fwds).unwrap();
+    let surf = WasmSsviSurface::calibrate(tenors, fwds, flat, sizes).unwrap();
     let atm = surf.black_vol(1.0, 100.0).unwrap();
     assert!(
         (atm - 0.20).abs() < 0.02,
@@ -603,7 +603,7 @@ fn ssvi_calibrate() {
 #[wasm_bindgen_test]
 fn essvi_calibrate() {
     let (flat, sizes, tenors, fwds) = two_tenor_market_data();
-    let surf = WasmEssviSurface::calibrate(flat, sizes, tenors, fwds).unwrap();
+    let surf = WasmEssviSurface::calibrate(tenors, fwds, flat, sizes).unwrap();
     let atm = surf.black_vol(1.0, 100.0).unwrap();
     assert!(
         (atm - 0.20).abs() < 0.02,
@@ -614,19 +614,19 @@ fn essvi_calibrate() {
 #[wasm_bindgen_test]
 fn ssvi_calibrate_mismatched_sizes() {
     let (flat, _, tenors, fwds) = two_tenor_market_data();
-    assert!(WasmSsviSurface::calibrate(flat, vec![7, 5], tenors, fwds).is_err());
+    assert!(WasmSsviSurface::calibrate(tenors, fwds, flat, vec![7, 5]).is_err());
 }
 
 #[wasm_bindgen_test]
 fn essvi_calibrate_mismatched_sizes() {
     let (flat, _, tenors, fwds) = two_tenor_market_data();
-    assert!(WasmEssviSurface::calibrate(flat, vec![7, 5], tenors, fwds).is_err());
+    assert!(WasmEssviSurface::calibrate(tenors, fwds, flat, vec![7, 5]).is_err());
 }
 
 #[wasm_bindgen_test]
 fn essvi_fit_per_tenor() {
     let (flat, sizes, tenors, fwds) = two_tenor_market_data();
-    let fits = WasmEssviSurface::fit_per_tenor(flat, sizes, tenors, fwds).unwrap();
+    let fits = WasmEssviSurface::fit_per_tenor(tenors, fwds, flat, sizes).unwrap();
     assert_eq!(fits.len(), 2);
     assert!((fits[0].tenor() - 0.25).abs() < 1e-12);
     assert!((fits[1].tenor() - 1.0).abs() < 1e-12);
@@ -638,7 +638,7 @@ fn essvi_fit_per_tenor() {
 #[wasm_bindgen_test]
 fn essvi_fit_per_tenor_svi_getter() {
     let (flat, sizes, tenors, fwds) = two_tenor_market_data();
-    let fits = WasmEssviSurface::fit_per_tenor(flat, sizes, tenors, fwds).unwrap();
+    let fits = WasmEssviSurface::fit_per_tenor(tenors, fwds, flat, sizes).unwrap();
     let svi = fits[0].svi();
     assert!((svi.forward() - 100.0).abs() < 1e-12);
     let vol = svi.vol(100.0).unwrap();
@@ -648,7 +648,7 @@ fn essvi_fit_per_tenor_svi_getter() {
 #[wasm_bindgen_test]
 fn essvi_from_per_tenor_json() {
     let (flat, sizes, tenors, fwds) = two_tenor_market_data();
-    let fits = WasmEssviSurface::fit_per_tenor(flat, sizes, tenors, fwds).unwrap();
+    let fits = WasmEssviSurface::fit_per_tenor(tenors, fwds, flat, sizes).unwrap();
     let json0 = fits[0].to_json().unwrap();
     let json1 = fits[1].to_json().unwrap();
     let json = format!("[{json0},{json1}]");
@@ -676,7 +676,12 @@ fn model_sabr_rejects_negative_beta() {
 #[wasm_bindgen_test]
 fn model_sabr_rejects_beta_above_one() {
     let mut b = WasmSurfaceBuilder::new();
-    assert!(b.model_sabr(1.1).is_err());
+    let err = b.model_sabr(1.1).unwrap_err();
+    // The bare core message, not its `Display` form — matches the Python binding.
+    assert_eq!(
+        err.as_string().unwrap(),
+        "SABR beta must be in [0, 1], got 1.1"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -922,6 +927,18 @@ fn convention_error_paths() {
     assert!(log_moneyness(0.0, 100.0).is_err());
     assert!(forward_price(0.0, 0.05, 0.0, 1.0).is_err());
     assert!(forward_price(100.0, 0.05, 0.0, -1.0).is_err());
+}
+
+#[wasm_bindgen_test]
+fn numerical_error_carries_bare_message() {
+    // K/F underflows to zero, so ln(K/F) = -inf: a NumericalError, not InvalidInput.
+    let err = log_moneyness(f64::MIN_POSITIVE, f64::MAX).unwrap_err();
+    let msg = err.as_string().unwrap();
+    // The bare core message, not its `Display` form ("numerical error: ...").
+    assert!(
+        msg.starts_with("log-moneyness overflow"),
+        "unexpected message: {msg}"
+    );
 }
 
 // ── Local vol: Dupire + boundary adapter, reachable from WASM surfaces (PAN-28) ──

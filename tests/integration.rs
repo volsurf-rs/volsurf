@@ -570,6 +570,16 @@ fn cubic_spline_surface_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Diagnostics over a spline surface: the per-smile scan is clipped to each
+    // smile's knot range, so an arbitrage-free fit must not be flagged by the
+    // flat-extrapolated wings that lie outside it.
+    let diagnostics = surface.diagnostics()?;
+    assert!(
+        diagnostics.is_free(),
+        "spline surface fitted to arb-free SVI data should be clean, got {:?}",
+        diagnostics
+    );
+
     Ok(())
 }
 
@@ -945,7 +955,7 @@ fn ssvi_analytical_calendar_check() {
     let surface = build_ssvi_surface();
 
     // Analytical check should also pass for well-behaved params
-    let violations = surface.calendar_arb_analytical();
+    let violations = surface.calendar_violations().unwrap();
     assert!(
         violations.is_empty(),
         "Analytical calendar check should pass, got {} violations",

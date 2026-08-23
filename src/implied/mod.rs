@@ -5,6 +5,22 @@
 //! - [`BlackImpliedVol`] — Standard Black (lognormal) model via Jäckel's algorithm
 //! - [`NormalImpliedVol`] — Bachelier (normal) model for fixed income / short-dated FX
 //! - [`DisplacedImpliedVol`] — Displaced diffusion hybrid (interpolates normal ↔ Black)
+//!
+//! # Scope
+//!
+//! Only the Black branch feeds the layers above: smiles, surfaces, and local
+//! vol are all quoted in lognormal vol, and [`SmileSection::density`] prices
+//! its butterflies with [`black_price`]. The Bachelier and displaced-diffusion
+//! extractors are **standalone utilities** — deliberately so. Threading a vol
+//! convention through the surface stack would make this a pricing library,
+//! which it is not; callers working in normal vol should convert at the
+//! boundary. The [`NormalVol`](crate::types::NormalVol) and
+//! [`DisplacedVol`](crate::types::DisplacedVol) newtypes exist to keep those
+//! quotes from being mistaken for lognormal ones — including by the pricing
+//! functions here, which take the unit their extractor returns — not as a
+//! half-finished surface parameterization.
+//!
+//! [`SmileSection::density`]: crate::smile::SmileSection::density
 
 pub mod black;
 pub mod displaced;

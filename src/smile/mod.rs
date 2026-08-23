@@ -33,14 +33,26 @@ use crate::validate::validate_positive;
 /// k = ln(K/F) used when checking `is_arbitrage_free_with`.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ArbitrageScanConfig {
+    /// Sample points across the range, at least 2.
     pub n_points: usize,
+    /// Lower end of the scanned log-moneyness range.
     pub k_min: f64,
+    /// Upper end of the scanned log-moneyness range, greater than `k_min`.
     pub k_max: f64,
 }
 
+impl Default for ArbitrageScanConfig {
+    fn default() -> Self {
+        Self::wide()
+    }
+}
+
 impl ArbitrageScanConfig {
-    /// Default for SVI and SSVI models: 200 points over [-3, 3].
-    pub fn svi_default() -> Self {
+    /// 200 points over k ∈ \[−3, 3\], the default grid.
+    ///
+    /// Wide enough for models valid across the whole wing — SVI, SSVI and
+    /// eSSVI scan an analytical g-function, which stays well-behaved out there.
+    pub fn wide() -> Self {
         Self {
             n_points: 200,
             k_min: -3.0,
@@ -48,10 +60,12 @@ impl ArbitrageScanConfig {
         }
     }
 
-    /// Default for SABR model: 200 points over [-2, 2].
+    /// 200 points over k ∈ \[−2, 2\].
     ///
-    /// Narrower range than SVI because Hagan formula breaks down in deep wings.
-    pub fn sabr_default() -> Self {
+    /// For models whose own approximation breaks down before the deep wings do,
+    /// which would otherwise report the breakdown as arbitrage. SABR uses this:
+    /// the Hagan expansion loses accuracy past |k| ≈ 2.
+    pub fn narrow() -> Self {
         Self {
             n_points: 200,
             k_min: -2.0,
@@ -152,27 +166,15 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
         let v_mid = self.vol(strike)?;
         let v_hi = self.vol(Strike(k_hi))?;
 
-        let c_lo = black_price(
-            self.forward(),
-            k_lo,
-            v_lo.0,
-            self.expiry(),
-            OptionType::Call,
-        )?;
+        let c_lo = black_price(self.forward(), k_lo, v_lo, self.expiry(), OptionType::Call)?;
         let c_mid = black_price(
             self.forward(),
             strike.0,
-            v_mid.0,
+            v_mid,
             self.expiry(),
             OptionType::Call,
         )?;
-        let c_hi = black_price(
-            self.forward(),
-            k_hi,
-            v_hi.0,
-            self.expiry(),
-            OptionType::Call,
-        )?;
+        let c_hi = black_price(self.forward(), k_hi, v_hi, self.expiry(), OptionType::Call)?;
 
         // Breeden-Litzenberger: q(K) = d²C/dK² (undiscounted)
         Ok((c_lo - 2.0 * c_mid + c_hi) / (h * h))
@@ -187,13 +189,24 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// Human-readable model name (e.g. "SVI", "SABR", "CubicSpline").
     fn model_name(&self) -> &'static str;
 
+    /// The scan grid [`is_arbitrage_free`](SmileSection::is_arbitrage_free)
+    /// runs on.
+    ///
+    /// Override in models that are only accurate over part of the wing, so a
+    /// caller asking for the default check gets this model's own domain rather
+    /// than the crate-wide [`wide`](ArbitrageScanConfig::wide) grid.
+    fn default_scan_config(&self) -> ArbitrageScanConfig {
+        ArbitrageScanConfig::wide()
+    }
+
     /// Check whether this smile is free of butterfly arbitrage.
     ///
-    /// Uses model-specific defaults for scan grid. Override this or
-    /// [`is_arbitrage_free_with`](SmileSection::is_arbitrage_free_with)
-    /// for custom grid parameters.
+    /// Scans [`default_scan_config`](SmileSection::default_scan_config).
+    /// Override that to change the grid; override
+    /// [`is_arbitrage_free_with`](SmileSection::is_arbitrage_free_with) to
+    /// change how the grid is scanned.
     fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        self.is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+        self.is_arbitrage_free_with(self.default_scan_config())
     }
 
     /// Check butterfly arbitrage with custom scan grid configuration.
@@ -203,14 +216,124 @@ pub trait SmileSection: Send + Sync + std::fmt::Debug {
     /// `[config.k_min, config.k_max]`. Models with analytical g-functions
     /// (SVI, SSVI) override this for better accuracy.
     ///
-    /// A returned report covers the whole configured grid: if the density cannot
-    /// be evaluated at any point, this returns `Err` rather than a partial scan.
+    /// A returned report covers the whole grid actually scanned: if the density
+    /// cannot be evaluated at any point, this returns `Err` rather than a partial
+    /// scan. Implementations may first narrow `config` to their own domain of
+    /// validity — [`SplineSmile`] clips to its knot range, since it
+    /// flat-extrapolates beyond it — so a clean report is not on its own proof
+    /// that every point of `config` was examined.
     fn is_arbitrage_free_with(
         &self,
-        config: &ArbitrageScanConfig,
+        config: ArbitrageScanConfig,
     ) -> error::Result<ArbitrageReport> {
         arbitrage::scan_density(self.expiry(), self.forward(), config, |strike| {
             self.density(Strike(strike))
         })
     }
+}
+
+/// Fits a [`SmileSection`] to one tenor of market quotes.
+///
+/// Every model runs the same pipeline — validate, filter, resolve weighting,
+/// optimize, reconstruct — and this trait is the contract they share. It is
+/// also what [`SurfaceBuilder`](crate::surface::SurfaceBuilder) calibrates
+/// through, so a model living outside this crate can be built into a surface
+/// on the same footing as [`SmileModel`](crate::surface::SmileModel).
+///
+/// # Examples
+///
+/// ```
+/// use volsurf::calibration::{DataFilter, WeightingScheme};
+/// use volsurf::smile::{SmileCalibrator, SmileSection, SplineSmile};
+/// use volsurf::surface::{SurfaceBuilder, VolSurface};
+/// use volsurf::types::{Strike, Tenor};
+///
+/// /// Straight-through interpolation of the quotes, no fitting.
+/// #[derive(Debug)]
+/// struct RawSpline;
+///
+/// impl SmileCalibrator for RawSpline {
+///     fn model_name(&self) -> &'static str {
+///         "RawSpline"
+///     }
+///
+///     fn min_strikes(&self) -> usize {
+///         3
+///     }
+///
+///     fn calibrate(
+///         &self,
+///         forward: f64,
+///         expiry: f64,
+///         market_vols: &[(f64, f64)],
+///         _filter: DataFilter,
+///         _weighting: WeightingScheme,
+///     ) -> volsurf::Result<Box<dyn SmileSection>> {
+///         let mut pairs: Vec<(f64, f64)> = market_vols
+///             .iter()
+///             .map(|&(k, v)| (k, v * v * expiry))
+///             .collect();
+///         pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+///         let (strikes, variances) = pairs.into_iter().unzip();
+///         Ok(Box::new(SplineSmile::new(forward, expiry, strikes, variances)?))
+///     }
+/// }
+///
+/// let strikes = vec![90.0, 95.0, 100.0, 105.0, 110.0];
+/// let vols = vec![0.24, 0.22, 0.20, 0.22, 0.24];
+///
+/// let surface = SurfaceBuilder::new()
+///     .spot(100.0)
+///     .rate(0.05)
+///     .calibrator(RawSpline)
+///     .add_tenor(0.25, &strikes, &vols)
+///     .add_tenor(1.00, &strikes, &vols)
+///     .build()?;
+///
+/// assert_eq!(surface.smile_at(Tenor(0.25))?.model_name(), "CubicSpline");
+/// assert!(surface.black_vol(Tenor(0.5), Strike(100.0))?.0 > 0.0);
+/// # Ok::<(), volsurf::VolSurfError>(())
+/// ```
+pub trait SmileCalibrator: Send + Sync + std::fmt::Debug {
+    /// Name used in error messages and diagnostics.
+    fn model_name(&self) -> &'static str;
+
+    /// Fewest quotes the model can fit. Checked before [`calibrate`](Self::calibrate).
+    fn min_strikes(&self) -> usize;
+
+    /// Check the model's own parameters, independent of any market data.
+    ///
+    /// [`SurfaceBuilder::build`](crate::surface::SurfaceBuilder::build) calls
+    /// this once before it touches a single tenor, so a misconfigured model
+    /// reports its own error rather than whatever the first tenor happens to
+    /// trip over. Models with no free parameters keep the default.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`](crate::VolSurfError::InvalidInput)
+    /// if a parameter fixed at construction is out of range.
+    fn validate(&self) -> error::Result<()> {
+        Ok(())
+    }
+
+    /// Fit the model to `market_vols`, a slice of `(strike, implied_vol)` pairs.
+    ///
+    /// `filter` is applied to the quotes before fitting; `weighting` sets the
+    /// per-quote weights in the objective. Filter first, then weight, and treat
+    /// a filter that leaves fewer points than the model needs as an error
+    /// rather than fitting the remainder.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`](crate::VolSurfError::InvalidInput)
+    /// for malformed quotes and
+    /// [`VolSurfError::CalibrationError`](crate::VolSurfError::CalibrationError)
+    /// if the fit does not converge, or if the filter leaves fewer than
+    /// [`min_strikes`](Self::min_strikes) quotes.
+    fn calibrate(
+        &self,
+        forward: f64,
+        expiry: f64,
+        market_vols: &[(f64, f64)],
+        filter: crate::calibration::DataFilter,
+        weighting: crate::calibration::WeightingScheme,
+    ) -> error::Result<Box<dyn SmileSection>>;
 }

@@ -18,8 +18,9 @@
 use crate::error::VolSurfError;
 use crate::implied::black::{self, BlackImpliedVol};
 use crate::implied::normal::{self, NormalImpliedVol};
-use crate::types::{OptionType, Vol};
-use crate::validate::{validate_non_negative, validate_positive};
+use crate::implied::{PriceDomain, validate_implied_inputs, validate_pricing_inputs};
+use crate::types::{DisplacedVol, NormalVol, OptionType, Vol};
+use crate::validate::{validate_in_range, validate_positive};
 
 /// Displaced diffusion implied volatility calculator.
 ///
@@ -28,9 +29,9 @@ use crate::validate::{validate_non_negative, validate_positive};
 /// - β = 1 → pure Black (lognormal) model
 /// - 0 < β < 1 → intermediate CEV-like behavior
 ///
-/// The returned vol `σ` is the displaced diffusion vol parameter.
-/// At β = 1, it equals the Black implied vol. At β = 0, the effective
-/// normal vol is `σ · F`.
+/// The returned [`DisplacedVol`] is the displaced diffusion vol parameter `σ`,
+/// its own unit: at β = 1 it equals the Black implied vol, and at β = 0 the
+/// effective normal vol is `σ · F`.
 #[derive(Debug, Clone, Copy)]
 pub struct DisplacedImpliedVol {
     beta: f64,
@@ -42,11 +43,7 @@ impl DisplacedImpliedVol {
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if `beta` is not in \[0, 1\].
     pub fn new(beta: f64) -> crate::error::Result<Self> {
-        if !(0.0..=1.0).contains(&beta) {
-            return Err(VolSurfError::InvalidInput {
-                message: format!("beta must be in [0, 1], got {beta}"),
-            });
-        }
+        validate_in_range(beta, 0.0, 1.0, "beta")?;
         Ok(Self { beta })
     }
 
@@ -78,20 +75,18 @@ impl DisplacedImpliedVol {
         strike: f64,
         expiry: f64,
         option_type: OptionType,
-    ) -> crate::error::Result<Vol> {
-        validate_non_negative(option_price, "option_price")?;
-        validate_positive(forward, "forward")?;
-        validate_positive(strike, "strike")?;
-        validate_positive(expiry, "expiry")?;
+    ) -> crate::error::Result<DisplacedVol> {
+        validate_implied_inputs(option_price, forward, strike, expiry, PriceDomain::Positive)?;
 
         if self.beta == 1.0 {
-            return BlackImpliedVol::compute(option_price, forward, strike, expiry, option_type);
+            return BlackImpliedVol::compute(option_price, forward, strike, expiry, option_type)
+                .map(|black| DisplacedVol(black.0));
         }
 
         if self.beta == 0.0 {
             let normal_vol =
                 NormalImpliedVol::compute(option_price, forward, strike, expiry, option_type)?;
-            return Ok(Vol(normal_vol.0 / forward));
+            return Ok(DisplacedVol(normal_vol.0 / forward));
         }
 
         let k_shifted = (1.0 - self.beta) * forward + self.beta * strike;
@@ -109,7 +104,7 @@ impl DisplacedImpliedVol {
         let shifted_iv =
             BlackImpliedVol::compute(price_adj, forward, k_shifted, expiry, option_type)?;
 
-        Ok(Vol(shifted_iv.0 / self.beta))
+        Ok(DisplacedVol(shifted_iv.0 / self.beta))
     }
 }
 
@@ -136,34 +131,27 @@ impl DisplacedImpliedVol {
 pub fn displaced_price(
     forward: f64,
     strike: f64,
-    vol: f64,
+    vol: DisplacedVol,
     expiry: f64,
     beta: f64,
     option_type: OptionType,
 ) -> crate::error::Result<f64> {
-    validate_positive(forward, "forward")?;
-    validate_positive(strike, "strike")?;
-    validate_non_negative(vol, "volatility")?;
-    validate_non_negative(expiry, "expiry")?;
-    if !(0.0..=1.0).contains(&beta) {
-        return Err(VolSurfError::InvalidInput {
-            message: format!("beta must be in [0, 1], got {beta}"),
-        });
-    }
+    validate_pricing_inputs(forward, strike, vol.0, expiry, PriceDomain::Positive)?;
+    validate_in_range(beta, 0.0, 1.0, "beta")?;
 
     if beta == 1.0 {
-        return black::black_price(forward, strike, vol, expiry, option_type);
+        return black::black_price(forward, strike, Vol(vol.0), expiry, option_type);
     }
 
     if beta == 0.0 {
-        let normal_vol = vol * forward;
+        let normal_vol = NormalVol(vol.0 * forward);
         return normal::normal_price(forward, strike, normal_vol, expiry, option_type);
     }
 
     let k_shifted = (1.0 - beta) * forward + beta * strike;
     validate_positive(k_shifted, "shifted strike")?;
 
-    let black_vol = beta * vol;
+    let black_vol = Vol(beta * vol.0);
     let p = black::black_price(forward, k_shifted, black_vol, expiry, option_type)?;
     Ok(p / beta)
 }
@@ -229,48 +217,50 @@ mod tests {
     #[test]
     fn displaced_price_beta_one_equals_black() {
         let (f, k, sigma, t) = (100.0, 110.0, 0.25, 1.0);
-        let dp = displaced_price(f, k, sigma, t, 1.0, OptionType::Call).unwrap();
-        let bp = black::black_price(f, k, sigma, t, OptionType::Call).unwrap();
+        let dp = displaced_price(f, k, DisplacedVol(sigma), t, 1.0, OptionType::Call).unwrap();
+        let bp = black::black_price(f, k, Vol(sigma), t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(dp, bp, epsilon = 1e-14);
     }
 
     #[test]
     fn displaced_price_beta_zero_equals_normal() {
         let (f, k, sigma, t) = (100.0, 110.0, 0.25, 1.0);
-        let dp = displaced_price(f, k, sigma, t, 0.0, OptionType::Call).unwrap();
-        let np = normal::normal_price(f, k, sigma * f, t, OptionType::Call).unwrap();
+        let dp = displaced_price(f, k, DisplacedVol(sigma), t, 0.0, OptionType::Call).unwrap();
+        let np = normal::normal_price(f, k, NormalVol(sigma * f), t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(dp, np, epsilon = 1e-12);
     }
 
     #[test]
     fn displaced_price_put_call_parity() {
         let (f, k, sigma, t, beta) = (100.0, 110.0, 0.25, 1.0, 0.5);
-        let call = displaced_price(f, k, sigma, t, beta, OptionType::Call).unwrap();
-        let put = displaced_price(f, k, sigma, t, beta, OptionType::Put).unwrap();
+        let call = displaced_price(f, k, DisplacedVol(sigma), t, beta, OptionType::Call).unwrap();
+        let put = displaced_price(f, k, DisplacedVol(sigma), t, beta, OptionType::Put).unwrap();
         assert_abs_diff_eq!(call - put, f - k, epsilon = 1e-10);
     }
 
     #[test]
     fn displaced_price_zero_vol() {
-        let price = displaced_price(100.0, 80.0, 0.0, 1.0, 0.5, OptionType::Call).unwrap();
+        let price =
+            displaced_price(100.0, 80.0, DisplacedVol(0.0), 1.0, 0.5, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
     #[test]
     fn displaced_price_zero_expiry() {
-        let price = displaced_price(100.0, 80.0, 0.25, 0.0, 0.5, OptionType::Call).unwrap();
+        let price =
+            displaced_price(100.0, 80.0, DisplacedVol(0.25), 0.0, 0.5, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, 20.0, epsilon = 1e-12);
     }
 
     #[test]
     fn displaced_price_rejects_negative_vol() {
-        let result = displaced_price(100.0, 100.0, -0.1, 1.0, 0.5, OptionType::Call);
+        let result = displaced_price(100.0, 100.0, DisplacedVol(-0.1), 1.0, 0.5, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
     #[test]
     fn displaced_price_rejects_invalid_beta() {
-        let result = displaced_price(100.0, 100.0, 0.25, 1.0, 1.5, OptionType::Call);
+        let result = displaced_price(100.0, 100.0, DisplacedVol(0.25), 1.0, 1.5, OptionType::Call);
         assert!(matches!(result, Err(VolSurfError::InvalidInput { .. })));
     }
 
@@ -278,9 +268,9 @@ mod tests {
     fn round_trip_beta_one_atm() {
         let calc = DisplacedImpliedVol::new(1.0).unwrap();
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
-        let price = displaced_price(f, k, sigma, t, 1.0, OptionType::Call).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 1.0, OptionType::Call).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 1.0, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 1.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
@@ -288,7 +278,7 @@ mod tests {
     fn round_trip_beta_one_matches_black() {
         let calc = DisplacedImpliedVol::new(1.0).unwrap();
         let (f, k, t) = (100.0, 110.0, 1.0);
-        let price = black::black_price(f, k, 0.25, t, OptionType::Call).unwrap();
+        let price = black::black_price(f, k, Vol(0.25), t, OptionType::Call).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
         let black_iv = BlackImpliedVol::compute(price, f, k, t, OptionType::Call).unwrap();
         assert_abs_diff_eq!(iv.0, black_iv.0, epsilon = 1e-12);
@@ -298,9 +288,9 @@ mod tests {
     fn round_trip_beta_half_atm_call() {
         let calc = DisplacedImpliedVol::new(0.5).unwrap();
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
-        let price = displaced_price(f, k, sigma, t, 0.5, OptionType::Call).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.5, OptionType::Call).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.5, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.5, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
@@ -308,9 +298,9 @@ mod tests {
     fn round_trip_beta_half_otm_put() {
         let calc = DisplacedImpliedVol::new(0.5).unwrap();
         let (f, k, t, sigma) = (100.0, 80.0, 1.0, 0.30);
-        let price = displaced_price(f, k, sigma, t, 0.5, OptionType::Put).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.5, OptionType::Put).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.5, OptionType::Put).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.5, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-12);
     }
 
@@ -318,9 +308,9 @@ mod tests {
     fn round_trip_beta_quarter() {
         let calc = DisplacedImpliedVol::new(0.25).unwrap();
         let (f, k, t, sigma) = (100.0, 105.0, 0.5, 0.15);
-        let price = displaced_price(f, k, sigma, t, 0.25, OptionType::Call).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.25, OptionType::Call).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.25, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.25, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-11);
     }
 
@@ -328,9 +318,9 @@ mod tests {
     fn round_trip_beta_zero() {
         let calc = DisplacedImpliedVol::new(0.0).unwrap();
         let (f, k, t, sigma) = (100.0, 100.0, 1.0, 0.20);
-        let price = displaced_price(f, k, sigma, t, 0.0, OptionType::Call).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.0, OptionType::Call).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.0, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.0, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-10);
     }
 
@@ -338,9 +328,9 @@ mod tests {
     fn round_trip_beta_zero_otm_put() {
         let calc = DisplacedImpliedVol::new(0.0).unwrap();
         let (f, k, t, sigma) = (100.0, 80.0, 1.0, 0.25);
-        let price = displaced_price(f, k, sigma, t, 0.0, OptionType::Put).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.0, OptionType::Put).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Put).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.0, OptionType::Put).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.0, OptionType::Put).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-10);
     }
 
@@ -394,7 +384,7 @@ mod tests {
         let betas = [0.0, 0.25, 0.5, 0.75, 1.0];
         let prices: Vec<f64> = betas
             .iter()
-            .map(|&b| displaced_price(f, k, sigma, t, b, OptionType::Call).unwrap())
+            .map(|&b| displaced_price(f, k, DisplacedVol(sigma), t, b, OptionType::Call).unwrap())
             .collect();
         // ATM call prices should all be positive; exact monotonicity depends on
         // the vol parameter interpretation, so just verify they're all reasonable
@@ -411,9 +401,9 @@ mod tests {
         // β=0.001: general path near β=0 delegation boundary
         let calc = DisplacedImpliedVol::new(0.001).unwrap();
         let (f, k, t, sigma) = (100.0, 105.0, 1.0, 0.20);
-        let price = displaced_price(f, k, sigma, t, 0.001, OptionType::Call).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.001, OptionType::Call).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.001, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.001, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-11);
     }
 
@@ -422,9 +412,9 @@ mod tests {
         // β=0.999: general path near β=1 delegation boundary
         let calc = DisplacedImpliedVol::new(0.999).unwrap();
         let (f, k, t, sigma) = (100.0, 110.0, 1.0, 0.25);
-        let price = displaced_price(f, k, sigma, t, 0.999, OptionType::Call).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.999, OptionType::Call).unwrap();
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.999, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.999, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-11);
     }
 
@@ -433,10 +423,10 @@ mod tests {
         // K_s = 0.5*100 + 0.5*180 = 140, deep OTM for Black
         let calc = DisplacedImpliedVol::new(0.5).unwrap();
         let (f, k, t, sigma) = (100.0, 180.0, 1.0, 0.30);
-        let price = displaced_price(f, k, sigma, t, 0.5, OptionType::Call).unwrap();
+        let price = displaced_price(f, k, DisplacedVol(sigma), t, 0.5, OptionType::Call).unwrap();
         assert!(price > 0.0);
         let iv = calc.compute(price, f, k, t, OptionType::Call).unwrap();
-        let reprice = displaced_price(f, k, iv.0, t, 0.5, OptionType::Call).unwrap();
+        let reprice = displaced_price(f, k, iv, t, 0.5, OptionType::Call).unwrap();
         assert_abs_diff_eq!(price, reprice, epsilon = 1e-10);
     }
 

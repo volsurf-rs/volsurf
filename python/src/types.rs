@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1};
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 use volsurf::calibration::{DataFilter, WeightingScheme};
 use volsurf::smile::{ArbitrageReport, ArbitrageScanConfig, ButterflyViolation};
 use volsurf::surface::{CalendarViolation, SmileModel, SurfaceDiagnostics};
-use volsurf::{OptionType, SmileSection, Strike, Tenor, VolSurface};
+use volsurf::{OptionType, SmileCalibrator, SmileSection, Strike, Tenor, VolSurface};
 
 use crate::error::to_py_err;
 
@@ -60,14 +59,9 @@ impl PySmileModel {
 
     #[classmethod]
     fn sabr(_cls: &Bound<'_, PyType>, beta: f64) -> PyResult<Self> {
-        if !beta.is_finite() || !(0.0..=1.0).contains(&beta) {
-            return Err(PyValueError::new_err(format!(
-                "SABR beta must be in [0, 1] and finite, got {beta}"
-            )));
-        }
-        Ok(Self {
-            inner: SmileModel::Sabr { beta },
-        })
+        let inner = SmileModel::Sabr { beta };
+        inner.validate().map_err(to_py_err)?;
+        Ok(Self { inner })
     }
 
     fn __repr__(&self) -> String {
@@ -148,16 +142,16 @@ impl PyArbitrageScanConfig {
     }
 
     #[staticmethod]
-    fn svi_default() -> Self {
+    fn wide() -> Self {
         Self {
-            inner: ArbitrageScanConfig::svi_default(),
+            inner: ArbitrageScanConfig::wide(),
         }
     }
 
     #[staticmethod]
-    fn sabr_default() -> Self {
+    fn narrow() -> Self {
         Self {
-            inner: ArbitrageScanConfig::sabr_default(),
+            inner: ArbitrageScanConfig::narrow(),
         }
     }
 
@@ -267,7 +261,7 @@ impl PySmile {
     ) -> PyResult<PyArbitrageReport> {
         Ok(self
             .inner
-            .is_arbitrage_free_with(&config.inner)
+            .is_arbitrage_free_with(config.inner)
             .map_err(to_py_err)?
             .into())
     }
@@ -330,7 +324,7 @@ impl PySurface {
     fn diagnostics_with(&self, config: &PyArbitrageScanConfig) -> PyResult<PySurfaceDiagnostics> {
         Ok(self
             .inner
-            .diagnostics_with(&config.inner)
+            .diagnostics_with(config.inner)
             .map_err(to_py_err)?
             .into())
     }

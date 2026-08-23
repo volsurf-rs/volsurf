@@ -43,7 +43,7 @@ macro_rules! impl_smile_methods {
             ) -> PyResult<PyArbitrageReport> {
                 Ok(self
                     .inner
-                    .is_arbitrage_free_with(&config.inner)
+                    .is_arbitrage_free_with(config.inner)
                     .map_err(to_py_err)?
                     .into())
             }
@@ -136,8 +136,8 @@ impl PySviSmile {
             forward,
             expiry,
             &market_vols,
-            &f,
-            &w,
+            f,
+            w,
             seed.map(|s| &s.inner),
         )
         .map_err(to_py_err)?;
@@ -191,8 +191,8 @@ impl PySabrSmile {
             expiry,
             beta,
             &market_vols,
-            &f,
-            &w,
+            f,
+            w,
             seed.map(|s| &s.inner),
         )
         .map_err(to_py_err)?;
@@ -213,6 +213,27 @@ impl PySplineSmile {
     #[pyo3(signature = (forward, expiry, strikes, variances))]
     fn new(forward: f64, expiry: f64, strikes: Vec<f64>, variances: Vec<f64>) -> PyResult<Self> {
         let inner = SplineSmile::new(forward, expiry, strikes, variances).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, market_vols))]
+    fn calibrate(forward: f64, expiry: f64, market_vols: Vec<(f64, f64)>) -> PyResult<Self> {
+        let inner = SplineSmile::calibrate(forward, expiry, &market_vols).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (forward, expiry, market_vols, filter=None))]
+    fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        market_vols: Vec<(f64, f64)>,
+        filter: Option<&crate::types::PyDataFilter>,
+    ) -> PyResult<Self> {
+        let f = filter.map(|f| f.inner).unwrap_or_default();
+        let inner = SplineSmile::calibrate_with_config(forward, expiry, &market_vols, f)
+            .map_err(to_py_err)?;
         Ok(Self { inner })
     }
 }

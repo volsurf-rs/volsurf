@@ -87,7 +87,7 @@ macro_rules! impl_wasm_surface_methods {
                 config: &WasmArbitrageScanConfig,
             ) -> Result<WasmSurfaceDiagnostics, JsValue> {
                 self.inner
-                    .diagnostics_with(&config.inner())
+                    .diagnostics_with(config.inner())
                     .map(WasmSurfaceDiagnostics::from)
                     .map_err(to_js_err)
             }
@@ -103,31 +103,30 @@ macro_rules! impl_wasm_surface_methods {
             }
 
             pub fn calibrate(
-                market_data_flat: Vec<f64>,
-                tenor_sizes: Vec<usize>,
                 tenors: Vec<f64>,
                 forwards: Vec<f64>,
+                market_data_flat: Vec<f64>,
+                tenor_sizes: Vec<usize>,
             ) -> Result<$name, JsValue> {
                 let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
                 let inner =
-                    <$inner>::calibrate(&market_data, &tenors, &forwards).map_err(to_js_err)?;
+                    <$inner>::calibrate(&tenors, &forwards, &market_data).map_err(to_js_err)?;
                 Ok(Self { inner })
             }
 
             pub fn calibrate_with_config(
-                market_data_flat: Vec<f64>,
-                tenor_sizes: Vec<usize>,
                 tenors: Vec<f64>,
                 forwards: Vec<f64>,
+                market_data_flat: Vec<f64>,
+                tenor_sizes: Vec<usize>,
                 filter: Option<WasmDataFilter>,
                 weighting: Option<WasmWeightingScheme>,
             ) -> Result<$name, JsValue> {
                 let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
                 let f = filter.map(|f| f.inner()).unwrap_or_default();
                 let w = weighting.map(|w| w.inner()).unwrap_or_default();
-                let inner =
-                    <$inner>::calibrate_with_config(&market_data, &tenors, &forwards, &f, &w)
-                        .map_err(to_js_err)?;
+                let inner = <$inner>::calibrate_with_config(&tenors, &forwards, &market_data, f, w)
+                    .map_err(to_js_err)?;
                 Ok(Self { inner })
             }
 
@@ -225,8 +224,8 @@ impl WasmEssviSurface {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn a(&self) -> f64 {
-        self.inner.a()
+    pub fn rho_exponent(&self) -> f64 {
+        self.inner.rho_exponent()
     }
 
     #[wasm_bindgen(getter)]
@@ -245,14 +244,14 @@ impl WasmEssviSurface {
     }
 
     pub fn fit_per_tenor(
-        market_data_flat: Vec<f64>,
-        tenor_sizes: Vec<usize>,
         tenors: Vec<f64>,
         forwards: Vec<f64>,
+        market_data_flat: Vec<f64>,
+        tenor_sizes: Vec<usize>,
     ) -> Result<Vec<WasmPerTenorFit>, JsValue> {
         let market_data = market_data_from_flat(&market_data_flat, &tenor_sizes)?;
         let fits =
-            EssviSurface::fit_per_tenor(&market_data, &tenors, &forwards).map_err(to_js_err)?;
+            EssviSurface::fit_per_tenor(&tenors, &forwards, &market_data).map_err(to_js_err)?;
         Ok(fits.into_iter().map(WasmPerTenorFit::from).collect())
     }
 

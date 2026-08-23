@@ -5,7 +5,163 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.0.0] - 2026-08-23
+
+### Added
+
+- `types::DisplacedVol` — the displaced-diffusion vol parameter, which is a
+  Black vol only at β = 1 and was being returned as one at every β.
+- `SmileSection::default_scan_config()` — the grid `is_arbitrage_free()` scans.
+  A model whose approximation stops short of the wings states its own domain
+  once instead of overriding `is_arbitrage_free()` to pass a grid, and an
+  implementor outside this crate no longer silently inherits SVI's.
+- `ArbitrageScanConfig::default()`, so
+  `ArbitrageScanConfig { n_points: 500, ..Default::default() }` compiles.
+- `SplineSmile::calibrate` and `calibrate_with_config` — fit a spline from
+  `(strike, vol)` quotes like SVI and SABR do. `new()` takes sorted strikes and
+  total variances, and every caller was writing that conversion itself.
+  `calibrate_with_config` takes no `WeightingScheme`: a spline passes through
+  every surviving quote, so no residual bears a weight. Both reach the Python
+  bindings as `SplineSmile.calibrate` and `SplineSmile.calibrate_with_config`;
+  WASM exposes no spline smile type, so there is no JS counterpart.
+- Accessors for parameters that could previously only be read back through
+  serde: `SviSmile::a/b/m/sigma` and `SplineSmile::strikes/variances`.
+- `VolSurface::forward(expiry)` — reads the forward directly instead of
+  building a whole smile section for it. `DupireLocalVol` needs three forwards
+  and no vols per query; on a `PiecewiseSurface` that used to cost ~150
+  variance evaluations, three spline solves, and three allocations. The
+  `local_vol/dupire_piecewise_single_query` benchmark goes from 6.75 µs to
+  180 ns, a 37× speedup.
+- `VolSurface::calendar_violations()` — calendar spread checks reachable
+  through `&dyn VolSurface`, with a grid-scanning default. `SsviSurface`
+  overrides it with the exact `∂w/∂θ` test.
+- `smile::SmileCalibrator` — the per-tenor calibration contract the models
+  already shared informally. `SurfaceBuilder::calibrator()` accepts any
+  implementation, so a model defined outside this crate can be built into a
+  surface on the same footing as the `SmileModel` variants. Its
+  `validate()` method (default `Ok(())`) checks parameters fixed at
+  construction; `SurfaceBuilder::build()` calls it before reading any tenor
+  data, so a misconfigured model reports its own error rather than whatever
+  the first tenor trips over.
+- `validate_in_range` and `validate_open_unit_interval` behind the ρ, β, and γ
+  checks, so those messages are uniform across models.
+
+### Changed
+
+- **BREAKING**: `black_price`, `normal_price` and `displaced_price` take the vol
+  newtype their extractor returns — `Vol`, `NormalVol` and `DisplacedVol`
+  respectively — rather than a bare `f64`. A Bachelier vol of `20.0` and a Black
+  vol of `0.20` were interchangeable at the one call site where the two units
+  meet. Wrap the argument: `black_price(f, k, Vol(0.2), t, ty)`, or pass an
+  extractor's output straight through. The Python and WASM bindings still take
+  and return bare floats.
+- **BREAKING**: `DisplacedImpliedVol::compute` returns `DisplacedVol` rather
+  than `Vol`. Both are tuple newtypes, so `.0` still reaches the `f64`.
+- **BREAKING**: `ArbitrageScanConfig::svi_default()` and `sabr_default()` are
+  `wide()` and `narrow()`. They describe grid width, not models — `svi_default()`
+  was also the SSVI default and the trait-wide fallback. `Default` returns
+  `wide()`. Renamed in the Python and WASM bindings too.
+- **BREAKING**: `DataFilter`, `WeightingScheme` and `ArbitrageScanConfig` are
+  passed by value, not by reference, on every `calibrate_with_config`,
+  `is_arbitrage_free_with`, `diagnostics_with`, `apply_filter` and
+  `SmileCalibrator::calibrate`. All three are `Copy`, and
+  `SurfaceBuilder::data_filter` already took one by value. Drop the `&`.
+- **BREAKING**: surface calibration takes `(tenors, forwards, market_data)`
+  rather than `(market_data, tenors, forwards)`, matching the smile layer's
+  coordinates-then-quotes order. Affects `SsviSurface::calibrate*`,
+  `EssviSurface::calibrate*` and `EssviSurface::fit_per_tenor*`, in the Python
+  and WASM bindings as well. `market_data` has a distinct type, so a call left
+  in the old order fails to compile rather than mis-binding.
+- **BREAKING**: `EssviSurface::rho(theta)` is `rho_at(theta)` and
+  `EssviSurface::a()` is `rho_exponent()`. `rho()` everywhere else in the crate
+  reads a stored parameter; on `EssviSurface` alone it evaluated a function.
+  `a` is the exponent in ρ(θ) = ρ₀ + (ρₘ − ρ₀)(θ/θ_max)^a — still the name of
+  the constructor argument, which follows the paper. The `a` half lands in the
+  bindings too: the Python getter `EssviSurface.a` and the WASM getter
+  `WasmEssviSurface.a` are `rho_exponent`, and unlike the Rust rename those
+  fail at runtime — `essvi.a` raises `AttributeError` in Python and is
+  `undefined` in JS. (`rho_at` is not exposed in either binding.) Every
+  `EssviSurface` accessor now carries a doc comment.
+- **BREAKING**: `EssviSurface::calendar_check_structural()` is
+  `calendar_violations_structural()`, matching the `VolSurface::calendar_violations()`
+  it sits beside.
+- `PiecewiseSurface::smile_at()` returns the stored smile on an exact tenor
+  match rather than a cubic-spline resampling of it. The section now keeps its
+  model identity (`model_name()` reports `"SVI"`, not `"CubicSpline"`), its
+  analytic density, and its wing behaviour — previously `smile_at(T).vol(K)`
+  and `black_vol(T, K)` disagreed outside `[0.5F, 2F]` on the same surface.
+  Off-grid expiries are still resampled onto a spline.
+- On `SmileModel::CubicSpline`, `SurfaceBuilder::build()` now validates each
+  quote before applying the `DataFilter`, so a non-finite or non-positive vol
+  errors with `InvalidInput` instead of being filtered out and fitted around.
+  The spline arm routes through `SplineSmile::calibrate_with_config`, which
+  aligns it with the SVI and SABR arms. A build with a `min_vol` filter and one
+  zero or NaN vol in a chain that previously succeeded on the surviving quotes
+  now fails that tenor.
+- `ArbitrageScanConfig` is re-exported at the crate root, alongside `DataFilter`.
+- SVI's calibration is split into named stages (weighting, vol-cliff filter,
+  ATM interpolation, multi-start search, ATM sanity check) that are unit-tested
+  directly. The fit itself is unchanged.
+- Error message wording, on the same `VolSurfError` variants as before. Match
+  on the variant, not the string:
+  - Bad tenors or forwards passed to `SsviSurface::calibrate*` or
+    `EssviSurface::fit_per_tenor*` now read
+    `"tenors must be positive and finite, got tenors[0]=0"` rather than
+    `"tenors[0] must be positive and finite, got 0"`. Both surfaces route
+    through the shared slice validator, so they no longer disagree.
+  - An out-of-range SABR `beta` reads `"SABR beta must be in [0, 1], got NaN"`
+    rather than `"SABR beta must be in [0, 1] and finite, got NaN"`; `NaN` and
+    `inf` are still rejected. `SabrSmile::new`/`calibrate_with_config` name the
+    parameter the same way (was `"beta must be in [0, 1]"`), and the Python and
+    WASM bindings raise the core message instead of their own copy of it.
+  - `SurfaceBuilder::build()`'s min-strikes error names the model by
+    `model_name()` — `"(model: SABR)"` — instead of debug-formatting the
+    `SmileModel`, so the message no longer carries `beta`.
+- WASM errors from `InvalidInput` and `NumericalError` now carry the bare
+  message rather than the `Display` form, matching the Python bindings: a JS
+  caller sees `"tenors must be positive and finite, got tenors[0]=0"`, not
+  `"invalid input: tenors must be positive and finite, got tenors[0]=0"`. This
+  applies to every message on those two variants, not just SABR `beta`. It also
+  makes `InvalidInput` and `NumericalError` indistinguishable to a JS caller;
+  `CalibrationError` still carries its `"{model}: {message}"` prefix. These
+  bindings throw plain strings rather than a typed value, so they offer no
+  equivalent of the Python bindings' `ValueError`/`RuntimeError` split.
+- `SplineSmile` now overrides `is_arbitrage_free_with` instead of
+  `is_arbitrage_free`, so both entry points scan the same domain. They
+  previously disagreed: `is_arbitrage_free()` ran a hand-rolled scan over the
+  knot range with a hardcoded point count and tolerance and ignored
+  `ArbitrageScanConfig` entirely, while `is_arbitrage_free_with(config)` fell
+  through to the trait default and scanned log-moneyness `[k_min, k_max]`.
+  The configured range is now honoured but clipped to the knot range, stepping
+  in from the boundary knots. Outside `[K₀, Kₙ]` the spline flat-extrapolates,
+  where the finite-difference density is cancellation noise, and `w` is only C⁰
+  at the boundary itself — on a convex 5-knot smile the unclipped scan reported
+  six spurious violations, two of them at magnitude ~13. A `config` that does
+  not overlap the knot range now returns `InvalidInput` rather than silently
+  reporting a clean scan it never performed.
+
+- `SviSmile::b` and `SviSmile::rho` document that neither is identified when
+  `m` falls outside the quoted log-moneyness range. The total-variance curve
+  goes linear there and the two trade off along a ray, so a low RMSE does not
+  imply a determined `b`, and `rho`'s sign stops tracking which wing is
+  steeper.
+
+### Removed
+
+Breaking. Each has a drop-in replacement on the `VolSurface` trait — bring it
+into scope with `use volsurf::surface::VolSurface`:
+
+- `SsviSurface::calendar_arb_analytical()` → `SsviSurface::calendar_violations()`,
+  which now returns `Result<Vec<CalendarViolation>>`.
+- The inherent `SsviSurface::tenors()` and `EssviSurface::tenors()`, which
+  shadowed the identical trait method.
+
+Breaking, Python bindings only:
+
+- Python 3.9 support. `requires-python` is now `>=3.10` and CI tests 3.10
+  and 3.14. 3.9 reached end of life in October 2025, and supporting it held
+  the test matrix on a pytest release predating the CVE-2025-71176 tmpdir
+  fix, which needs 3.10+. The Rust crate is unaffected.
 
 ## [3.0.0] - 2026-08-22
 
@@ -271,7 +427,8 @@ resolve; they remain git-only releases and their contents ship here (PAN-134).
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/volsurf-rs/volsurf/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/volsurf-rs/volsurf/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/volsurf-rs/volsurf/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/volsurf-rs/volsurf/compare/v2.2.0...v2.3.0

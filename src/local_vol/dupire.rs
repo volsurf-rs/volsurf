@@ -95,8 +95,7 @@ impl LocalVol for DupireLocalVol {
         let t = expiry.0;
         let k = strike.0;
 
-        let smile = self.surface.smile_at(expiry)?;
-        let fwd = smile.forward();
+        let fwd = self.surface.forward(expiry)?;
         let y = log_moneyness(k, fwd)?;
 
         let w = self.surface.black_variance(expiry, strike)?.0;
@@ -116,26 +115,17 @@ impl LocalVol for DupireLocalVol {
         let d2w_dy2 = (w_up - 2.0 * w + w_dn) / (h * h);
 
         // Time derivative at constant y (forward adjustment at bumped tenors)
+        let variance_at_y = |tenor: Tenor| -> error::Result<f64> {
+            let strike = Strike(self.surface.forward(tenor)? * y.exp());
+            Ok(self.surface.black_variance(tenor, strike)?.0)
+        };
         let dw_dt = if t > 2.0 * h {
-            let smile_up = self.surface.smile_at(Tenor(t + h))?;
-            let smile_dn = self.surface.smile_at(Tenor(t - h))?;
-            let w_t_up = self
-                .surface
-                .black_variance(Tenor(t + h), Strike(smile_up.forward() * y.exp()))?
-                .0;
-            let w_t_dn = self
-                .surface
-                .black_variance(Tenor(t - h), Strike(smile_dn.forward() * y.exp()))?
-                .0;
+            let w_t_up = variance_at_y(Tenor(t + h))?;
+            let w_t_dn = variance_at_y(Tenor(t - h))?;
             (w_t_up - w_t_dn) / (2.0 * h)
         } else {
             // Forward difference for short expiry where T - h would be non-positive
-            let smile_up = self.surface.smile_at(Tenor(t + h))?;
-            let w_t_up = self
-                .surface
-                .black_variance(Tenor(t + h), Strike(smile_up.forward() * y.exp()))?
-                .0;
-            (w_t_up - w) / h
+            (variance_at_y(Tenor(t + h))? - w) / h
         };
 
         // Gatheral (1.10) denominator
@@ -263,7 +253,7 @@ mod tests {
         }
         fn diagnostics_with(
             &self,
-            _: &crate::smile::ArbitrageScanConfig,
+            _: crate::smile::ArbitrageScanConfig,
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
@@ -330,7 +320,7 @@ mod tests {
         }
         fn diagnostics_with(
             &self,
-            _: &crate::smile::ArbitrageScanConfig,
+            _: crate::smile::ArbitrageScanConfig,
         ) -> error::Result<SurfaceDiagnostics> {
             unimplemented!()
         }
@@ -575,7 +565,7 @@ mod tests {
             }
             fn diagnostics_with(
                 &self,
-                _: &crate::smile::ArbitrageScanConfig,
+                _: crate::smile::ArbitrageScanConfig,
             ) -> error::Result<SurfaceDiagnostics> {
                 unimplemented!()
             }

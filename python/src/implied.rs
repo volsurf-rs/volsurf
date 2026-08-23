@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use volsurf::types::{DisplacedVol, NormalVol, Vol};
 
 use crate::error::to_py_err;
 use crate::types::PyOptionType;
@@ -12,7 +13,7 @@ pub fn black_price(
     expiry: f64,
     option_type: PyOptionType,
 ) -> PyResult<f64> {
-    volsurf::implied::black_price(forward, strike, vol, expiry, option_type.into())
+    volsurf::implied::black_price(forward, strike, Vol(vol), expiry, option_type.into())
         .map_err(to_py_err)
 }
 
@@ -25,7 +26,7 @@ pub fn normal_price(
     expiry: f64,
     option_type: PyOptionType,
 ) -> PyResult<f64> {
-    volsurf::implied::normal_price(forward, strike, vol, expiry, option_type.into())
+    volsurf::implied::normal_price(forward, strike, NormalVol(vol), expiry, option_type.into())
         .map_err(to_py_err)
 }
 
@@ -39,8 +40,15 @@ pub fn displaced_price(
     beta: f64,
     option_type: PyOptionType,
 ) -> PyResult<f64> {
-    volsurf::implied::displaced_price(forward, strike, vol, expiry, beta, option_type.into())
-        .map_err(to_py_err)
+    volsurf::implied::displaced_price(
+        forward,
+        strike,
+        DisplacedVol(vol),
+        expiry,
+        beta,
+        option_type.into(),
+    )
+    .map_err(to_py_err)
 }
 
 #[pyclass(frozen, name = "BlackImpliedVol")]
