@@ -11,8 +11,8 @@ Not yet on PyPI — build from source with [maturin](https://www.maturin.rs):
 maturin develop --release -m python/Cargo.toml
 ```
 
-Requires Python 3.9 or later and a Rust toolchain. NumPy is the only runtime
-dependency. Tested against Python 3.9 and 3.14.
+Requires Python 3.10 or later and a Rust toolchain. NumPy is the only runtime
+dependency. Tested against Python 3.10 and 3.14.
 
 ## Build a surface
 
