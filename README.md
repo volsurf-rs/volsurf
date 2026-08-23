@@ -14,7 +14,7 @@ Volatility surface construction for equity and FX derivatives.
 **Smile Models**
 - **SVI** (Gatheral 2006) -- 5-parameter with quasi-explicit calibration (Zeliade 2009), analytical g-function density, butterfly arbitrage detection
 - **SABR** (Hagan 2002) -- 4-parameter with Hagan closed-form, analytic alpha + Nelder-Mead calibration, 12-digit accuracy vs reference values
-- **Cubic spline** -- non-parametric on total variance, Thomas algorithm O(n), flat extrapolation
+- **Cubic spline** -- non-parametric on total variance, Thomas algorithm O(n), flat extrapolation, `SplineSmile::calibrate` fits market quotes directly
 
 **Surface Construction**
 - **SSVI** global parameterization (Gatheral-Jacquier 2014) with two-stage calibration
@@ -22,6 +22,7 @@ Volatility surface construction for equity and FX derivatives.
 - **Piecewise** per-tenor surfaces with linear variance interpolation
 - **Builder API** with SVI/SABR/spline model selection, dividend yield, per-tenor forward override
 - Ragged strike grids -- different strikes per tenor, no rectangular matrix assumption
+- `VolSurface::forward(expiry)` reads the forward off the surface without building a smile section
 
 **Arbitrage Detection**
 - Butterfly arbitrage via analytical g-function (SVI) and numerical density scan (SABR)
@@ -206,7 +207,7 @@ volsurf
 │   ├── sabr       SabrSmile (Hagan 2002)
 │   ├── spline     SplineSmile (cubic on variance)
 │   └── arbitrage  ArbitrageReport, ButterflyViolation, ArbitrageScanConfig
-├── surface
+├── surface        VolSurface
 │   ├── ssvi       SsviSurface (Gatheral-Jacquier 2014)
 │   ├── essvi      EssviSurface, EssviSlice (Hendriks-Martini 2019)
 │   ├── piecewise  PiecewiseSurface (per-tenor interpolation)
