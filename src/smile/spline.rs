@@ -281,12 +281,11 @@ impl SmileSection for SplineSmile {
     /// need no such treatment — a natural cubic spline is C² there.
     ///
     /// # Errors
-    /// Returns [`VolSurfError::InvalidInput`] if `config` does not overlap the
-    /// usable knot range, since no point in it could be meaningfully evaluated.
-    /// That covers a config disjoint from the knots and a knot span narrower
-    /// than `2 · KNOT_EDGE_INSET` in log-moneyness, which leaves nothing usable
-    /// whatever the config; the message reports both ranges so the two cases are
-    /// distinguishable.
+    /// Returns [`VolSurfError::InvalidInput`] if nothing in `config` could be
+    /// meaningfully evaluated: either the knot span is narrower than
+    /// `2 · KNOT_EDGE_INSET` in log-moneyness, leaving nothing usable whatever
+    /// the config, or the config is disjoint from the usable knot range. Each
+    /// case names its own cause.
     fn is_arbitrage_free_with(
         &self,
         config: &ArbitrageScanConfig,
@@ -295,7 +294,17 @@ impl SmileSection for SplineSmile {
         let last = self.strikes.len() - 1;
         let lo = (self.strikes[0] / self.forward).ln() + KNOT_EDGE_INSET;
         let hi = (self.strikes[last] / self.forward).ln() - KNOT_EDGE_INSET;
-        if lo >= hi || config.k_max <= lo || config.k_min >= hi {
+        if lo >= hi {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "knot range [{}, {}] spans less than 2·KNOT_EDGE_INSET ({}) in log-moneyness, leaving nothing scannable",
+                    self.strikes[0],
+                    self.strikes[last],
+                    2.0 * KNOT_EDGE_INSET
+                ),
+            });
+        }
+        if config.k_max <= lo || config.k_min >= hi {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
                     "scan range [{}, {}] does not overlap the spline's usable knot range [{lo}, {hi}]",
@@ -578,14 +587,15 @@ mod tests {
 
     /// The trait's `is_arbitrage_free()` delegates to `is_arbitrage_free_with`,
     /// so the two must not disagree about the scan domain the way they did when
-    /// this model carried its own hand-rolled knot-space scan.
+    /// this model carried its own hand-rolled knot-space scan. The dip fixture
+    /// makes both counts nonzero, so a divergent domain moves one of them.
     #[test]
     fn both_arbitrage_entry_points_agree() {
         let smile = SplineSmile::new(
             100.0,
             1.0,
             vec![80.0, 90.0, 100.0, 110.0, 120.0],
-            vec![0.065, 0.045, 0.04, 0.045, 0.065],
+            vec![0.04, 0.04, 0.002, 0.04, 0.04],
         )
         .unwrap();
 
@@ -593,6 +603,10 @@ mod tests {
         let explicit = smile
             .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
             .unwrap();
+        assert!(
+            !default.butterfly_violations.is_empty(),
+            "fixture must violate, else equal counts prove nothing"
+        );
         assert_eq!(
             default.butterfly_violations.len(),
             explicit.butterfly_violations.len()
@@ -671,7 +685,11 @@ mod tests {
         let err = smile
             .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
             .unwrap_err();
-        assert!(matches!(err, VolSurfError::InvalidInput { .. }), "{err}");
+        let VolSurfError::InvalidInput { message } = &err else {
+            panic!("expected InvalidInput, got {err}");
+        };
+        assert!(message.contains("knot range"), "{message}");
+        assert!(message.contains("KNOT_EDGE_INSET"), "{message}");
     }
 
     /// Deliberately violated input: a variance dip sharp enough to drive the

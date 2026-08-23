@@ -114,7 +114,9 @@ pub trait VolSurface: Send + Sync + std::fmt::Debug {
 
     /// Surface-level diagnostics with custom butterfly scan configuration.
     ///
-    /// Passes `config` through to per-smile `is_arbitrage_free_with()` calls.
+    /// Passes `config` through to per-smile `is_arbitrage_free_with()` calls;
+    /// implementations may narrow `config` to their domain of validity — see
+    /// [`SmileSection::is_arbitrage_free_with`].
     /// Calendar spread checks use the same hardcoded grid as `diagnostics()`.
     fn diagnostics_with(&self, config: &ArbitrageScanConfig) -> error::Result<SurfaceDiagnostics>;
 
