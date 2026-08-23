@@ -193,7 +193,7 @@ fn essvi_construct_and_query() {
 
     assert!((surf.rho_0() - -0.4).abs() < 1e-12);
     assert!((surf.rho_m() - -0.2).abs() < 1e-12);
-    assert!((surf.a() - 0.3).abs() < 1e-12);
+    assert!((surf.rho_exponent() - 0.3).abs() < 1e-12);
     assert!((surf.eta() - 1.5).abs() < 1e-12);
     assert!((surf.gamma() - 0.5).abs() < 1e-12);
     assert!(surf.theta_max() > 0.0);

@@ -33,7 +33,7 @@ use crate::validate::{
 
 /// A structural calendar no-arb violation (Thm 4.1, Eq 4.10).
 ///
-/// Returned by [`EssviSurface::calendar_check_structural()`] when the
+/// Returned by [`EssviSurface::calendar_violations_structural()`] when the
 /// continuous-time condition `(δ + ρ·γ)² ≤ γ²` fails at a stored tenor.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructuralViolation {
@@ -734,47 +734,56 @@ impl EssviSurface {
     /// ```
     ///
     /// Result is clamped strictly inside (−1, 1) by `surface::calib::RHO_CLAMP`.
-    pub fn rho(&self, theta: f64) -> f64 {
+    pub fn rho_at(&self, theta: f64) -> f64 {
         let t = (theta / self.theta_max).clamp(0.0, 1.0);
         let r = self.rho_0 + (self.rho_m - self.rho_0) * t.powf(self.a);
         r.clamp(-RHO_CLAMP, RHO_CLAMP)
     }
 
+    /// Correlation ρ₀ at the short end, θ = 0.
     pub fn rho_0(&self) -> f64 {
         self.rho_0
     }
 
+    /// Correlation ρₘ at the long end, θ = θ_max.
     pub fn rho_m(&self) -> f64 {
         self.rho_m
     }
 
-    pub fn a(&self) -> f64 {
+    /// Exponent `a` governing how ρ moves from ρ₀ to ρₘ across the term
+    /// structure. See [`rho_at`](Self::rho_at) for where it enters.
+    pub fn rho_exponent(&self) -> f64 {
         self.a
     }
 
+    /// Smile amplitude parameter η.
     pub fn eta(&self) -> f64 {
         self.eta
     }
 
+    /// Term structure decay parameter γ.
     pub fn gamma(&self) -> f64 {
         self.gamma
     }
 
+    /// Forward prices at each tenor.
     pub fn forwards(&self) -> &[f64] {
         &self.forwards
     }
 
+    /// ATM total variances θ_i at each tenor.
     pub fn thetas(&self) -> &[f64] {
         &self.thetas
     }
 
+    /// Largest stored θ, the normalizer in ρ(θ).
     pub fn theta_max(&self) -> f64 {
         self.theta_max
     }
 
     /// Evaluate eSSVI total variance at `(θ, k)` with maturity-dependent ρ.
     pub(crate) fn total_variance_at(&self, theta: f64, k: f64) -> f64 {
-        let rho = self.rho(theta);
+        let rho = self.rho_at(theta);
         ssvi_total_variance(theta, k, rho, self.eta, self.gamma)
     }
 
@@ -802,12 +811,12 @@ impl EssviSurface {
     /// An empty vector means the surface is structurally calendar-arb-free.
     /// For surfaces passing the Eq. 5.7 constraint at construction, this
     /// always returns empty.
-    pub fn calendar_check_structural(&self) -> Vec<StructuralViolation> {
+    pub fn calendar_violations_structural(&self) -> Vec<StructuralViolation> {
         let gamma_thm = 1.0 - self.gamma;
         let mut violations = Vec::new();
 
         for (i, &theta) in self.thetas.iter().enumerate() {
-            let rho = self.rho(theta);
+            let rho = self.rho_at(theta);
             let t = (theta / self.theta_max).clamp(0.0, 1.0);
             let delta = self.a * (self.rho_m - self.rho_0) * t.powf(self.a);
             let lhs = (delta + rho * gamma_thm).abs();
@@ -848,7 +857,7 @@ impl VolSurface for EssviSurface {
     fn smile_at(&self, expiry: Tenor) -> error::Result<Box<dyn SmileSection>> {
         validate_positive(expiry.0, "expiry")?;
         let (theta, forward) = self.theta_and_forward_at(expiry.0);
-        let rho = self.rho(theta);
+        let rho = self.rho_at(theta);
         let slice = EssviSlice::new(forward, expiry.0, rho, self.eta, self.gamma, theta)?;
         Ok(Box::new(slice))
     }
@@ -865,7 +874,7 @@ impl VolSurface for EssviSurface {
                 EssviSlice::new(
                     self.forwards[i],
                     self.tenors[i],
-                    self.rho(self.thetas[i]),
+                    self.rho_at(self.thetas[i]),
                     self.eta,
                     self.gamma,
                     self.thetas[i],
@@ -1168,7 +1177,7 @@ mod tests {
         let s = equity_surface();
         assert_eq!(s.rho_0(), -0.4);
         assert_eq!(s.rho_m(), -0.2);
-        assert_eq!(s.a(), 0.5);
+        assert_eq!(s.rho_exponent(), 0.5);
         assert_eq!(s.eta(), 0.5);
         assert_eq!(s.gamma(), 0.5);
         assert_eq!(s.tenors(), &[0.25, 0.5, 1.0, 2.0]);
@@ -1267,7 +1276,7 @@ mod tests {
             vec![0.04, 0.08],
         )
         .unwrap();
-        assert_eq!(s.a(), 0.0);
+        assert_eq!(s.rho_exponent(), 0.0);
     }
 
     #[test]
@@ -1559,7 +1568,7 @@ mod tests {
     fn rho_at_zero_theta() {
         let s = equity_surface();
         // theta=0 => (0/theta_max)^a = 0 => rho(0) = rho_0
-        let r = s.rho(0.0);
+        let r = s.rho_at(0.0);
         assert_abs_diff_eq!(r, -0.4, epsilon = 1e-14);
     }
 
@@ -1567,7 +1576,7 @@ mod tests {
     fn rho_at_theta_max() {
         let s = equity_surface();
         // theta=theta_max => (1)^a = 1 => rho = rho_0 + (rho_m - rho_0) = rho_m
-        let r = s.rho(s.theta_max());
+        let r = s.rho_at(s.theta_max());
         assert_abs_diff_eq!(r, -0.2, epsilon = 1e-14);
     }
 
@@ -1576,16 +1585,16 @@ mod tests {
         let s = equity_surface();
         // theta=0.16, theta_max=0.32 => t=0.5, a=0.5 => t^a = sqrt(0.5)
         let expected = -0.4 + (-0.2 - (-0.4)) * (0.5_f64).sqrt();
-        let r = s.rho(0.16);
+        let r = s.rho_at(0.16);
         assert_abs_diff_eq!(r, expected, epsilon = 1e-14);
     }
 
     #[test]
     fn rho_monotone_when_rho_m_greater() {
         let s = equity_surface(); // rho_0=-0.4, rho_m=-0.2
-        let r1 = s.rho(0.04);
-        let r2 = s.rho(0.16);
-        let r3 = s.rho(0.32);
+        let r1 = s.rho_at(0.04);
+        let r2 = s.rho_at(0.16);
+        let r3 = s.rho_at(0.32);
         assert!(r1 < r2, "rho should increase: {r1} < {r2}");
         assert!(r2 < r3, "rho should increase: {r2} < {r3}");
     }
@@ -1604,7 +1613,7 @@ mod tests {
             vec![0.04, 0.08],
         )
         .unwrap();
-        assert!(s.rho(0.04) > s.rho(0.08));
+        assert!(s.rho_at(0.04) > s.rho_at(0.08));
     }
 
     #[test]
@@ -1622,7 +1631,7 @@ mod tests {
         .unwrap();
         // a=0 => t^0 = 1 for all t>0, so rho = rho_0 + (rho_m - rho_0)*1 = rho_m
         // BUT at theta=0, t=0, 0^0 = 1 by f64 convention
-        assert_abs_diff_eq!(s.rho(0.04), s.rho(0.08), epsilon = 1e-14);
+        assert_abs_diff_eq!(s.rho_at(0.04), s.rho_at(0.08), epsilon = 1e-14);
     }
 
     #[test]
@@ -1640,16 +1649,16 @@ mod tests {
         .unwrap();
         // rho(theta) = rho_0 + (rho_m-rho_0)*(theta/theta_max)
         let expected = -0.4 + 0.2 * (0.04 / 0.08);
-        assert_abs_diff_eq!(s.rho(0.04), expected, epsilon = 1e-14);
+        assert_abs_diff_eq!(s.rho_at(0.04), expected, epsilon = 1e-14);
     }
 
     #[test]
     fn rho_clamped_to_valid_range() {
         // Even with extreme extrapolation, rho stays in (-0.999, 0.999)
         let s = equity_surface();
-        let r = s.rho(100.0); // way beyond theta_max
+        let r = s.rho_at(100.0); // way beyond theta_max
         assert!(r > -0.999 && r < 0.999);
-        let r0 = s.rho(0.0);
+        let r0 = s.rho_at(0.0);
         assert!(r0 > -0.999 && r0 < 0.999);
     }
 
@@ -1829,7 +1838,7 @@ mod tests {
     #[test]
     fn surface_calendar_structural_clean() {
         let s = equity_surface();
-        let violations = s.calendar_check_structural();
+        let violations = s.calendar_violations_structural();
         assert!(
             violations.is_empty(),
             "valid params should pass structural check"
@@ -1858,7 +1867,7 @@ mod tests {
         let s2: EssviSurface = serde_json::from_str(&json).unwrap();
         assert_eq!(s.rho_0(), s2.rho_0());
         assert_eq!(s.rho_m(), s2.rho_m());
-        assert_eq!(s.a(), s2.a());
+        assert_eq!(s.rho_exponent(), s2.rho_exponent());
         assert_eq!(s.eta(), s2.eta());
         assert_eq!(s.gamma(), s2.gamma());
         assert_eq!(s.tenors(), s2.tenors());
@@ -2017,7 +2026,11 @@ mod tests {
         let c = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
         assert!(c.rho_0().abs() < 1.0, "rho_0 out of range: {}", c.rho_0());
         assert!(c.rho_m().abs() < 1.0, "rho_m out of range: {}", c.rho_m());
-        assert!(c.a() >= 0.0, "a must be non-negative: {}", c.a());
+        assert!(
+            c.rho_exponent() >= 0.0,
+            "a must be non-negative: {}",
+            c.rho_exponent()
+        );
         assert!(c.eta() > 0.0, "eta must be positive: {}", c.eta());
         assert!(
             (0.0..=1.0).contains(&c.gamma()),
@@ -2073,7 +2086,7 @@ mod tests {
         let market_data = synthetic_surface_data(&original, &tenors, &strikes);
 
         let calibrated = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
-        let violations = calibrated.calendar_check_structural();
+        let violations = calibrated.calendar_violations_structural();
         assert!(
             violations.is_empty(),
             "calibrated surface should pass structural check, got {} violations",
@@ -2095,7 +2108,11 @@ mod tests {
 
         assert_abs_diff_eq!(calibrated.rho_0(), deserialized.rho_0(), epsilon = 1e-14);
         assert_abs_diff_eq!(calibrated.rho_m(), deserialized.rho_m(), epsilon = 1e-14);
-        assert_abs_diff_eq!(calibrated.a(), deserialized.a(), epsilon = 1e-14);
+        assert_abs_diff_eq!(
+            calibrated.rho_exponent(),
+            deserialized.rho_exponent(),
+            epsilon = 1e-14
+        );
         assert_abs_diff_eq!(calibrated.eta(), deserialized.eta(), epsilon = 1e-14);
         assert_abs_diff_eq!(calibrated.gamma(), deserialized.gamma(), epsilon = 1e-14);
         assert_eq!(calibrated.tenors(), deserialized.tenors());
@@ -2271,21 +2288,21 @@ mod tests {
 
         // Clipping was binding: calibrated a sits at the Eq. 5.7 bound
         assert!(
-            cal.a() <= a_bound + 1e-10,
+            cal.rho_exponent() <= a_bound + 1e-10,
             "a={} exceeds a_max={a_bound}",
-            cal.a()
+            cal.rho_exponent()
         );
         assert!(
-            (cal.a() - a_bound).abs() < 1e-10,
+            (cal.rho_exponent() - a_bound).abs() < 1e-10,
             "a={} should equal a_max={a_bound} (clipping binding)",
-            cal.a()
+            cal.rho_exponent()
         );
 
         let rms = rms_vol_error(&cal, &tenors, &market_data);
         assert!(rms < 0.02, "RMS {rms} too large");
 
         assert!(
-            cal.calendar_check_structural().is_empty(),
+            cal.calendar_violations_structural().is_empty(),
             "calendar structural violations after a-clipping"
         );
     }
@@ -2329,9 +2346,9 @@ mod tests {
         let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
         assert!(
-            cal.a() < 0.5,
+            cal.rho_exponent() < 0.5,
             "near-constant rho profile should yield small a, got {}",
-            cal.a()
+            cal.rho_exponent()
         );
 
         let rms = rms_vol_error(&cal, &tenors, &market_data);
@@ -2364,8 +2381,8 @@ mod tests {
 
         // Per-tenor SVI rho estimates are noisy, so the reconstructed rho(theta)
         // won't be perfectly flat. But the spread should be small.
-        let rho_first = cal.rho(*cal.thetas().first().unwrap());
-        let rho_last = cal.rho(*cal.thetas().last().unwrap());
+        let rho_first = cal.rho_at(*cal.thetas().first().unwrap());
+        let rho_last = cal.rho_at(*cal.thetas().last().unwrap());
         assert_abs_diff_eq!(rho_first, rho_last, epsilon = 0.03);
 
         let rms = rms_vol_error(&cal, &tenors, &market_data);
@@ -2390,7 +2407,7 @@ mod tests {
         let cal = EssviSurface::calibrate(&market_data, &tenors, &forwards).unwrap();
 
         // rho(theta_max) must equal rho_m: the power law (theta_max/theta_max)^a = 1^a = 1
-        assert_abs_diff_eq!(cal.rho(cal.theta_max()), cal.rho_m(), epsilon = 1e-14);
+        assert_abs_diff_eq!(cal.rho_at(cal.theta_max()), cal.rho_m(), epsilon = 1e-14);
     }
 
     // Real market data test — ES futures options with cabinet-level OTM call artifacts.
@@ -2558,7 +2575,7 @@ mod tests {
         // Should be bit-identical since calibrate() delegates
         assert_eq!(one_shot.rho_0(), two_stage.rho_0());
         assert_eq!(one_shot.rho_m(), two_stage.rho_m());
-        assert_eq!(one_shot.a(), two_stage.a());
+        assert_eq!(one_shot.rho_exponent(), two_stage.rho_exponent());
         assert_eq!(one_shot.eta(), two_stage.eta());
         assert_eq!(one_shot.gamma(), two_stage.gamma());
 

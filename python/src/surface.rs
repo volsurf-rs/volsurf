@@ -275,8 +275,8 @@ impl PyEssviSurface {
     }
 
     #[getter]
-    fn a(&self) -> f64 {
-        self.inner.a()
+    fn rho_exponent(&self) -> f64 {
+        self.inner.rho_exponent()
     }
 
     #[getter]

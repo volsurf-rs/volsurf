@@ -225,8 +225,8 @@ impl WasmEssviSurface {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn a(&self) -> f64 {
-        self.inner.a()
+    pub fn rho_exponent(&self) -> f64 {
+        self.inner.rho_exponent()
     }
 
     #[wasm_bindgen(getter)]

@@ -120,7 +120,7 @@ const essvi = new WasmEssviSurface(rho0, rhoM, a, eta, gamma, tenors, forwards, 
 // Same query methods as SSVI, plus:
 essvi.rho0
 essvi.rhoM
-essvi.a
+essvi.rho_exponent
 essvi.thetaMax
 ```
 

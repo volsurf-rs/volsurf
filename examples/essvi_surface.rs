@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "eSSVI surface: rho_0={:.1}, rho_m={:.1}, a={:.1}, eta={:.1}, gamma={:.1}",
         surface.rho_0(),
         surface.rho_m(),
-        surface.a(),
+        surface.rho_exponent(),
         surface.eta(),
         surface.gamma()
     );
@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{:>8} {:>8} {:>8}", "T", "theta", "rho");
     println!("{}", "-".repeat(28));
     for (&t, &theta) in tenors.iter().zip(thetas.iter()) {
-        println!("{t:>8.2} {theta:>8.4} {:>8.4}", surface.rho(theta));
+        println!("{t:>8.2} {theta:>8.4} {:>8.4}", surface.rho_at(theta));
     }
 
     // ---------------------------------------------------------------
@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "\nOriginal:   rho_0={:.4}, rho_m={:.4}, a={:.4}, eta={:.4}, gamma={:.4}",
         surface.rho_0(),
         surface.rho_m(),
-        surface.a(),
+        surface.rho_exponent(),
         surface.eta(),
         surface.gamma()
     );
@@ -129,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Calibrated: rho_0={:.4}, rho_m={:.4}, a={:.4}, eta={:.4}, gamma={:.4}",
         calibrated.rho_0(),
         calibrated.rho_m(),
-        calibrated.a(),
+        calibrated.rho_exponent(),
         calibrated.eta(),
         calibrated.gamma()
     );
@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "One-shot: rho_0={:.4}, rho_m={:.4}, a={:.4}, eta={:.4}, gamma={:.4}",
         oneshot.rho_0(),
         oneshot.rho_m(),
-        oneshot.a(),
+        oneshot.rho_exponent(),
         oneshot.eta(),
         oneshot.gamma()
     );
@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n--- Calendar arbitrage (structural) ---\n");
 
-    let violations = surface.calendar_check_structural();
+    let violations = surface.calendar_violations_structural();
     println!("Structural violations: {}", violations.len());
 
     let diag = surface.diagnostics()?;
@@ -217,7 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\neSSVI diverges from SSVI most at short tenors where rho(theta)");
     println!(
         "is steeper ({:.2} vs {:.2}). They converge at theta_max where rho -> rho_m.",
-        surface.rho(*thetas.first().unwrap()),
+        surface.rho_at(*thetas.first().unwrap()),
         surface.rho_m()
     );
 
