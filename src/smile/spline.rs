@@ -282,8 +282,8 @@ impl SmileSection for SplineSmile {
     ///
     /// # Errors
     /// Returns [`VolSurfError::InvalidInput`] if nothing in `config` could be
-    /// meaningfully evaluated: either the knot span is narrower than
-    /// `2 · KNOT_EDGE_INSET` in log-moneyness, leaving nothing usable whatever
+    /// meaningfully evaluated: either the knot span in log-moneyness is too
+    /// narrow to clear both boundary insets, leaving nothing usable whatever
     /// the config, or the config is disjoint from the usable knot range. Each
     /// case names its own cause.
     fn is_arbitrage_free_with(
@@ -297,9 +297,10 @@ impl SmileSection for SplineSmile {
         if lo >= hi {
             return Err(VolSurfError::InvalidInput {
                 message: format!(
-                    "knot range [{}, {}] spans less than 2·KNOT_EDGE_INSET ({}) in log-moneyness, leaving nothing scannable",
+                    "knot range [{}, {}] spans {} in log-moneyness, less than the {} needed to clear both boundary insets, leaving nothing scannable",
                     self.strikes[0],
                     self.strikes[last],
+                    (self.strikes[last] / self.strikes[0]).ln(),
                     2.0 * KNOT_EDGE_INSET
                 ),
             });
@@ -689,7 +690,8 @@ mod tests {
             panic!("expected InvalidInput, got {err}");
         };
         assert!(message.contains("knot range"), "{message}");
-        assert!(message.contains("KNOT_EDGE_INSET"), "{message}");
+        assert!(message.contains("in log-moneyness"), "{message}");
+        assert!(message.contains("boundary insets"), "{message}");
     }
 
     /// Deliberately violated input: a variance dip sharp enough to drive the
