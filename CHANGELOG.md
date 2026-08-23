@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.0.0] - 2026-08-23
 
 ### Added
 
@@ -149,6 +149,13 @@ into scope with `use volsurf::surface::VolSurface`:
   which now returns `Result<Vec<CalendarViolation>>`.
 - The inherent `SsviSurface::tenors()` and `EssviSurface::tenors()`, which
   shadowed the identical trait method.
+
+Breaking, Python bindings only:
+
+- Python 3.9 support. `requires-python` is now `>=3.10` and CI tests 3.10
+  and 3.14. 3.9 reached end of life in October 2025, and supporting it held
+  the test matrix on a pytest release predating the CVE-2025-71176 tmpdir
+  fix, which needs 3.10+. The Rust crate is unaffected.
 
 ## [3.0.0] - 2026-08-22
 
@@ -414,7 +421,8 @@ resolve; they remain git-only releases and their contents ship here (PAN-134).
 - `logging` Cargo feature for optional tracing instrumentation
 - Examples: `basic_surface`, `smile_models`, `implied_vol`
 
-[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/volsurf-rs/volsurf/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/volsurf-rs/volsurf/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/volsurf-rs/volsurf/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/volsurf-rs/volsurf/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/volsurf-rs/volsurf/compare/v2.2.0...v2.3.0
