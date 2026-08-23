@@ -19,10 +19,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{self, VolSurfError};
 use crate::serde_raw::validated_serde;
-use crate::smile::SmileSection;
-use crate::smile::arbitrage::{ArbitrageReport, ButterflyViolation};
+use crate::smile::arbitrage::{ArbitrageReport, scan_density};
+use crate::smile::{ArbitrageScanConfig, SmileSection};
 use crate::types::{Strike, Variance, Vol};
 use crate::validate::validate_positive;
+
+/// Half-width to step in from the boundary knots when scanning for arbitrage.
+///
+/// [`SmileSection::density`] centers its finite difference on `K · 1e-4`, which
+/// is ~1e-4 in log-moneyness; an order of magnitude of margin keeps the whole
+/// stencil clear of the knot boundary.
+const KNOT_EDGE_INSET: f64 = 1e-3;
 
 /// Coefficients for one cubic polynomial interval.
 ///
@@ -262,29 +269,37 @@ impl SmileSection for SplineSmile {
         "CubicSpline"
     }
 
-    fn is_arbitrage_free(&self) -> error::Result<ArbitrageReport> {
-        // Number of grid points for density-based arbitrage scan.
-        let n_samples = 200;
-        let k_min = self.strikes[0];
-        let k_max = self.strikes[self.strikes.len() - 1];
-        let dk = (k_max - k_min) / (n_samples as f64);
-
-        let mut violations = Vec::new();
-        for i in 1..n_samples {
-            let k = k_min + dk * (i as f64);
-            let d = self.density(Strike(k))?;
-            // Tolerance for negative density detection.
-            if d < -1e-8 {
-                violations.push(ButterflyViolation {
-                    strike: k,
-                    density: d,
-                });
-            }
-        }
-
-        Ok(ArbitrageReport {
-            expiry: self.expiry,
-            butterfly_violations: violations,
+    /// Scans the density over the configured grid, clipped to the knot range.
+    ///
+    /// Outside `[K₀, Kₙ]` the spline flat-extrapolates, so the deep wings carry
+    /// no fitted information and the finite-difference density there is
+    /// dominated by cancellation error — far enough out it reads as ~1e-8 of
+    /// spurious negative density, which is enough to trip the tolerance. The
+    /// boundary knots themselves are excluded too: `w` is only C⁰ where the
+    /// spline meets its flat extrapolation, and a stencil straddling that kink
+    /// reports a large negative density that is not arbitrage. Interior knots
+    /// need no such treatment — a natural cubic spline is C² there.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] if `config` does not overlap the
+    /// knot range, since no point in it could be meaningfully evaluated.
+    fn is_arbitrage_free_with(
+        &self,
+        config: &ArbitrageScanConfig,
+    ) -> error::Result<ArbitrageReport> {
+        config.validate()?;
+        let last = self.strikes.len() - 1;
+        let clipped = ArbitrageScanConfig {
+            n_points: config.n_points,
+            k_min: config
+                .k_min
+                .max((self.strikes[0] / self.forward).ln() + KNOT_EDGE_INSET),
+            k_max: config
+                .k_max
+                .min((self.strikes[last] / self.forward).ln() - KNOT_EDGE_INSET),
+        };
+        scan_density(self.expiry, self.forward, &clipped, |strike| {
+            self.density(Strike(strike))
         })
     }
 }
@@ -549,6 +564,88 @@ mod tests {
         }
         // Tolerance is generous: finite integration range + numerical density
         assert_abs_diff_eq!(integral, 1.0, epsilon = 0.10);
+    }
+
+    /// The trait's `is_arbitrage_free()` delegates to `is_arbitrage_free_with`,
+    /// so the two must not disagree about the scan domain the way they did when
+    /// this model carried its own hand-rolled knot-space scan.
+    #[test]
+    fn both_arbitrage_entry_points_agree() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![80.0, 90.0, 100.0, 110.0, 120.0],
+            vec![0.065, 0.045, 0.04, 0.045, 0.065],
+        )
+        .unwrap();
+
+        let default = smile.is_arbitrage_free().unwrap();
+        let explicit = smile
+            .is_arbitrage_free_with(&ArbitrageScanConfig::svi_default())
+            .unwrap();
+        assert_eq!(
+            default.butterfly_violations.len(),
+            explicit.butterfly_violations.len()
+        );
+    }
+
+    /// A config narrower than the knot range is honoured, not widened back out.
+    #[test]
+    fn scan_config_narrower_than_knots_is_respected() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![80.0, 90.0, 100.0, 110.0, 120.0],
+            vec![0.065, 0.045, 0.04, 0.045, 0.065],
+        )
+        .unwrap();
+
+        let narrow = ArbitrageScanConfig {
+            n_points: 5,
+            k_min: -0.01,
+            k_max: 0.01,
+        };
+        let report = smile.is_arbitrage_free_with(&narrow).unwrap();
+        assert!(report.is_free());
+        assert_abs_diff_eq!(report.expiry, 1.0, epsilon = 1e-14);
+    }
+
+    /// Scanning a window with no knot coverage cannot be answered, so it errors
+    /// rather than reporting a clean surface it never examined.
+    #[test]
+    fn scan_disjoint_from_knot_range_errors() {
+        let smile = SplineSmile::new(
+            100.0,
+            1.0,
+            vec![80.0, 90.0, 100.0, 110.0, 120.0],
+            vec![0.065, 0.045, 0.04, 0.045, 0.065],
+        )
+        .unwrap();
+
+        let far_wing = ArbitrageScanConfig {
+            n_points: 20,
+            k_min: 1.0,
+            k_max: 2.0,
+        };
+        assert!(matches!(
+            smile.is_arbitrage_free_with(&far_wing),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    /// Deliberately violated input: a variance dip sharp enough to drive the
+    /// risk-neutral density negative inside the knot range.
+    #[test]
+    fn concave_variance_dip_is_detected() {
+        let strikes = vec![80.0, 90.0, 100.0, 110.0, 120.0];
+        let variances = vec![0.04, 0.04, 0.002, 0.04, 0.04];
+        let smile = SplineSmile::new(100.0, 1.0, strikes, variances).unwrap();
+
+        let report = smile.is_arbitrage_free().unwrap();
+        assert!(
+            !report.is_free(),
+            "sharp variance dip should register butterfly arbitrage"
+        );
     }
 
     #[test]

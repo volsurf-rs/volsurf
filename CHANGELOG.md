@@ -65,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CalibrationError` still carries its `"{model}: {message}"` prefix. These
   bindings throw plain strings rather than a typed value, so they offer no
   equivalent of the Python bindings' `ValueError`/`RuntimeError` split.
+- `SplineSmile` now overrides `is_arbitrage_free_with` instead of
+  `is_arbitrage_free`, so both entry points scan the same domain. They
+  previously disagreed: `is_arbitrage_free()` ran a hand-rolled scan over the
+  knot range with a hardcoded point count and tolerance and ignored
+  `ArbitrageScanConfig` entirely, while `is_arbitrage_free_with(config)` fell
+  through to the trait default and scanned log-moneyness `[k_min, k_max]`.
+  The configured range is now honoured but clipped to the knot range, stepping
+  in from the boundary knots. Outside `[K₀, Kₙ]` the spline flat-extrapolates,
+  where the finite-difference density is cancellation noise, and `w` is only C⁰
+  at the boundary itself — on a convex 5-knot smile the unclipped scan reported
+  six spurious violations, two of them at magnitude ~13. A `config` that does
+  not overlap the knot range now returns `InvalidInput` rather than silently
+  reporting a clean scan it never performed.
 
 ### Removed
 
