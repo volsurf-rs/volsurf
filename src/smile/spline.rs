@@ -17,6 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::{DataFilter, prepare_market_vols};
 use crate::error::{self, VolSurfError};
 use crate::serde_raw::validated_serde;
 use crate::smile::arbitrage::{ArbitrageReport, scan_density};
@@ -30,6 +31,9 @@ use crate::validate::validate_positive;
 /// is ~1e-4 in log-moneyness; an order of magnitude of margin keeps the whole
 /// stencil clear of the knot boundary.
 const KNOT_EDGE_INSET: f64 = 1e-3;
+
+/// Fewest quotes a cubic spline can be fitted through.
+const MIN_POINTS: usize = 3;
 
 /// Coefficients for one cubic polynomial interval.
 ///
@@ -108,9 +112,9 @@ impl SplineSmile {
                 ),
             });
         }
-        if strikes.len() < 3 {
+        if strikes.len() < MIN_POINTS {
             return Err(VolSurfError::InvalidInput {
-                message: "spline requires at least 3 data points".into(),
+                message: format!("spline requires at least {MIN_POINTS} data points"),
             });
         }
         for k in &strikes {
@@ -153,6 +157,72 @@ impl SplineSmile {
             variances,
             coeffs,
         })
+    }
+
+    /// Fit a spline through market (strike, implied vol) observations.
+    ///
+    /// Converts each quote to total variance σ²T and sorts by strike, which is
+    /// what [`new`](Self::new) wants and what every caller would otherwise
+    /// write for itself. Equivalent to
+    /// [`calibrate_with_config`](Self::calibrate_with_config) with the default
+    /// filter.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] for non-positive strikes or vols,
+    /// or if fewer than 3 quotes are supplied.
+    pub fn calibrate(forward: f64, expiry: f64, market_vols: &[(f64, f64)]) -> error::Result<Self> {
+        Self::calibrate_with_config(forward, expiry, market_vols, DataFilter::default())
+    }
+
+    /// Fit a spline through market quotes, filtering them first.
+    ///
+    /// Takes no [`WeightingScheme`](crate::calibration::WeightingScheme): a
+    /// spline passes through every surviving quote exactly, so there is no
+    /// residual for a weight to bear on.
+    ///
+    /// # Errors
+    /// Returns [`VolSurfError::InvalidInput`] for non-positive strikes or vols,
+    /// or if fewer than 3 quotes are supplied, and
+    /// [`VolSurfError::CalibrationError`] if `filter` leaves fewer than 3.
+    pub fn calibrate_with_config(
+        forward: f64,
+        expiry: f64,
+        market_vols: &[(f64, f64)],
+        filter: DataFilter,
+    ) -> error::Result<Self> {
+        validate_positive(forward, "forward")?;
+        validate_positive(expiry, "expiry")?;
+        if market_vols.len() < MIN_POINTS {
+            return Err(VolSurfError::InvalidInput {
+                message: format!(
+                    "at least {MIN_POINTS} market points required, got {}",
+                    market_vols.len()
+                ),
+            });
+        }
+        for &(strike, vol) in market_vols {
+            validate_positive(strike, "strike")?;
+            validate_positive(vol, "implied vol")?;
+        }
+
+        let quotes = prepare_market_vols(market_vols, forward, &filter, MIN_POINTS, "CubicSpline")?;
+        let mut pairs: Vec<(f64, f64)> = quotes
+            .iter()
+            .map(|&(strike, vol)| (strike, vol * vol * expiry))
+            .collect();
+        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (strikes, variances) = pairs.into_iter().unzip();
+        Self::new(forward, expiry, strikes, variances)
+    }
+
+    /// Knot strikes, in increasing order.
+    pub fn strikes(&self) -> &[f64] {
+        &self.strikes
+    }
+
+    /// Total variance σ²T at each knot strike.
+    pub fn variances(&self) -> &[f64] {
+        &self.variances
     }
 
     /// Interpolated total variance at `strike`, rejecting the negative values a
@@ -333,6 +403,40 @@ mod tests {
     /// Flat 20% vol smile for validation tests.
     fn make_flat_smile() -> SplineSmile {
         SplineSmile::new(100.0, 1.0, vec![80.0, 100.0, 120.0], vec![0.04, 0.04, 0.04]).unwrap()
+    }
+
+    #[test]
+    fn calibrate_reproduces_the_quotes_it_was_given() {
+        // Deliberately unsorted: calibrate sorts, new() would reject.
+        let quotes = [(110.0, 0.22), (90.0, 0.24), (100.0, 0.20), (120.0, 0.26)];
+        let smile = SplineSmile::calibrate(100.0, 2.0, &quotes).unwrap();
+        for &(strike, vol) in &quotes {
+            assert_abs_diff_eq!(smile.vol(Strike(strike)).unwrap().0, vol, epsilon = 1e-12);
+        }
+        assert_eq!(smile.strikes(), &[90.0, 100.0, 110.0, 120.0]);
+        assert_abs_diff_eq!(smile.variances()[0], 0.24 * 0.24 * 2.0, epsilon = 1e-15);
+    }
+
+    #[test]
+    fn calibrate_rejects_fewer_than_3_quotes() {
+        let quotes = [(90.0, 0.24), (100.0, 0.20)];
+        assert!(matches!(
+            SplineSmile::calibrate(100.0, 1.0, &quotes),
+            Err(VolSurfError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn calibrate_with_config_fails_when_the_filter_starves_the_fit() {
+        let quotes = [(60.0, 0.30), (100.0, 0.20), (170.0, 0.30)];
+        let filter = DataFilter {
+            max_log_moneyness: Some(0.1),
+            ..DataFilter::default()
+        };
+        assert!(matches!(
+            SplineSmile::calibrate_with_config(100.0, 1.0, &quotes, filter),
+            Err(VolSurfError::CalibrationError { .. })
+        ));
     }
 
     #[test]

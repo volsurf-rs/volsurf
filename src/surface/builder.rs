@@ -135,22 +135,12 @@ impl SmileCalibrator for SmileModel {
                 None,
             )?)),
 
-            Self::CubicSpline => {
-                let data = crate::calibration::prepare_market_vols(
-                    market_vols,
-                    forward,
-                    filter,
-                    self.min_strikes(),
-                    self.model_name(),
-                )?;
-                let mut pairs: Vec<(f64, f64)> =
-                    data.iter().map(|&(k, v)| (k, v * v * expiry)).collect();
-                pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
-                let (strikes, variances): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
-                Ok(Box::new(SplineSmile::new(
-                    forward, expiry, strikes, variances,
-                )?))
-            }
+            Self::CubicSpline => Ok(Box::new(SplineSmile::calibrate_with_config(
+                forward,
+                expiry,
+                market_vols,
+                *filter,
+            )?)),
 
             Self::Sabr { beta } => Ok(Box::new(SabrSmile::calibrate_with_config(
                 forward,

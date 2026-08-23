@@ -389,9 +389,29 @@ impl SviSmile {
         })
     }
 
+    /// Minimum variance level `a`.
+    pub fn a(&self) -> f64 {
+        self.a
+    }
+
+    /// Variance slope `b`, which sets the skew magnitude.
+    pub fn b(&self) -> f64 {
+        self.b
+    }
+
     /// Skew parameter.
     pub fn rho(&self) -> f64 {
         self.rho
+    }
+
+    /// Moneyness shift `m`, the log-moneyness the smile is centred on.
+    pub fn m(&self) -> f64 {
+        self.m
+    }
+
+    /// Curvature `σ`, the smile's convexity.
+    pub fn sigma(&self) -> f64 {
+        self.sigma
     }
 
     /// Calibrate SVI parameters from market (strike, vol) observations.
@@ -712,6 +732,16 @@ mod tests {
 
     // Calibration stages, exercised directly rather than through
     // calibrate_with_config.
+
+    #[test]
+    fn accessors_return_the_constructed_parameters() {
+        let smile = SviSmile::new(100.0, 1.0, 0.04, 0.1, -0.5, 0.02, 0.3).unwrap();
+        assert_eq!(smile.a(), 0.04);
+        assert_eq!(smile.b(), 0.1);
+        assert_eq!(smile.rho(), -0.5);
+        assert_eq!(smile.m(), 0.02);
+        assert_eq!(smile.sigma(), 0.3);
+    }
 
     #[test]
     fn uniform_weighting_gives_unit_weights() {
