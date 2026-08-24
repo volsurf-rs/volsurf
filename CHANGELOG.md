@@ -146,8 +146,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `b(1 − ρ)` when `m` sits above the ladder and `b(1 + ρ)` when it sits below,
   with `b` and `ρ` trading off along the curve `b(1 ∓ ρ) = const` and `σ`
   dropping out entirely — and flattens the same way when `σ` is wide relative
-  to the ladder, leaving only the slope `b(ρ − m/σ)`. A low RMSE implies
-  neither a determined `b` nor a `ρ` whose sign tracks which wing is steeper.
+  to the ladder, leaving only two pinned numbers, the slope `b(ρ − m/σ)` and
+  the line's intercept. A low RMSE implies neither a determined `b` nor a `ρ`
+  whose sign tracks which wing is steeper.
 
 ### Removed
 
