@@ -144,10 +144,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identified, and every accessor points at that section. The total-variance
   curve goes linear where `|k − m| ≫ σ` across the quoted ladder — pinning
   `b(1 − ρ)` when `m` sits above the ladder and `b(1 + ρ)` when it sits below,
-  with `b` and `rho` trading off along the curve `b(1 ∓ ρ) = const` and `sigma`
-  dropping out entirely — and flattens the same way when `sigma` is wide
-  relative to the ladder, leaving only `b·rho`. A low RMSE implies neither a
-  determined `b` nor a `rho` whose sign tracks which wing is steeper.
+  with `b` and `ρ` trading off along the curve `b(1 ∓ ρ) = const` and `σ`
+  dropping out entirely — and flattens the same way when `σ` is wide relative
+  to the ladder, leaving only the slope `b(ρ − m/σ)`. A low RMSE implies
+  neither a determined `b` nor a `ρ` whose sign tracks which wing is steeper.
 
 ### Removed
 

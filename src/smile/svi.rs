@@ -310,13 +310,15 @@ fn check_atm_variance_sane(
 ///
 /// **Wide `σ`.** A `σ` large compared with the ladder's width produces the
 /// same flattening with `m` well inside the quoted range:
-/// `√((k − m)² + σ²) ≈ σ + (k − m)²/2σ`, leaving `bρ` as the only pinned
-/// combination.
+/// `√((k − m)² + σ²) ≈ σ + (k − m)²/2σ`. The ladder cannot resolve the
+/// `b/2σ` curvature, so the slope `b(ρ − m/σ)` is the only pinned
+/// combination — `bρ` alone only for a ladder centred near `k = 0`.
 ///
 /// Comparing `m` against the quoted strike range therefore both over-flags
-/// (an `m` just outside the range with a wide `σ` still resolves the
-/// hyperbola's curvature) and under-flags. Profile the objective in `b`
-/// before reading any single parameter as a market measurement.
+/// (an `m` just outside the range with a `σ` comparable to the ladder's width
+/// still resolves the hyperbola's curvature) and under-flags. Profile the
+/// objective in `b` before reading any single parameter as a market
+/// measurement.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "SviSmileRaw", into = "SviSmileRaw")]
 pub struct SviSmile {
