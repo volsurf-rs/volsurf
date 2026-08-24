@@ -312,7 +312,10 @@ fn check_atm_variance_sane(
 /// same flattening with `m` well inside the quoted range:
 /// `√((k − m)² + σ²) ≈ σ + (k − m)²/2σ`. The ladder cannot resolve the
 /// `b/2σ` curvature, so the slope `b(ρ − m/σ)` is the only pinned
-/// combination — `bρ` alone only for a ladder centred near `k = 0`.
+/// combination in `k`; `a`, `m` and `σ` survive only through the intercept
+/// `a + bσ − bρm + bm²/2σ`. The slope reduces to `bρ` alone only when
+/// `|m| ≪ σ|ρ|` — a ladder centred near `k = 0` is a necessary but not
+/// sufficient proxy for that, since the linearised curve leaves `m` free.
 ///
 /// Comparing `m` against the quoted strike range therefore both over-flags
 /// (an `m` just outside the range with a `σ` comparable to the ladder's width
