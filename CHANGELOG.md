@@ -140,11 +140,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not overlap the knot range now returns `InvalidInput` rather than silently
   reporting a clean scan it never performed.
 
-- `SviSmile::b` and `SviSmile::rho` document that neither is identified when
-  `m` falls outside the quoted log-moneyness range. The total-variance curve
-  goes linear there and the two trade off along a ray, so a low RMSE does not
-  imply a determined `b`, and `rho`'s sign stops tracking which wing is
-  steeper.
+- `SviSmile` documents when its five parameters stop being separately
+  identified, and every accessor points at that section. The total-variance
+  curve goes linear where `|k − m| ≫ σ` across the quoted ladder — pinning
+  `b(1 − ρ)` when `m` sits above the ladder and `b(1 + ρ)` when it sits below,
+  with `b` and `rho` trading off along the curve `b(1 ∓ ρ) = const` and `sigma`
+  dropping out entirely — and flattens the same way when `sigma` is wide
+  relative to the ladder, leaving only `b·rho`. A low RMSE implies neither a
+  determined `b` nor a `rho` whose sign tracks which wing is steeper.
 
 ### Removed
 
