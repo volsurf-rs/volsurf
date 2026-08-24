@@ -315,9 +315,9 @@ fn check_atm_variance_sane(
 /// `b(ρ − m/σ)` and the intercept `a + bσ − bρm + bm²/2σ`. All five
 /// parameters enter only through that pair. The slope reduces to `bρ` alone
 /// only when `|m| ≪ σ|ρ|` — the expansion only requires `m` within `O(σ)` of
-/// the strikes, which bounds `m/σ` at order one but never establishes
-/// `|m/σ| ≪ |ρ|`; the linearised curve is free to place `m` anywhere in that
-/// band.
+/// the strikes, which bounds `m/σ` at order one for a ladder within `O(σ)` of
+/// the forward but never establishes `|m/σ| ≪ |ρ|`; the linearised curve is
+/// free to place `m` anywhere in that band.
 ///
 /// Comparing `m` against the quoted strike range therefore both over-flags
 /// (an `m` just outside the range with a `σ` comparable to the ladder's width
