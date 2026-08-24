@@ -317,7 +317,7 @@ fn check_atm_variance_sane(
 /// only when `|m| ≪ σ|ρ|` — the expansion only requires `m` within `O(σ)` of
 /// the strikes, which bounds `m/σ` at order one for a ladder within `O(σ)` of
 /// the forward but never establishes `|m/σ| ≪ |ρ|`; the linearised curve is
-/// free to place `m` anywhere in that band.
+/// free to place `m` anywhere within `O(σ)` of the strikes.
 ///
 /// Comparing `m` against the quoted strike range therefore both over-flags
 /// (an `m` just outside the range with a `σ` comparable to the ladder's width
