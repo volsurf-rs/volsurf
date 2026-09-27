@@ -290,6 +290,40 @@ fn check_atm_variance_sane(
 }
 
 /// SVI volatility smile with 5 parameters.
+///
+/// # Parameter identifiability
+///
+/// The five parameters are not separately identified on every slice. Two
+/// limits flatten the total-variance curve into something the quoted ladder
+/// cannot tell apart from a straight line, and a low RMSE rules out neither —
+/// such a fit is good, it is just not the only good one.
+///
+/// **Wide `|k − m|`.** Where `|k − m| ≫ σ` across the ladder,
+/// `√((k − m)² + σ²) → |k − m|`, so `w(k) → a + b(1 ∓ ρ)|k − m|` — linear,
+/// with only one product pinned: `b(1 − ρ)` when `m` sits above the ladder
+/// (the line falls in `k`, steeper put wing), `b(1 + ρ)` when it sits below
+/// (the line rises, steeper call wing). `b` and `ρ` trade off along the curve
+/// `b(1 ∓ ρ) = const`, and `b` can move an order of magnitude while the fitted
+/// curve shifts by less than the fit's own residual. `σ` drops out of the
+/// observed curve entirely; `a` and `m` survive only through that line's
+/// intercept.
+///
+/// **Wide `σ`.** A `σ` large compared with the ladder's width produces the
+/// same flattening with `m` well inside the quoted range:
+/// `√((k − m)² + σ²) ≈ σ + (k − m)²/2σ`. The ladder cannot resolve the
+/// `b/2σ` curvature, so the data pins only two numbers: the slope
+/// `b(ρ − m/σ)` and the intercept `a + bσ − bρm + bm²/2σ`. All five
+/// parameters enter only through that pair. The slope reduces to `bρ` alone
+/// only when `|m| ≪ σ|ρ|` — the expansion only requires `m` within `O(σ)` of
+/// the strikes, which bounds `m/σ` at order one for a ladder within `O(σ)` of
+/// the forward but never establishes `|m/σ| ≪ |ρ|`; the linearised curve is
+/// free to place `m` anywhere within `O(σ)` of the strikes.
+///
+/// Comparing `m` against the quoted strike range therefore both over-flags
+/// (an `m` just outside the range with a `σ` comparable to the ladder's width
+/// still resolves the hyperbola's curvature) and under-flags. Profile the
+/// objective in `b` before reading any single parameter as a market
+/// measurement.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "SviSmileRaw", into = "SviSmileRaw")]
 pub struct SviSmile {
@@ -390,41 +424,44 @@ impl SviSmile {
     }
 
     /// Minimum variance level `a`.
+    ///
+    /// Not always identified on its own — see
+    /// [parameter identifiability](SviSmile#parameter-identifiability).
     pub fn a(&self) -> f64 {
         self.a
     }
 
     /// Variance slope `b`, which sets the skew magnitude.
     ///
-    /// Not identified on every slice. Where `m` falls outside the range of
-    /// quoted log-moneyness, `√((k − m)² + σ²) → m − k` over every observed
-    /// `k`, so `w(k) → a + b(1 − ρ)(m − k)` — linear, with only the product
-    /// `b(1 − ρ)` pinned. `b` and `ρ` then trade off along a ray: `b` can move
-    /// an order of magnitude while the fitted curve shifts by less than the
-    /// fit's own residual. Check [`m()`](Self::m) against the quoted strike range, or
-    /// profile the objective in `b`, before reading `b` as a wing measurement.
-    /// A low RMSE does not rule this out — such a fit is good, it is just not
-    /// the only good one.
+    /// In the flattened regimes only a product involving `b` is pinned, so `b`
+    /// on its own is not a wing measurement — see
+    /// [parameter identifiability](SviSmile#parameter-identifiability).
     pub fn b(&self) -> f64 {
         self.b
     }
 
     /// Skew parameter `ρ`, the smile's asymmetry.
     ///
-    /// Its sign is not a reliable read on which wing is steeper. Where `m`
-    /// falls outside the quoted log-moneyness range the whole ladder sits on
-    /// one branch of the hyperbola, and a slice with a visibly steeper put
-    /// wing can fit `ρ > 0`. Same degeneracy as [`b()`](Self::b).
+    /// Its sign is not a reliable read on which wing is steeper: in the
+    /// flattened regimes the wing that looks steeper does not fix `ρ`'s sign.
+    /// See [parameter identifiability](SviSmile#parameter-identifiability).
     pub fn rho(&self) -> f64 {
         self.rho
     }
 
     /// Moneyness shift `m`, the log-moneyness the smile is centred on.
+    ///
+    /// Not always identified on its own, and not a reliable degeneracy
+    /// diagnostic — see
+    /// [parameter identifiability](SviSmile#parameter-identifiability).
     pub fn m(&self) -> f64 {
         self.m
     }
 
     /// Curvature `σ`, the smile's convexity.
+    ///
+    /// Drops out of the observed curve in the wide-`|k − m|` limit — see
+    /// [parameter identifiability](SviSmile#parameter-identifiability).
     pub fn sigma(&self) -> f64 {
         self.sigma
     }

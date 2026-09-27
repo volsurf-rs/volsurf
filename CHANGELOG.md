@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `SviSmile`'s identifiability docs, added in 4.0.0, covered only `m` outside
+  the quoted range and gave the linear limit's sign for `m` above the ladder
+  alone. `SviSmile` now documents when its five parameters stop being
+  separately identified, and every accessor points at that section. The
+  total-variance curve goes linear where `|k − m| ≫ σ` across the quoted
+  ladder — pinning `b(1 − ρ)` when `m` sits above the ladder and `b(1 + ρ)`
+  when it sits below, with `b` and `ρ` trading off along the curve
+  `b(1 ∓ ρ) = const` and `σ` dropping out entirely — and flattens the same way
+  when `σ` is wide relative to the ladder, leaving only two pinned numbers, the
+  slope `b(ρ − m/σ)` and the line's intercept. Comparing `m` against the quoted
+  strike range is no longer offered as a check: it both over- and under-flags.
+
 ## [4.0.0] - 2026-08-23
 
 ### Added
