@@ -111,8 +111,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # The bindings are not abi3, so every supported Python needs its own
-      # wheel; --find-interpreter builds one per interpreter it can see.
-      # Linux builds run in the manylinux image, which ships its own.
+      # wheel. macOS and Windows see only the interpreters installed here.
+      # The manylinux image also ships pre-release, free-threaded and PyPy
+      # interpreters CI never tests, so Linux names the five it builds for.
       - uses: actions/setup-python@v5
         if: runner.os != 'Linux'
         with:
@@ -125,7 +126,7 @@ jobs:
       - uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter -m python/Cargo.toml
+          args: --release --out dist -m python/Cargo.toml ${{ runner.os == 'Linux' && '-i python3.10 python3.11 python3.12 python3.13 python3.14' || '--find-interpreter' }}
           manylinux: auto
       - uses: actions/upload-artifact@v4
         with:
@@ -189,7 +190,7 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - run: npm pack --dry-run wasm/pkg
+      - run: npm pack --dry-run ./wasm/pkg
       - name: Check whether the version is already published
         id: npm
         env:
@@ -204,6 +205,6 @@ jobs:
           echo "volsurf-wasm $VERSION already on npm: $published" >> "$GITHUB_STEP_SUMMARY"
       - name: Publish
         if: steps.npm.outputs.published == 'false' && (github.event_name == 'push' || inputs.publish)
-        run: npm publish wasm/pkg --provenance --access public
+        run: npm publish ./wasm/pkg --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
