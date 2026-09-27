@@ -5,14 +5,20 @@ surface library for equity and FX derivatives. Built with PyO3.
 
 ## Install
 
-Not yet on PyPI — build from source with [maturin](https://www.maturin.rs):
+```bash
+pip install volsurf
+```
+
+Requires Python 3.10 or later. NumPy is the only runtime dependency. Tested
+against Python 3.10 and 3.14. Wheels cover Linux (x86_64, aarch64), macOS
+(x86_64, arm64) and Windows (x64); elsewhere pip builds from the source
+distribution, which needs a Rust toolchain.
+
+To build from a checkout, use [maturin](https://www.maturin.rs):
 
 ```bash
 maturin develop --release -m python/Cargo.toml
 ```
-
-Requires Python 3.10 or later and a Rust toolchain. NumPy is the only runtime
-dependency. Tested against Python 3.10 and 3.14.
 
 ## Build a surface
 
