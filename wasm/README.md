@@ -2,6 +2,15 @@
 
 WebAssembly bindings for the [volsurf](https://crates.io/crates/volsurf) volatility surface library.
 
+## Install
+
+```bash
+npm install volsurf-wasm
+```
+
+Built with `wasm-pack --target web`: an ES module whose default export,
+`init()`, loads the `.wasm` binary and must be awaited before any other call.
+
 ## Quick Start
 
 ```typescript
